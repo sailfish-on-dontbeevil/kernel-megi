@@ -1690,8 +1690,13 @@ smb2_query_dir_first(const unsigned int xid, struct cifs_tcon *tcon,
 	oparms.fid = fid;
 	oparms.reconnect = false;
 
-	rc = SMB2_open(xid, &oparms, utf16_path, &oplock, NULL, NULL, NULL);
+	do {
+		rc = SMB2_open(xid, &oparms, utf16_path, &oplock, NULL, NULL,
+			       NULL);
+	} while (rc == -EAGAIN);
+
 	kfree(utf16_path);
+
 	if (rc) {
 		cifs_dbg(FYI, "open dir failed rc=%d\n", rc);
 		return rc;
@@ -1700,8 +1705,11 @@ smb2_query_dir_first(const unsigned int xid, struct cifs_tcon *tcon,
 	srch_inf->entries_in_buffer = 0;
 	srch_inf->index_of_last_entry = 2;
 
-	rc = SMB2_query_directory(xid, tcon, fid->persistent_fid,
-				  fid->volatile_fid, 0, srch_inf);
+	do {
+		rc = SMB2_query_directory(xid, tcon, fid->persistent_fid,
+					  fid->volatile_fid, 0, srch_inf);
+	} while (rc == -EAGAIN);
+
 	if (rc) {
 		cifs_dbg(FYI, "query directory failed rc=%d\n", rc);
 		SMB2_close(xid, tcon, fid->persistent_fid, fid->volatile_fid);
@@ -1714,8 +1722,13 @@ smb2_query_dir_next(const unsigned int xid, struct cifs_tcon *tcon,
 		    struct cifs_fid *fid, __u16 search_flags,
 		    struct cifs_search_info *srch_inf)
 {
-	return SMB2_query_directory(xid, tcon, fid->persistent_fid,
-				    fid->volatile_fid, 0, srch_inf);
+	int rc;
+
+	do {
+		rc = SMB2_query_directory(xid, tcon, fid->persistent_fid,
+					  fid->volatile_fid, 0, srch_inf);
+	} while (rc == -EAGAIN);
+	return rc;
 }
 
 static int

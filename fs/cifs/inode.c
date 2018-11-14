@@ -771,8 +771,11 @@ cifs_get_inode_info(struct inode **inode, const char *full_path,
 			goto cgii_exit;
 		}
 		data = (FILE_ALL_INFO *)buf;
-		rc = server->ops->query_path_info(xid, tcon, cifs_sb, full_path,
-						  data, &adjust_tz, &symlink);
+		do {
+			rc = server->ops->query_path_info(xid, tcon, cifs_sb,
+							  full_path, data,
+							  &adjust_tz, &symlink);
+		} while (rc == -EAGAIN);
 	}
 
 	if (!rc) {
