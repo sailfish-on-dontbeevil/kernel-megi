@@ -469,6 +469,32 @@ static int sun6i_video_s_input(struct file *file, void *private,
 	return 0;
 }
 
+static int sun6i_vidioc_g_parm(struct file *file, void *priv,
+			       struct v4l2_streamparm *p)
+{
+	struct sun6i_video *video = video_drvdata(file);
+	struct v4l2_subdev *subdev;
+
+	subdev = sun6i_video_remote_subdev(video, NULL);
+	if (!subdev)
+		return -ENXIO;
+
+	return v4l2_g_parm_cap(video_devdata(file), subdev, p);
+}
+
+static int sun6i_vidioc_s_parm(struct file *file, void *priv,
+			       struct v4l2_streamparm *p)
+{
+	struct sun6i_video *video = video_drvdata(file);
+	struct v4l2_subdev *subdev;
+
+	subdev = sun6i_video_remote_subdev(video, NULL);
+	if (!subdev)
+		return -ENXIO;
+
+	return v4l2_s_parm_cap(video_devdata(file), subdev, p);
+}
+
 static const struct v4l2_ioctl_ops sun6i_video_ioctl_ops = {
 	.vidioc_querycap		= sun6i_video_querycap,
 
@@ -480,6 +506,9 @@ static const struct v4l2_ioctl_ops sun6i_video_ioctl_ops = {
 	.vidioc_enum_input		= sun6i_video_enum_input,
 	.vidioc_g_input			= sun6i_video_g_input,
 	.vidioc_s_input			= sun6i_video_s_input,
+
+	.vidioc_g_parm			= sun6i_vidioc_g_parm,
+	.vidioc_s_parm			= sun6i_vidioc_s_parm,
 
 	.vidioc_create_bufs		= vb2_ioctl_create_bufs,
 	.vidioc_prepare_buf		= vb2_ioctl_prepare_buf,
