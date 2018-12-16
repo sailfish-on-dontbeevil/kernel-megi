@@ -1157,6 +1157,7 @@ static void xs_sock_reset_connection_flags(struct rpc_xprt *xprt)
 	smp_mb__before_atomic();
 	clear_bit(XPRT_CLOSE_WAIT, &xprt->state);
 	clear_bit(XPRT_CLOSING, &xprt->state);
+	clear_bit(XPRT_WRITE_SPACE, &xprt->state);
 	xs_sock_reset_state_flags(xprt);
 	smp_mb__after_atomic();
 }
