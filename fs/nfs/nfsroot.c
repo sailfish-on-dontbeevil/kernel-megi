@@ -261,7 +261,7 @@ static int __init root_nfs_data(char *cmdline)
 	 * mess into nfs_root_device.
 	 */
 	len = snprintf(nfs_export_path, sizeof(nfs_export_path),
-				fmtcheck(tmp, "%s", 0), utsname()->nodename);
+				tmp, utsname()->nodename);
 	if (len >= (int)sizeof(nfs_export_path))
 		goto out_devnametoolong;
 	len = snprintf(nfs_root_device, sizeof(nfs_root_device),
