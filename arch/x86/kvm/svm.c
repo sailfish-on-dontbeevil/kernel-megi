@@ -675,11 +675,6 @@ struct svm_cpu_data {
 
 static DEFINE_PER_CPU(struct svm_cpu_data *, svm_data);
 
-struct svm_init_data {
-	int cpu;
-	int r;
-};
-
 static const u32 msrpm_ranges[] = {0, 0xc0000000, 0xc0010000};
 
 #define NUM_MSR_MAPS ARRAY_SIZE(msrpm_ranges)
@@ -1456,10 +1451,11 @@ static u64 svm_write_l1_tsc_offset(struct kvm_vcpu *vcpu, u64 offset)
 		g_tsc_offset = svm->vmcb->control.tsc_offset -
 			       svm->nested.hsave->control.tsc_offset;
 		svm->nested.hsave->control.tsc_offset = offset;
-	} else
-		trace_kvm_write_tsc_offset(vcpu->vcpu_id,
-					   svm->vmcb->control.tsc_offset,
-					   offset);
+	}
+
+	trace_kvm_write_tsc_offset(vcpu->vcpu_id,
+				   svm->vmcb->control.tsc_offset - g_tsc_offset,
+				   offset);
 
 	svm->vmcb->control.tsc_offset = offset + g_tsc_offset;
 
@@ -2129,6 +2125,13 @@ static struct kvm_vcpu *svm_create_vcpu(struct kvm *kvm, unsigned int id)
 		goto out;
 	}
 
+	svm->vcpu.arch.guest_fpu = kmem_cache_zalloc(x86_fpu_cache, GFP_KERNEL);
+	if (!svm->vcpu.arch.guest_fpu) {
+		printk(KERN_ERR "kvm: failed to allocate vcpu's fpu\n");
+		err = -ENOMEM;
+		goto free_partial_svm;
+	}
+
 	err = kvm_vcpu_init(&svm->vcpu, kvm, id);
 	if (err)
 		goto free_svm;
@@ -2188,6 +2191,8 @@ free_page1:
 uninit:
 	kvm_vcpu_uninit(&svm->vcpu);
 free_svm:
+	kmem_cache_free(x86_fpu_cache, svm->vcpu.arch.guest_fpu);
+free_partial_svm:
 	kmem_cache_free(kvm_vcpu_cache, svm);
 out:
 	return ERR_PTR(err);
@@ -2217,6 +2222,7 @@ static void svm_free_vcpu(struct kvm_vcpu *vcpu)
 	__free_page(virt_to_page(svm->nested.hsave));
 	__free_pages(virt_to_page(svm->nested.msrpm), MSRPM_ALLOC_ORDER);
 	kvm_vcpu_uninit(vcpu);
+	kmem_cache_free(x86_fpu_cache, svm->vcpu.arch.guest_fpu);
 	kmem_cache_free(kvm_vcpu_cache, svm);
 }
 
@@ -7051,6 +7057,12 @@ failed:
 	return ret;
 }
 
+static uint16_t nested_get_evmcs_version(struct kvm_vcpu *vcpu)
+{
+	/* Not supported */
+	return 0;
+}
+
 static int nested_enable_evmcs(struct kvm_vcpu *vcpu,
 				   uint16_t *vmcs_version)
 {
@@ -7189,6 +7201,7 @@ static struct kvm_x86_ops svm_x86_ops __ro_after_init = {
 	.mem_enc_unreg_region = svm_unregister_enc_region,
 
 	.nested_enable_evmcs = nested_enable_evmcs,
+	.nested_get_evmcs_version = nested_get_evmcs_version,
 };
 
 static int __init svm_init(void)

@@ -231,6 +231,19 @@ void kvm_vm_get_dirty_log(struct kvm_vm *vm, int slot, void *log)
 		    strerror(-ret));
 }
 
+void kvm_vm_clear_dirty_log(struct kvm_vm *vm, int slot, void *log,
+			    uint64_t first_page, uint32_t num_pages)
+{
+	struct kvm_clear_dirty_log args = { .dirty_bitmap = log, .slot = slot,
+		                            .first_page = first_page,
+	                                    .num_pages = num_pages };
+	int ret;
+
+	ret = ioctl(vm->fd, KVM_CLEAR_DIRTY_LOG, &args);
+	TEST_ASSERT(ret == 0, "%s: KVM_CLEAR_DIRTY_LOG failed: %s",
+		    strerror(-ret));
+}
+
 /*
  * Userspace Memory Region Find
  *
@@ -1270,14 +1283,24 @@ int _vcpu_sregs_set(struct kvm_vm *vm, uint32_t vcpuid, struct kvm_sregs *sregs)
 void vcpu_ioctl(struct kvm_vm *vm, uint32_t vcpuid,
 		unsigned long cmd, void *arg)
 {
+	int ret;
+
+	ret = _vcpu_ioctl(vm, vcpuid, cmd, arg);
+	TEST_ASSERT(ret == 0, "vcpu ioctl %lu failed, rc: %i errno: %i (%s)",
+		cmd, ret, errno, strerror(errno));
+}
+
+int _vcpu_ioctl(struct kvm_vm *vm, uint32_t vcpuid,
+		unsigned long cmd, void *arg)
+{
 	struct vcpu *vcpu = vcpu_find(vm, vcpuid);
 	int ret;
 
 	TEST_ASSERT(vcpu != NULL, "vcpu not found, vcpuid: %u", vcpuid);
 
 	ret = ioctl(vcpu->fd, cmd, arg);
-	TEST_ASSERT(ret == 0, "vcpu ioctl %lu failed, rc: %i errno: %i (%s)",
-		cmd, ret, errno, strerror(errno));
+
+	return ret;
 }
 
 /*

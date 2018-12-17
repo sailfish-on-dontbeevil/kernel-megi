@@ -497,7 +497,7 @@ struct kvm_mtrr {
 struct kvm_vcpu_hv_stimer {
 	struct hrtimer timer;
 	int index;
-	u64 config;
+	union hv_stimer_config config;
 	u64 count;
 	u64 exp_time;
 	struct hv_message msg;
@@ -601,17 +601,16 @@ struct kvm_vcpu_arch {
 
 	/*
 	 * QEMU userspace and the guest each have their own FPU state.
-	 * In vcpu_run, we switch between the user and guest FPU contexts.
-	 * While running a VCPU, the VCPU thread will have the guest FPU
-	 * context.
+	 * In vcpu_run, we switch between the user, maintained in the
+	 * task_struct struct, and guest FPU contexts. While running a VCPU,
+	 * the VCPU thread will have the guest FPU context.
 	 *
 	 * Note that while the PKRU state lives inside the fpu registers,
 	 * it is switched out separately at VMENTER and VMEXIT time. The
 	 * "guest_fpu" state here contains the guest FPU context, with the
 	 * host PRKU bits.
 	 */
-	struct fpu user_fpu;
-	struct fpu guest_fpu;
+	struct fpu *guest_fpu;
 
 	u64 xcr0;
 	u64 guest_supported_xcr0;
@@ -1186,6 +1185,7 @@ struct kvm_x86_ops {
 
 	int (*nested_enable_evmcs)(struct kvm_vcpu *vcpu,
 				   uint16_t *vmcs_version);
+	uint16_t (*nested_get_evmcs_version)(struct kvm_vcpu *vcpu);
 };
 
 struct kvm_arch_async_pf {
@@ -1196,6 +1196,7 @@ struct kvm_arch_async_pf {
 };
 
 extern struct kvm_x86_ops *kvm_x86_ops;
+extern struct kmem_cache *x86_fpu_cache;
 
 #define __KVM_HAVE_ARCH_VM_ALLOC
 static inline struct kvm *kvm_arch_alloc_vm(void)
