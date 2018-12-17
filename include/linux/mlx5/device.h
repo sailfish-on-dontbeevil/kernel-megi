@@ -212,6 +212,13 @@ enum {
 	MLX5_PFAULT_SUBTYPE_RDMA = 1,
 };
 
+enum wqe_page_fault_type {
+	MLX5_WQE_PF_TYPE_RMP = 0,
+	MLX5_WQE_PF_TYPE_REQ_SEND_OR_WRITE = 1,
+	MLX5_WQE_PF_TYPE_RESP = 2,
+	MLX5_WQE_PF_TYPE_REQ_READ_OR_ATOMIC = 3,
+};
+
 enum {
 	MLX5_PERM_LOCAL_READ	= 1 << 2,
 	MLX5_PERM_LOCAL_WRITE	= 1 << 3,
@@ -294,9 +301,15 @@ enum {
 	MLX5_EVENT_QUEUE_TYPE_DCT = 6,
 };
 
+/* mlx5 components can subscribe to any one of these events via
+ * mlx5_eq_notifier_register API.
+ */
 enum mlx5_event {
+	/* Special value to subscribe to any event */
+	MLX5_EVENT_TYPE_NOTIFY_ANY	   = 0x0,
+	/* HW events enum start: comp events are not subscribable */
 	MLX5_EVENT_TYPE_COMP		   = 0x0,
-
+	/* HW Async events enum start: subscribable events */
 	MLX5_EVENT_TYPE_PATH_MIG	   = 0x01,
 	MLX5_EVENT_TYPE_COMM_EST	   = 0x02,
 	MLX5_EVENT_TYPE_SQ_DRAINED	   = 0x03,
@@ -334,6 +347,8 @@ enum mlx5_event {
 	MLX5_EVENT_TYPE_FPGA_QP_ERROR      = 0x21,
 
 	MLX5_EVENT_TYPE_DEVICE_TRACER      = 0x26,
+
+	MLX5_EVENT_TYPE_MAX                = MLX5_EVENT_TYPE_DEVICE_TRACER + 1,
 };
 
 enum {

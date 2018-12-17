@@ -220,6 +220,11 @@ static int hns_roce_query_device(struct ib_device *ib_dev,
 			    IB_ATOMIC_HCA : IB_ATOMIC_NONE;
 	props->max_pkeys = 1;
 	props->local_ca_ack_delay = hr_dev->caps.local_ca_ack_delay;
+	if (hr_dev->caps.flags & HNS_ROCE_CAP_FLAG_SRQ) {
+		props->max_srq = hr_dev->caps.max_srqs;
+		props->max_srq_wr = hr_dev->caps.max_srq_wrs;
+		props->max_srq_sge = hr_dev->caps.max_srq_sges;
+	}
 
 	return 0;
 }
@@ -541,6 +546,21 @@ static int hns_roce_register_device(struct hns_roce_dev *hr_dev)
 		ib_dev->map_mr_sg		= hns_roce_map_mr_sg;
 	}
 
+	/* SRQ */
+	if (hr_dev->caps.flags & HNS_ROCE_CAP_FLAG_SRQ) {
+		ib_dev->create_srq = hns_roce_create_srq;
+		ib_dev->modify_srq = hr_dev->hw->modify_srq;
+		ib_dev->query_srq = hr_dev->hw->query_srq;
+		ib_dev->destroy_srq = hns_roce_destroy_srq;
+		ib_dev->post_srq_recv = hr_dev->hw->post_srq_recv;
+		ib_dev->uverbs_cmd_mask |=
+				(1ULL << IB_USER_VERBS_CMD_CREATE_SRQ) |
+				(1ULL << IB_USER_VERBS_CMD_MODIFY_SRQ) |
+				(1ULL << IB_USER_VERBS_CMD_QUERY_SRQ) |
+				(1ULL << IB_USER_VERBS_CMD_DESTROY_SRQ) |
+				(1ULL << IB_USER_VERBS_CMD_POST_SRQ_RECV);
+	}
+
 	/* OTHERS */
 	ib_dev->get_port_immutable	= hns_roce_port_immutable;
 	ib_dev->disassociate_ucontext	= hns_roce_disassociate_ucontext;
@@ -646,7 +666,57 @@ static int hns_roce_init_hem(struct hns_roce_dev *hr_dev)
 		goto err_unmap_trrl;
 	}
 
+	if (hr_dev->caps.srqc_entry_sz) {
+		ret = hns_roce_init_hem_table(hr_dev, &hr_dev->srq_table.table,
+					      HEM_TYPE_SRQC,
+					      hr_dev->caps.srqc_entry_sz,
+					      hr_dev->caps.num_srqs, 1);
+		if (ret) {
+			dev_err(dev,
+			      "Failed to init SRQ context memory, aborting.\n");
+			goto err_unmap_cq;
+		}
+	}
+
+	if (hr_dev->caps.num_srqwqe_segs) {
+		ret = hns_roce_init_hem_table(hr_dev,
+					     &hr_dev->mr_table.mtt_srqwqe_table,
+					     HEM_TYPE_SRQWQE,
+					     hr_dev->caps.mtt_entry_sz,
+					     hr_dev->caps.num_srqwqe_segs, 1);
+		if (ret) {
+			dev_err(dev,
+				"Failed to init MTT srqwqe memory, aborting.\n");
+			goto err_unmap_srq;
+		}
+	}
+
+	if (hr_dev->caps.num_idx_segs) {
+		ret = hns_roce_init_hem_table(hr_dev,
+					      &hr_dev->mr_table.mtt_idx_table,
+					      HEM_TYPE_IDX,
+					      hr_dev->caps.idx_entry_sz,
+					      hr_dev->caps.num_idx_segs, 1);
+		if (ret) {
+			dev_err(dev,
+				"Failed to init MTT idx memory, aborting.\n");
+			goto err_unmap_srqwqe;
+		}
+	}
+
 	return 0;
+
+err_unmap_srqwqe:
+	if (hr_dev->caps.num_srqwqe_segs)
+		hns_roce_cleanup_hem_table(hr_dev,
+					   &hr_dev->mr_table.mtt_srqwqe_table);
+
+err_unmap_srq:
+	if (hr_dev->caps.srqc_entry_sz)
+		hns_roce_cleanup_hem_table(hr_dev, &hr_dev->srq_table.table);
+
+err_unmap_cq:
+	hns_roce_cleanup_hem_table(hr_dev, &hr_dev->cq_table.table);
 
 err_unmap_trrl:
 	if (hr_dev->caps.trrl_entry_sz)
@@ -727,7 +797,20 @@ static int hns_roce_setup_hca(struct hns_roce_dev *hr_dev)
 		goto err_cq_table_free;
 	}
 
+	if (hr_dev->caps.flags & HNS_ROCE_CAP_FLAG_SRQ) {
+		ret = hns_roce_init_srq_table(hr_dev);
+		if (ret) {
+			dev_err(dev,
+				"Failed to init share receive queue table.\n");
+			goto err_qp_table_free;
+		}
+	}
+
 	return 0;
+
+err_qp_table_free:
+	if (hr_dev->caps.flags & HNS_ROCE_CAP_FLAG_SRQ)
+		hns_roce_cleanup_qp_table(hr_dev);
 
 err_cq_table_free:
 	hns_roce_cleanup_cq_table(hr_dev);
