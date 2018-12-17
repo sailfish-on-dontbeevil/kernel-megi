@@ -38,6 +38,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/spinlock.h>
 #include <linux/platform_device.h>
+#include <linux/interrupt.h>
 
 #include <linux/mmc/host.h>
 #include <linux/mmc/mmc.h>
@@ -215,26 +216,6 @@ static void msdc_tasklet_card(struct work_struct *work)
 
 	spin_unlock(&host->lock);
 }
-
-static void msdc_select_clksrc(struct msdc_host *host, unsigned char clksrc)
-{
-	u32 val;
-
-	BUG_ON(clksrc > 3);
-
-	val = readl(host->base + MSDC_CLKSRC_REG);
-	if (readl(host->base + MSDC_ECO_VER) >= 4) {
-		val &= ~(0x3  << clk_src_bit[host->id]);
-		val |= clksrc << clk_src_bit[host->id];
-	} else {
-		val &= ~0x3; val |= clksrc;
-	}
-	writel(val, host->base + MSDC_CLKSRC_REG);
-
-	host->hclk = hclks[clksrc];
-	host->hw->clk_src = clksrc;
-}
-#endif /* end of --- */
 
 static void msdc_set_mclk(struct msdc_host *host, int ddr, unsigned int hz)
 {
@@ -1693,7 +1674,7 @@ static int msdc_drv_probe(struct platform_device *pdev)
 	host->mrq = NULL;
 	//init_MUTEX(&host->sem); /* we don't need to support multiple threads access */
 
-	mmc_dev(mmc)->dma_mask = NULL;
+	dma_coerce_mask_and_coherent(mmc_dev(mmc), DMA_BIT_MASK(32));
 
 	/* using dma_alloc_coherent*/  /* todo: using 1, for all 4 slots */
 	host->dma.gpd = dma_alloc_coherent(&pdev->dev,
@@ -1797,6 +1778,7 @@ static void msdc_drv_pm(struct platform_device *pdev, pm_message_t state)
 
 	if (mmc) {
 		struct msdc_host *host = mmc_priv(mmc);
+
 		msdc_pm(state, (void *)host);
 	}
 }

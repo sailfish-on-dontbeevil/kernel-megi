@@ -45,8 +45,8 @@ s32 _rtw_init_xmit_priv(struct xmit_priv *pxmitpriv, struct adapter *padapter)
 
 	spin_lock_init(&pxmitpriv->lock);
 	spin_lock_init(&pxmitpriv->lock_sctx);
-	sema_init(&pxmitpriv->xmit_sema, 0);
-	sema_init(&pxmitpriv->terminate_xmitthread_sema, 0);
+	init_completion(&pxmitpriv->xmit_comp);
+	init_completion(&pxmitpriv->terminate_xmitthread_comp);
 
 	/*
 	Please insert all the queue initializaiton using _rtw_init_queue below
@@ -2879,7 +2879,7 @@ void enqueue_pending_xmitbuf(
 	list_add_tail(&pxmitbuf->list, get_list_head(pqueue));
 	spin_unlock_bh(&pqueue->lock);
 
-	up(&(pri_adapter->xmitpriv.xmit_sema));
+	complete(&(pri_adapter->xmitpriv.xmit_comp));
 }
 
 void enqueue_pending_xmitbuf_to_head(
@@ -2998,7 +2998,7 @@ int rtw_xmit_thread(void *context)
 		flush_signals_thread();
 	} while (_SUCCESS == err);
 
-	up(&padapter->xmitpriv.terminate_xmitthread_sema);
+	complete(&padapter->xmitpriv.terminate_xmitthread_comp);
 
 	thread_exit();
 }
@@ -3033,7 +3033,7 @@ int rtw_sctx_wait(struct submit_ctx *sctx, const char *msg)
 	return ret;
 }
 
-static bool rtw_sctx_chk_waring_status(int status)
+static bool rtw_sctx_chk_warning_status(int status)
 {
 	switch (status) {
 	case RTW_SCTX_DONE_UNKNOWN:
@@ -3051,7 +3051,7 @@ static bool rtw_sctx_chk_waring_status(int status)
 void rtw_sctx_done_err(struct submit_ctx **sctx, int status)
 {
 	if (*sctx) {
-		if (rtw_sctx_chk_waring_status(status))
+		if (rtw_sctx_chk_warning_status(status))
 			DBG_871X("%s status:%d\n", __func__, status);
 		(*sctx)->status = status;
 		complete(&((*sctx)->done));
