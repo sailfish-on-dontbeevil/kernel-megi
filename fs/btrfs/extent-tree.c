@@ -31,6 +31,7 @@
 #include "space-info.h"
 #include "block-rsv.h"
 #include "delalloc-space.h"
+#include "block-group.h"
 
 #undef SCRAMBLE_DELAYED_REFS
 
