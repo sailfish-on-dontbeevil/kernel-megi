@@ -431,9 +431,10 @@ out:
  */
 int __init devtmpfs_init(void)
 {
+	char opts[] = "mode=0755";
 	int err;
 
-	mnt = vfs_kern_mount(&internal_fs_type, 0, "devtmpfs", "mode=0755");
+	mnt = vfs_kern_mount(&internal_fs_type, 0, "devtmpfs", opts);
 	if (IS_ERR(mnt)) {
 		printk(KERN_ERR "devtmpfs: unable to create devtmpfs %ld\n",
 				PTR_ERR(mnt));
