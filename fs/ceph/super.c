@@ -853,7 +853,7 @@ out:
  */
 static int ceph_real_mount(struct fs_context *fc, struct ceph_fs_client *fsc)
 {
-	int err;
+	int err = 0;
 	unsigned long started = jiffies;  /* note the start time */
 	struct dentry *root;
 
