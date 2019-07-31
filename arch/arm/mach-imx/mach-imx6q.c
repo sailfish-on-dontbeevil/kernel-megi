@@ -274,7 +274,6 @@ static void __init imx6q_init_machine(void)
 
 	of_platform_default_populate(NULL, NULL, parent);
 
-	imx_anatop_init();
 	cpu_is_imx6q() ?  imx6q_pm_init() : imx6dl_pm_init();
 	imx6q_1588_init();
 	imx6q_axi_init();

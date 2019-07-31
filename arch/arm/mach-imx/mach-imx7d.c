@@ -90,7 +90,6 @@ static void __init imx7d_init_machine(void)
 	if (parent == NULL)
 		pr_warn("failed to initialize soc device\n");
 
-	imx_anatop_init();
 	imx7d_enet_init();
 }
 

@@ -64,7 +64,6 @@ static void __init imx6ul_init_machine(void)
 
 	of_platform_default_populate(NULL, NULL, parent);
 	imx6ul_enet_init();
-	imx_anatop_init();
 	imx6ul_pm_init();
 }
 
