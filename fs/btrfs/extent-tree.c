@@ -7569,33 +7569,6 @@ int btrfs_free_block_groups(struct btrfs_fs_info *info)
 	return 0;
 }
 
-/* link_block_group will queue up kobjects to add when we're reclaim-safe */
-void btrfs_add_raid_kobjects(struct btrfs_fs_info *fs_info)
-{
-	struct btrfs_space_info *space_info;
-	struct raid_kobject *rkobj;
-	LIST_HEAD(list);
-	int ret = 0;
-
-	spin_lock(&fs_info->pending_raid_kobjs_lock);
-	list_splice_init(&fs_info->pending_raid_kobjs, &list);
-	spin_unlock(&fs_info->pending_raid_kobjs_lock);
-
-	list_for_each_entry(rkobj, &list, list) {
-		space_info = btrfs_find_space_info(fs_info, rkobj->flags);
-
-		ret = kobject_add(&rkobj->kobj, &space_info->kobj,
-				"%s", btrfs_bg_type_to_raid_name(rkobj->flags));
-		if (ret) {
-			kobject_put(&rkobj->kobj);
-			break;
-		}
-	}
-	if (ret)
-		btrfs_warn(fs_info,
-			   "failed to add kobject for block cache, ignoring");
-}
-
 static void link_block_group(struct btrfs_block_group_cache *cache)
 {
 	struct btrfs_space_info *space_info = cache->space_info;
