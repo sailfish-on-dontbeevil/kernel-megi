@@ -7572,7 +7572,6 @@ int btrfs_free_block_groups(struct btrfs_fs_info *info)
 static void link_block_group(struct btrfs_block_group_cache *cache)
 {
 	struct btrfs_space_info *space_info = cache->space_info;
-	struct btrfs_fs_info *fs_info = cache->fs_info;
 	int index = btrfs_bg_flags_to_raid_index(cache->flags);
 	bool first = false;
 
@@ -7582,21 +7581,8 @@ static void link_block_group(struct btrfs_block_group_cache *cache)
 	list_add_tail(&cache->list, &space_info->block_groups[index]);
 	up_write(&space_info->groups_sem);
 
-	if (first) {
-		struct raid_kobject *rkobj = kzalloc(sizeof(*rkobj), GFP_NOFS);
-		if (!rkobj) {
-			btrfs_warn(cache->fs_info,
-				"couldn't alloc memory for raid level kobject");
-			return;
-		}
-		rkobj->flags = cache->flags;
-		kobject_init(&rkobj->kobj, &btrfs_raid_ktype);
-
-		spin_lock(&fs_info->pending_raid_kobjs_lock);
-		list_add_tail(&rkobj->list, &fs_info->pending_raid_kobjs);
-		spin_unlock(&fs_info->pending_raid_kobjs_lock);
-		space_info->block_group_kobjs[index] = &rkobj->kobj;
-	}
+	if (first)
+		btrfs_sysfs_add_block_group_type(cache);
 }
 
 static struct btrfs_block_group_cache *

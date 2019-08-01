@@ -758,6 +758,33 @@ void btrfs_add_raid_kobjects(struct btrfs_fs_info *fs_info)
 			   "failed to add kobject for block cache, ignoring");
 }
 
+/*
+ * Create a sysfs entry for a given block group type at path
+ * /sys/fs/btrfs/UUID/allocation/data/TYPE
+ */
+void btrfs_sysfs_add_block_group_type(struct btrfs_block_group_cache *cache)
+{
+	struct btrfs_fs_info *fs_info = cache->fs_info;
+	struct btrfs_space_info *space_info = cache->space_info;
+	struct raid_kobject *rkobj;
+	const int index = btrfs_bg_flags_to_raid_index(cache->flags);
+
+	rkobj = kzalloc(sizeof(*rkobj), GFP_NOFS);
+	if (!rkobj) {
+		btrfs_warn(cache->fs_info,
+				"couldn't alloc memory for raid level kobject");
+		return;
+	}
+
+	rkobj->flags = cache->flags;
+	kobject_init(&rkobj->kobj, &btrfs_raid_ktype);
+
+	spin_lock(&fs_info->pending_raid_kobjs_lock);
+	list_add_tail(&rkobj->list, &fs_info->pending_raid_kobjs);
+	spin_unlock(&fs_info->pending_raid_kobjs_lock);
+	space_info->block_group_kobjs[index] = &rkobj->kobj;
+}
+
 /* when one_device is NULL, it removes all device links */
 
 int btrfs_sysfs_rm_device_link(struct btrfs_fs_devices *fs_devices,
