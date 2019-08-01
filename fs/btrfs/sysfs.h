@@ -103,5 +103,7 @@ int btrfs_sysfs_add_mounted(struct btrfs_fs_info *fs_info);
 void btrfs_sysfs_remove_mounted(struct btrfs_fs_info *fs_info);
 void btrfs_add_raid_kobjects(struct btrfs_fs_info *fs_info);
 void btrfs_sysfs_add_block_group_type(struct btrfs_block_group_cache *cache);
+int btrfs_sysfs_add_space_info_type(struct btrfs_fs_info *fs_info,
+				    struct btrfs_space_info *space_info);
 
 #endif
