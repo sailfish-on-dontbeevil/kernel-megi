@@ -3,6 +3,8 @@
 #ifndef BTRFS_SYSFS_H
 #define BTRFS_SYSFS_H
 
+#include <linux/kobject.h>
+
 /*
  * Data exported through sysfs
  */

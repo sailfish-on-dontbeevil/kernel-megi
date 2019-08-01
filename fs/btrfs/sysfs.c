@@ -7,7 +7,6 @@
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/completion.h>
-#include <linux/kobject.h>
 #include <linux/bug.h>
 #include <linux/debugfs.h>
 
