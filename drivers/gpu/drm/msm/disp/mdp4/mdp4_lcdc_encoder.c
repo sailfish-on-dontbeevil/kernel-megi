@@ -16,6 +16,8 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <linux/delay.h>
+
 #include <drm/drm_crtc.h>
 #include <drm/drm_probe_helper.h>
 

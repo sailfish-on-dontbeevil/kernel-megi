@@ -17,6 +17,8 @@
  */
 
 #include <linux/clk-provider.h>
+#include <linux/delay.h>
+
 #include "hdmi.h"
 
 struct hdmi_pll_8960 {

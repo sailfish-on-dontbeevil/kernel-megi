@@ -16,6 +16,8 @@
  */
 
 #include <drm/drm_damage_helper.h>
+#include <drm/drm_fourcc.h>
+
 #include "mdp4_kms.h"
 
 #define DOWN_SCALE_MAX	8

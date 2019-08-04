@@ -15,10 +15,12 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <linux/dma-buf.h>
+
+#include <drm/drm_prime.h>
+
 #include "msm_drv.h"
 #include "msm_gem.h"
-
-#include <linux/dma-buf.h>
 
 struct sg_table *msm_gem_prime_get_sg_table(struct drm_gem_object *obj)
 {
