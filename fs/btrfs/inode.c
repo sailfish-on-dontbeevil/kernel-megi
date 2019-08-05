@@ -1502,18 +1502,14 @@ next_slot:
 			if (!btrfs_inc_nocow_writers(fs_info, disk_bytenr))
 				goto out_check;
 			nocow = true;
-		} else if (extent_type == BTRFS_FILE_EXTENT_INLINE) {
-			extent_end = found_key.offset +
-				btrfs_file_extent_ram_bytes(leaf, fi);
-			extent_end = ALIGN(extent_end,
-					   fs_info->sectorsize);
+		} else {
+			extent_end = found_key.offset + ram_bytes;
+			extent_end = ALIGN(extent_end, fs_info->sectorsize);
 			/* Skip extents outside of our requested range */
 			if (extent_end <= start) {
 				path->slots[0]++;
 				goto next_slot;
 			}
-		} else {
-			BUG();
 		}
 out_check:
 		/*
