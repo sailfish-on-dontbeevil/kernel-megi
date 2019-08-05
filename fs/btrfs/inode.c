@@ -1343,30 +1343,18 @@ static noinline int csum_exist_in_range(struct btrfs_fs_info *fs_info,
  */
 static noinline int run_delalloc_nocow(struct inode *inode,
 				       struct page *locked_page,
-			      u64 start, u64 end, int *page_started, int force,
-			      unsigned long *nr_written)
+				       const u64 start, const u64 end,
+				       int *page_started, int force,
+				       unsigned long *nr_written)
 {
 	struct btrfs_fs_info *fs_info = btrfs_sb(inode->i_sb);
 	struct btrfs_root *root = BTRFS_I(inode)->root;
-	struct extent_buffer *leaf;
 	struct btrfs_path *path;
-	struct btrfs_file_extent_item *fi;
-	struct btrfs_key found_key;
-	struct extent_map *em;
-	u64 cow_start;
-	u64 cur_offset;
-	u64 extent_end;
-	u64 extent_offset;
-	u64 disk_bytenr;
-	u64 num_bytes;
-	u64 disk_num_bytes;
-	u64 ram_bytes;
-	int extent_type;
+	u64 cow_start = (u64)-1;
+	u64 cur_offset = start;
 	int ret;
-	int type;
-	int nocow;
-	int check_prev = 1;
-	bool nolock;
+	bool check_prev = true;
+	bool freespace_inode = btrfs_is_free_space_inode(BTRFS_I(inode));
 	u64 ino = btrfs_ino(BTRFS_I(inode));
 
 	path = btrfs_alloc_path();
@@ -1381,15 +1369,28 @@ static noinline int run_delalloc_nocow(struct inode *inode,
 		return -ENOMEM;
 	}
 
-	nolock = btrfs_is_free_space_inode(BTRFS_I(inode));
-
-	cow_start = (u64)-1;
-	cur_offset = start;
 	while (1) {
+		struct btrfs_key found_key;
+		struct btrfs_file_extent_item *fi;
+		struct extent_buffer *leaf;
+		u64 extent_end;
+		u64 extent_offset;
+		u64 disk_bytenr = 0;
+		u64 num_bytes = 0;
+		u64 disk_num_bytes;
+		u64 ram_bytes;
+		int extent_type;
+		bool nocow = false;
+
 		ret = btrfs_lookup_file_extent(NULL, root, path, ino,
 					       cur_offset, 0);
 		if (ret < 0)
 			goto error;
+
+		/*
+		 * If nothing found and this is the initial search get the last
+		 * extent of this file
+		 */
 		if (ret > 0 && path->slots[0] > 0 && check_prev) {
 			leaf = path->nodes[0];
 			btrfs_item_key_to_cpu(leaf, &found_key,
@@ -1398,8 +1399,9 @@ static noinline int run_delalloc_nocow(struct inode *inode,
 			    found_key.type == BTRFS_EXTENT_DATA_KEY)
 				path->slots[0]--;
 		}
-		check_prev = 0;
+		check_prev = false;
 next_slot:
+		/* If we are beyond end of leaf break */
 		leaf = path->nodes[0];
 		if (path->slots[0] >= btrfs_header_nritems(leaf)) {
 			ret = btrfs_next_leaf(root, path);
@@ -1413,28 +1415,41 @@ next_slot:
 			leaf = path->nodes[0];
 		}
 
-		nocow = 0;
-		disk_bytenr = 0;
-		num_bytes = 0;
 		btrfs_item_key_to_cpu(leaf, &found_key, path->slots[0]);
 
+		/* Didn't find anything for our INO */
 		if (found_key.objectid > ino)
 			break;
+		/*
+		 * Found a different inode or no extents for our file,
+		 * goto next slot
+		 */
 		if (WARN_ON_ONCE(found_key.objectid < ino) ||
 		    found_key.type < BTRFS_EXTENT_DATA_KEY) {
 			path->slots[0]++;
 			goto next_slot;
 		}
+
+		/* Found key is not EXTENT_DATA_KEY or starts after req range */
 		if (found_key.type > BTRFS_EXTENT_DATA_KEY ||
 		    found_key.offset > end)
 			break;
 
+		/*
+		 * If the found extent starts after requested offset, then
+		 * adjust extent_end to be right before this extent begins
+		 */
 		if (found_key.offset > cur_offset) {
 			extent_end = found_key.offset;
 			extent_type = 0;
 			goto out_check;
 		}
 
+
+		/*
+		 * Found extent which begins before our range and has the
+		 * potential to intersect it.
+		 */
 		fi = btrfs_item_ptr(leaf, path->slots[0],
 				    struct btrfs_file_extent_item);
 		extent_type = btrfs_file_extent_type(leaf, fi);
@@ -1448,26 +1463,36 @@ next_slot:
 				btrfs_file_extent_num_bytes(leaf, fi);
 			disk_num_bytes =
 				btrfs_file_extent_disk_num_bytes(leaf, fi);
+			/*
+			 * If extent we got ends before our range starts,
+			 * skip to next extent
+			 */
 			if (extent_end <= start) {
 				path->slots[0]++;
 				goto next_slot;
 			}
+			/* skip holes */
 			if (disk_bytenr == 0)
 				goto out_check;
+			/* skip compressed/encrypted/encoded extents */
 			if (btrfs_file_extent_compression(leaf, fi) ||
 			    btrfs_file_extent_encryption(leaf, fi) ||
 			    btrfs_file_extent_other_encoding(leaf, fi))
 				goto out_check;
 			/*
-			 * Do the same check as in btrfs_cross_ref_exist but
-			 * without the unnecessary search.
+			 * If extent is created before the last volume's snapshot
+			 * this implies the extent is shared, hence we can't do
+			 * nocow. This is the same check as in
+			 * btrfs_cross_ref_exist but without calling
+			 * btrfs_search_slot.
 			 */
-			if (!nolock &&
+			if (!freespace_inode &&
 			    btrfs_file_extent_generation(leaf, fi) <=
 			    btrfs_root_last_snapshot(&root->root_item))
 				goto out_check;
 			if (extent_type == BTRFS_FILE_EXTENT_REG && !force)
 				goto out_check;
+			/* If extent RO, we must CoW it */
 			if (btrfs_extent_readonly(fs_info, disk_bytenr))
 				goto out_check;
 			ret = btrfs_cross_ref_exist(root, ino,
@@ -1484,17 +1509,17 @@ next_slot:
 					goto error;
 				}
 
-				WARN_ON_ONCE(nolock);
+				WARN_ON_ONCE(freespace_inode);
 				goto out_check;
 			}
 			disk_bytenr += extent_offset;
 			disk_bytenr += cur_offset - found_key.offset;
 			num_bytes = min(end + 1, extent_end) - cur_offset;
 			/*
-			 * if there are pending snapshots for this root,
+			 * If there are pending snapshots for this root,
 			 * we fall into common COW way.
 			 */
-			if (!nolock && atomic_read(&root->snapshot_force_cow))
+			if (!freespace_inode && atomic_read(&root->snapshot_force_cow))
 				goto out_check;
 			/*
 			 * force cow if csum exists in the range.
@@ -1513,27 +1538,26 @@ next_slot:
 						cur_offset = cow_start;
 					goto error;
 				}
-				WARN_ON_ONCE(nolock);
+				WARN_ON_ONCE(freespace_inode);
 				goto out_check;
 			}
 			if (!btrfs_inc_nocow_writers(fs_info, disk_bytenr))
 				goto out_check;
-			nocow = 1;
-		} else if (extent_type == BTRFS_FILE_EXTENT_INLINE) {
-			extent_end = found_key.offset +
-				btrfs_file_extent_ram_bytes(leaf, fi);
-			extent_end = ALIGN(extent_end,
-					   fs_info->sectorsize);
+			nocow = true;
 		} else {
-			BUG();
+			extent_end = found_key.offset + ram_bytes;
+			extent_end = ALIGN(extent_end, fs_info->sectorsize);
+			/* Skip extents outside of our requested range */
+			if (extent_end <= start) {
+				path->slots[0]++;
+				goto next_slot;
+			}
 		}
 out_check:
-		if (extent_end <= start) {
-			path->slots[0]++;
-			if (nocow)
-				btrfs_dec_nocow_writers(fs_info, disk_bytenr);
-			goto next_slot;
-		}
+		/*
+		 * If nocow is false then record the beginning of the range
+		 * that needs to be CoWed
+		 */
 		if (!nocow) {
 			if (cow_start == (u64)-1)
 				cow_start = cur_offset;
@@ -1545,6 +1569,12 @@ out_check:
 		}
 
 		btrfs_release_path(path);
+
+		/*
+		 * CoW range from cow_start to found_key.offset - 1. As the key
+		 * will contains the beginning of the first extent that can be
+		 * NOCOW, following one which needs to be CoW'ed
+		 */
 		if (cow_start != (u64)-1) {
 			ret = cow_file_range(inode, locked_page,
 					     cow_start, found_key.offset - 1,
@@ -1560,6 +1590,7 @@ out_check:
 
 		if (extent_type == BTRFS_FILE_EXTENT_PREALLOC) {
 			u64 orig_start = found_key.offset - extent_offset;
+			struct extent_map *em;
 
 			em = create_io_em(inode, cur_offset, num_bytes,
 					  orig_start,
@@ -1576,19 +1607,30 @@ out_check:
 				goto error;
 			}
 			free_extent_map(em);
-		}
-
-		if (extent_type == BTRFS_FILE_EXTENT_PREALLOC) {
-			type = BTRFS_ORDERED_PREALLOC;
+			ret = btrfs_add_ordered_extent(inode, cur_offset,
+						       disk_bytenr, num_bytes,
+						       num_bytes,
+						       BTRFS_ORDERED_PREALLOC);
+			if (nocow)
+				btrfs_dec_nocow_writers(fs_info, disk_bytenr);
+			if (ret) {
+				btrfs_drop_extent_cache(BTRFS_I(inode),
+							cur_offset,
+							cur_offset + num_bytes - 1,
+							0);
+				goto error;
+			}
 		} else {
-			type = BTRFS_ORDERED_NOCOW;
+			ret = btrfs_add_ordered_extent(inode, cur_offset,
+						       disk_bytenr, num_bytes,
+						       num_bytes,
+						       BTRFS_ORDERED_NOCOW);
+			if (nocow)
+				btrfs_dec_nocow_writers(fs_info, disk_bytenr);
+			if (ret)
+				goto error;
 		}
 
-		ret = btrfs_add_ordered_extent(inode, cur_offset, disk_bytenr,
-					       num_bytes, num_bytes, type);
-		if (nocow)
-			btrfs_dec_nocow_writers(fs_info, disk_bytenr);
-		BUG_ON(ret); /* -ENOMEM */
 
 		if (root->root_key.objectid ==
 		    BTRFS_DATA_RELOC_TREE_OBJECTID)
