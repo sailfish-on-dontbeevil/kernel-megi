@@ -7678,8 +7678,6 @@ int btrfs_free_block_groups(struct btrfs_fs_info *info)
 	btrfs_release_global_block_rsv(info);
 
 	while (!list_empty(&info->space_info)) {
-		int i;
-
 		space_info = list_entry(info->space_info.next,
 					struct btrfs_space_info,
 					list);
@@ -7693,52 +7691,14 @@ int btrfs_free_block_groups(struct btrfs_fs_info *info)
 			    space_info->bytes_may_use > 0))
 			btrfs_dump_space_info(info, space_info, 0, 0);
 		list_del(&space_info->list);
-		for (i = 0; i < BTRFS_NR_RAID_TYPES; i++) {
-			struct kobject *kobj;
-			kobj = space_info->block_group_kobjs[i];
-			space_info->block_group_kobjs[i] = NULL;
-			if (kobj) {
-				kobject_del(kobj);
-				kobject_put(kobj);
-			}
-		}
-		kobject_del(&space_info->kobj);
-		kobject_put(&space_info->kobj);
+		btrfs_sysfs_remove_space_info(space_info);
 	}
 	return 0;
-}
-
-/* link_block_group will queue up kobjects to add when we're reclaim-safe */
-void btrfs_add_raid_kobjects(struct btrfs_fs_info *fs_info)
-{
-	struct btrfs_space_info *space_info;
-	struct raid_kobject *rkobj;
-	LIST_HEAD(list);
-	int ret = 0;
-
-	spin_lock(&fs_info->pending_raid_kobjs_lock);
-	list_splice_init(&fs_info->pending_raid_kobjs, &list);
-	spin_unlock(&fs_info->pending_raid_kobjs_lock);
-
-	list_for_each_entry(rkobj, &list, list) {
-		space_info = btrfs_find_space_info(fs_info, rkobj->flags);
-
-		ret = kobject_add(&rkobj->kobj, &space_info->kobj,
-				"%s", btrfs_bg_type_to_raid_name(rkobj->flags));
-		if (ret) {
-			kobject_put(&rkobj->kobj);
-			break;
-		}
-	}
-	if (ret)
-		btrfs_warn(fs_info,
-			   "failed to add kobject for block cache, ignoring");
 }
 
 static void link_block_group(struct btrfs_block_group_cache *cache)
 {
 	struct btrfs_space_info *space_info = cache->space_info;
-	struct btrfs_fs_info *fs_info = cache->fs_info;
 	int index = btrfs_bg_flags_to_raid_index(cache->flags);
 	bool first = false;
 
@@ -7748,21 +7708,8 @@ static void link_block_group(struct btrfs_block_group_cache *cache)
 	list_add_tail(&cache->list, &space_info->block_groups[index]);
 	up_write(&space_info->groups_sem);
 
-	if (first) {
-		struct raid_kobject *rkobj = kzalloc(sizeof(*rkobj), GFP_NOFS);
-		if (!rkobj) {
-			btrfs_warn(cache->fs_info,
-				"couldn't alloc memory for raid level kobject");
-			return;
-		}
-		rkobj->flags = cache->flags;
-		kobject_init(&rkobj->kobj, &btrfs_raid_ktype);
-
-		spin_lock(&fs_info->pending_raid_kobjs_lock);
-		list_add_tail(&rkobj->list, &fs_info->pending_raid_kobjs);
-		spin_unlock(&fs_info->pending_raid_kobjs_lock);
-		space_info->block_group_kobjs[index] = &rkobj->kobj;
-	}
+	if (first)
+		btrfs_sysfs_add_block_group_type(cache);
 }
 
 static struct btrfs_block_group_cache *

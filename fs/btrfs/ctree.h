@@ -16,7 +16,6 @@
 #include <linux/backing-dev.h>
 #include <linux/wait.h>
 #include <linux/slab.h>
-#include <linux/kobject.h>
 #include <trace/events/btrfs.h>
 #include <asm/kmap_types.h>
 #include <asm/unaligned.h>
@@ -397,13 +396,6 @@ struct btrfs_dev_replace {
 
 	struct percpu_counter bio_counter;
 	wait_queue_head_t replace_wait;
-};
-
-/* For raid type sysfs entries */
-struct raid_kobject {
-	u64 flags;
-	struct kobject kobj;
-	struct list_head list;
 };
 
 /*
@@ -2538,7 +2530,6 @@ int btrfs_read_block_groups(struct btrfs_fs_info *info);
 int btrfs_make_block_group(struct btrfs_trans_handle *trans,
 			   u64 bytes_used, u64 type, u64 chunk_offset,
 			   u64 size);
-void btrfs_add_raid_kobjects(struct btrfs_fs_info *fs_info);
 struct btrfs_trans_handle *btrfs_start_trans_remove_block_group(
 				struct btrfs_fs_info *fs_info,
 				const u64 chunk_offset);
@@ -3097,12 +3088,6 @@ loff_t btrfs_remap_file_range(struct file *file_in, loff_t pos_in,
 /* tree-defrag.c */
 int btrfs_defrag_leaves(struct btrfs_trans_handle *trans,
 			struct btrfs_root *root);
-
-/* sysfs.c */
-int __init btrfs_init_sysfs(void);
-void __cold btrfs_exit_sysfs(void);
-int btrfs_sysfs_add_mounted(struct btrfs_fs_info *fs_info);
-void btrfs_sysfs_remove_mounted(struct btrfs_fs_info *fs_info);
 
 /* super.c */
 int btrfs_parse_options(struct btrfs_fs_info *info, char *options,
