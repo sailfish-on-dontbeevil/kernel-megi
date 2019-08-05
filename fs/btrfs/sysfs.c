@@ -9,7 +9,6 @@
 #include <linux/completion.h>
 #include <linux/kobject.h>
 #include <linux/bug.h>
-#include <linux/debugfs.h>
 
 #include "ctree.h"
 #include "disk-io.h"
@@ -17,6 +16,7 @@
 #include "sysfs.h"
 #include "volumes.h"
 #include "space-info.h"
+#include "block-group.h"
 
 static inline struct btrfs_fs_info *to_fs_info(struct kobject *kobj);
 static inline struct btrfs_fs_devices *to_fs_devs(struct kobject *kobj);
@@ -246,6 +246,25 @@ static const struct attribute_group btrfs_static_feature_attr_group = {
 	.name = "features",
 	.attrs = btrfs_supported_static_feature_attrs,
 };
+
+#ifdef CONFIG_BTRFS_DEBUG
+
+/*
+ * Runtime debugging exported via sysfs
+ *
+ * /sys/fs/btrfs/debug - applies to module or all filesystems
+ * /sys/fs/btrfs/UUID  - applies only to the given filesystem
+ */
+static struct attribute *btrfs_debug_feature_attrs[] = {
+	NULL
+};
+
+static const struct attribute_group btrfs_debug_feature_attr_group = {
+	.name = "debug",
+	.attrs = btrfs_debug_feature_attrs,
+};
+
+#endif
 
 static ssize_t btrfs_show_u64(u64 *value_ptr, spinlock_t *lock, char *buf)
 {
@@ -809,12 +828,6 @@ int btrfs_sysfs_add_device_link(struct btrfs_fs_devices *fs_devices,
 /* /sys/fs/btrfs/ entry */
 static struct kset *btrfs_kset;
 
-/* /sys/kernel/debug/btrfs */
-static struct dentry *btrfs_debugfs_root_dentry;
-
-/* Debugging tunables and exported data */
-u64 btrfs_debugfs_test;
-
 /*
  * Can be called by the device discovery thread.
  * And parent can be specified for seed device
@@ -858,6 +871,13 @@ int btrfs_sysfs_add_mounted(struct btrfs_fs_info *fs_info)
 				   &btrfs_feature_attr_group);
 	if (error)
 		goto failure;
+
+#ifdef CONFIG_BTRFS_DEBUG
+	error = sysfs_create_group(fsid_kobj,
+				   &btrfs_debug_feature_attr_group);
+	if (error)
+		goto failure;
+#endif
 
 	error = addrm_unknown_feature_attrs(fs_info, true);
 	if (error)
@@ -913,25 +933,6 @@ void btrfs_sysfs_feature_update(struct btrfs_fs_info *fs_info,
 	ret = sysfs_create_group(fsid_kobj, &btrfs_feature_attr_group);
 }
 
-static void btrfs_init_debugfs(void)
-{
-#ifdef CONFIG_DEBUG_FS
-	btrfs_debugfs_root_dentry = debugfs_create_dir("btrfs", NULL);
-
-	/*
-	 * Example code, how to export data through debugfs.
-	 *
-	 * file:        /sys/kernel/debug/btrfs/test
-	 * contents of: btrfs_debugfs_test
-	 */
-#ifdef CONFIG_BTRFS_DEBUG
-	debugfs_create_u64("test", S_IRUGO | S_IWUSR, btrfs_debugfs_root_dentry,
-			&btrfs_debugfs_test);
-#endif
-
-#endif
-}
-
 int __init btrfs_init_sysfs(void)
 {
 	int ret;
@@ -939,8 +940,6 @@ int __init btrfs_init_sysfs(void)
 	btrfs_kset = kset_create_and_add("btrfs", NULL, fs_kobj);
 	if (!btrfs_kset)
 		return -ENOMEM;
-
-	btrfs_init_debugfs();
 
 	init_feature_attrs();
 	ret = sysfs_create_group(&btrfs_kset->kobj, &btrfs_feature_attr_group);
@@ -951,12 +950,17 @@ int __init btrfs_init_sysfs(void)
 	if (ret)
 		goto out_remove_group;
 
+#ifdef CONFIG_BTRFS_DEBUG
+	ret = sysfs_create_group(&btrfs_kset->kobj, &btrfs_debug_feature_attr_group);
+	if (ret)
+		goto out2;
+#endif
+
 	return 0;
 
 out_remove_group:
 	sysfs_remove_group(&btrfs_kset->kobj, &btrfs_feature_attr_group);
 out2:
-	debugfs_remove_recursive(btrfs_debugfs_root_dentry);
 	kset_unregister(btrfs_kset);
 
 	return ret;
@@ -968,6 +972,5 @@ void __cold btrfs_exit_sysfs(void)
 			    &btrfs_static_feature_attr_group);
 	sysfs_remove_group(&btrfs_kset->kobj, &btrfs_feature_attr_group);
 	kset_unregister(btrfs_kset);
-	debugfs_remove_recursive(btrfs_debugfs_root_dentry);
 }
 
