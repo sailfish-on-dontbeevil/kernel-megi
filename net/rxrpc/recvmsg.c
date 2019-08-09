@@ -193,8 +193,7 @@ static void rxrpc_rotate_rx_window(struct rxrpc_call *call)
 	sp = rxrpc_skb(skb);
 	flags = sp->hdr.flags;
 	serial = sp->hdr.serial;
-	if (call->rxtx_annotations[ix] & RXRPC_RX_ANNO_JUMBO)
-		serial += (call->rxtx_annotations[ix] & RXRPC_RX_ANNO_JUMBO) - 1;
+	serial += call->rxtx_annotations[ix] & RXRPC_RX_ANNO_SUBPACKET;
 
 	call->rxtx_buffer[ix] = NULL;
 	call->rxtx_annotations[ix] = 0;
@@ -233,18 +232,19 @@ static int rxrpc_verify_packet(struct rxrpc_call *call, struct sk_buff *skb,
 	struct rxrpc_skb_priv *sp = rxrpc_skb(skb);
 	rxrpc_seq_t seq = sp->hdr.seq;
 	u16 cksum = sp->hdr.cksum;
+	u8 subpacket = annotation & RXRPC_RX_ANNO_SUBPACKET;
 
 	_enter("");
 
 	/* For all but the head jumbo subpacket, the security checksum is in a
 	 * jumbo header immediately prior to the data.
 	 */
-	if ((annotation & RXRPC_RX_ANNO_JUMBO) > 1) {
+	if (subpacket > 0) {
 		__be16 tmp;
 		if (skb_copy_bits(skb, offset - 2, &tmp, 2) < 0)
 			BUG();
 		cksum = ntohs(tmp);
-		seq += (annotation & RXRPC_RX_ANNO_JUMBO) - 1;
+		seq += subpacket;
 	}
 
 	return call->conn->security->verify_packet(call, skb, offset, len,
@@ -265,19 +265,18 @@ static int rxrpc_locate_data(struct rxrpc_call *call, struct sk_buff *skb,
 			     u8 *_annotation,
 			     unsigned int *_offset, unsigned int *_len)
 {
+	struct rxrpc_skb_priv *sp = rxrpc_skb(skb);
 	unsigned int offset = sizeof(struct rxrpc_wire_header);
 	unsigned int len;
 	int ret;
 	u8 annotation = *_annotation;
+	u8 subpacket = annotation & RXRPC_RX_ANNO_SUBPACKET;
 
 	/* Locate the subpacket */
+	offset += subpacket * RXRPC_JUMBO_SUBPKTLEN;
 	len = skb->len - offset;
-	if ((annotation & RXRPC_RX_ANNO_JUMBO) > 0) {
-		offset += (((annotation & RXRPC_RX_ANNO_JUMBO) - 1) *
-			   RXRPC_JUMBO_SUBPKTLEN);
-		len = (annotation & RXRPC_RX_ANNO_JLAST) ?
-			skb->len - offset : RXRPC_JUMBO_SUBPKTLEN;
-	}
+	if (subpacket < sp->nr_subpackets - 1)
+		len = RXRPC_JUMBO_SUBPKTLEN;
 
 	if (!(annotation & RXRPC_RX_ANNO_VERIFIED)) {
 		ret = rxrpc_verify_packet(call, skb, annotation, offset, len);

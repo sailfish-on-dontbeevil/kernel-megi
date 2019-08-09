@@ -663,7 +663,7 @@ TRACE_EVENT(rxrpc_skb,
 		    __entry->where = where;
 			   ),
 
-	    TP_printk("s=%p %s u=%d m=%d p=%pSR",
+	    TP_printk("s=%px %s u=%d m=%d p=%pSR",
 		      __entry->skb,
 		      __print_symbolic(__entry->op, rxrpc_skb_traces),
 		      __entry->usage,
