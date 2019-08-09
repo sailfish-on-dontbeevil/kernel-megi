@@ -448,6 +448,7 @@ static void rxrpc_input_data(struct rxrpc_call *call, struct sk_buff *skb)
 	}
 
 	atomic_set(&sp->nr_ring_pins, 1);
+	sp->rx_flags |= RXRPC_SKB_NEEDS_COW;
 
 	if (call->state == RXRPC_CALL_SERVER_RECV_REQUEST) {
 		unsigned long timo = READ_ONCE(call->next_req_timo);

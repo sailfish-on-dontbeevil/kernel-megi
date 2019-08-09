@@ -190,6 +190,7 @@ struct rxrpc_skb_priv {
 	u8		rx_flags;		/* Received packet flags */
 #define RXRPC_SKB_INCL_LAST	0x01		/* - Includes last packet */
 #define RXRPC_SKB_TX_BUFFER	0x02		/* - Is transmit buffer */
+#define RXRPC_SKB_NEEDS_COW	0x04		/* - Needs skb_cow_data() calling */
 	union {
 		int		remain;		/* amount of space remaining for next write */
 
