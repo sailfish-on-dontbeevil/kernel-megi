@@ -28,10 +28,12 @@ enum rxrpc_skb_trace {
 	rxrpc_skb_got,
 	rxrpc_skb_lost,
 	rxrpc_skb_new,
+	rxrpc_skb_pin,
 	rxrpc_skb_purged,
 	rxrpc_skb_received,
 	rxrpc_skb_rotated,
 	rxrpc_skb_seen,
+	rxrpc_skb_unpin,
 };
 
 enum rxrpc_local_trace {
@@ -228,10 +230,12 @@ enum rxrpc_tx_point {
 	EM(rxrpc_skb_got,			"GOT") \
 	EM(rxrpc_skb_lost,			"*L*") \
 	EM(rxrpc_skb_new,			"NEW") \
+	EM(rxrpc_skb_pin,			"PIN") \
 	EM(rxrpc_skb_purged,			"PUR") \
 	EM(rxrpc_skb_received,			"RCV") \
 	EM(rxrpc_skb_rotated,			"ROT") \
-	E_(rxrpc_skb_seen,			"SEE")
+	EM(rxrpc_skb_seen,			"SEE") \
+	E_(rxrpc_skb_unpin,			"UPN")
 
 #define rxrpc_local_traces \
 	EM(rxrpc_local_got,			"GOT") \
@@ -633,14 +637,15 @@ TRACE_EVENT(rxrpc_call,
 
 TRACE_EVENT(rxrpc_skb,
 	    TP_PROTO(struct sk_buff *skb, enum rxrpc_skb_trace op,
-		     int usage, int mod_count, const void *where),
+		     int usage, int mod_count, int pins, const void *where),
 
-	    TP_ARGS(skb, op, usage, mod_count, where),
+	    TP_ARGS(skb, op, usage, mod_count, pins, where),
 
 	    TP_STRUCT__entry(
 		    __field(struct sk_buff *,		skb		)
 		    __field(enum rxrpc_skb_trace,	op		)
 		    __field(u8,				flags		)
+		    __field(u8,				pins		)
 		    __field(int,			usage		)
 		    __field(int,			mod_count	)
 		    __field(const void *,		where		)
@@ -651,16 +656,18 @@ TRACE_EVENT(rxrpc_skb,
 		    __entry->flags = rxrpc_skb(skb)->rx_flags;
 		    __entry->op = op;
 		    __entry->usage = usage;
+		    __entry->pins = pins;
 		    __entry->mod_count = mod_count;
 		    __entry->where = where;
 			   ),
 
-	    TP_printk("s=%px %cx %s u=%d m=%d p=%pSR",
+	    TP_printk("s=%px %cx %s u=%d m=%d r=%u p=%pSR",
 		      __entry->skb,
 		      __entry->flags & RXRPC_SKB_TX_BUFFER ? 'T' : 'R',
 		      __print_symbolic(__entry->op, rxrpc_skb_traces),
 		      __entry->usage,
 		      __entry->mod_count,
+		      __entry->pins,
 		      __entry->where)
 	    );
 

@@ -22,9 +22,12 @@
  */
 void rxrpc_new_skb(struct sk_buff *skb, enum rxrpc_skb_trace op)
 {
+	struct rxrpc_skb_priv *sp = rxrpc_skb(skb);
 	const void *here = __builtin_return_address(0);
 	int n = atomic_inc_return(select_skb_count(skb));
-	trace_rxrpc_skb(skb, op, refcount_read(&skb->users), n, here);
+
+	atomic_set(&sp->nr_ring_pins, 1);
+	trace_rxrpc_skb(skb, op, refcount_read(&skb->users), n, 1, here);
 }
 
 /*
@@ -33,9 +36,12 @@ void rxrpc_new_skb(struct sk_buff *skb, enum rxrpc_skb_trace op)
 void rxrpc_see_skb(struct sk_buff *skb, enum rxrpc_skb_trace op)
 {
 	const void *here = __builtin_return_address(0);
+
 	if (skb) {
+		struct rxrpc_skb_priv *sp = rxrpc_skb(skb);
 		int n = atomic_read(select_skb_count(skb));
-		trace_rxrpc_skb(skb, op, refcount_read(&skb->users), n, here);
+		trace_rxrpc_skb(skb, op, refcount_read(&skb->users), n,
+				atomic_read(&sp->nr_ring_pins), here);
 	}
 }
 
@@ -44,9 +50,11 @@ void rxrpc_see_skb(struct sk_buff *skb, enum rxrpc_skb_trace op)
  */
 void rxrpc_get_skb(struct sk_buff *skb, enum rxrpc_skb_trace op)
 {
+	struct rxrpc_skb_priv *sp = rxrpc_skb(skb);
 	const void *here = __builtin_return_address(0);
 	int n = atomic_inc_return(select_skb_count(skb));
-	trace_rxrpc_skb(skb, op, refcount_read(&skb->users), n, here);
+	trace_rxrpc_skb(skb, op, refcount_read(&skb->users), n,
+			atomic_read(&sp->nr_ring_pins), here);
 	skb_get(skb);
 }
 
@@ -56,11 +64,14 @@ void rxrpc_get_skb(struct sk_buff *skb, enum rxrpc_skb_trace op)
 void rxrpc_free_skb(struct sk_buff *skb, enum rxrpc_skb_trace op)
 {
 	const void *here = __builtin_return_address(0);
+
 	if (skb) {
+		struct rxrpc_skb_priv *sp = rxrpc_skb(skb);
 		int n;
 		CHECK_SLAB_OKAY(&skb->users);
 		n = atomic_dec_return(select_skb_count(skb));
-		trace_rxrpc_skb(skb, op, refcount_read(&skb->users), n, here);
+		trace_rxrpc_skb(skb, op, refcount_read(&skb->users), n,
+				atomic_read(&sp->nr_ring_pins), here);
 		kfree_skb(skb);
 	}
 }
@@ -72,10 +83,46 @@ void rxrpc_purge_queue(struct sk_buff_head *list)
 {
 	const void *here = __builtin_return_address(0);
 	struct sk_buff *skb;
+
 	while ((skb = skb_dequeue((list))) != NULL) {
+		struct rxrpc_skb_priv *sp = rxrpc_skb(skb);
 		int n = atomic_dec_return(select_skb_count(skb));
 		trace_rxrpc_skb(skb, rxrpc_skb_purged,
-				refcount_read(&skb->users), n, here);
+				refcount_read(&skb->users), n,
+				atomic_read(&sp->nr_ring_pins), here);
 		kfree_skb(skb);
+	}
+}
+
+/*
+ * Add a secondary ref on the socket buffer.
+ */
+void rxrpc_pin_skb(struct sk_buff *skb, enum rxrpc_skb_trace op)
+{
+	struct rxrpc_skb_priv *sp = rxrpc_skb(skb);
+	const void *here = __builtin_return_address(0);
+	int n = atomic_read(select_skb_count(skb));
+	int np;
+
+	np = atomic_inc_return(&sp->nr_ring_pins);
+	trace_rxrpc_skb(skb, op, refcount_read(&skb->users), n, np, here);
+}
+
+/*
+ * Remove a secondary ref on the socket buffer.
+ */
+void rxrpc_unpin_skb(struct sk_buff *skb, enum rxrpc_skb_trace op)
+{
+	const void *here = __builtin_return_address(0);
+
+	if (skb) {
+		struct rxrpc_skb_priv *sp = rxrpc_skb(skb);
+		int n = atomic_read(select_skb_count(skb));
+		int np;
+
+		np = atomic_dec_return(&sp->nr_ring_pins);
+		trace_rxrpc_skb(skb, op, refcount_read(&skb->users), n, np, here);
+		if (np == 0)
+			rxrpc_free_skb(skb, op);
 	}
 }

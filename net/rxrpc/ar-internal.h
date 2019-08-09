@@ -1113,6 +1113,8 @@ void rxrpc_see_skb(struct sk_buff *, enum rxrpc_skb_trace);
 void rxrpc_get_skb(struct sk_buff *, enum rxrpc_skb_trace);
 void rxrpc_free_skb(struct sk_buff *, enum rxrpc_skb_trace);
 void rxrpc_purge_queue(struct sk_buff_head *);
+void rxrpc_pin_skb(struct sk_buff *, enum rxrpc_skb_trace);
+void rxrpc_unpin_skb(struct sk_buff *, enum rxrpc_skb_trace);
 
 /*
  * sysctl.c
