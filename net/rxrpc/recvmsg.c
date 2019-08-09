@@ -200,7 +200,7 @@ static void rxrpc_rotate_rx_window(struct rxrpc_call *call)
 	/* Barrier against rxrpc_input_data(). */
 	smp_store_release(&call->rx_hard_ack, hard_ack);
 
-	rxrpc_free_skb(skb, rxrpc_skb_freed);
+	rxrpc_unpin_skb(skb, rxrpc_skb_unpin);
 
 	_debug("%u,%u,%02x", hard_ack, top, flags);
 	trace_rxrpc_receive(call, rxrpc_receive_rotate, serial, hard_ack);

@@ -429,7 +429,7 @@ static void rxrpc_cleanup_ring(struct rxrpc_call *call)
 	int i;
 
 	for (i = 0; i < RXRPC_RXTX_BUFF_SIZE; i++) {
-		rxrpc_free_skb(call->rxtx_buffer[i], rxrpc_skb_cleaned);
+		rxrpc_unpin_skb(call->rxtx_buffer[i], rxrpc_skb_cleaned);
 		call->rxtx_buffer[i] = NULL;
 	}
 }

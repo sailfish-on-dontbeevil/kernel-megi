@@ -258,7 +258,7 @@ static bool rxrpc_rotate_tx_window(struct rxrpc_call *call, rxrpc_seq_t to,
 		skb = list;
 		list = skb->next;
 		skb_mark_not_on_list(skb);
-		rxrpc_free_skb(skb, rxrpc_skb_freed);
+		rxrpc_unpin_skb(skb, rxrpc_skb_unpin);
 	}
 
 	return rot_last;
@@ -447,6 +447,8 @@ static void rxrpc_input_data(struct rxrpc_call *call, struct sk_buff *skb)
 		return;
 	}
 
+	atomic_set(&sp->nr_ring_pins, 1);
+
 	if (call->state == RXRPC_CALL_SERVER_RECV_REQUEST) {
 		unsigned long timo = READ_ONCE(call->next_req_timo);
 		unsigned long now, expect_req_by;
@@ -550,6 +552,12 @@ static void rxrpc_input_data(struct rxrpc_call *call, struct sk_buff *skb)
 			ack_serial = serial;
 		}
 
+		/* Each insertion into the rxtx_buffer holds a ring pin.  This
+		 * allows a single ref on the buffer to be shared, thereby
+		 * allowing skb_cow_data() to be used.
+		 */
+		rxrpc_pin_skb(skb, rxrpc_skb_pin);
+
 		/* Queue the packet.  We use a couple of memory barriers here as need
 		 * to make sure that rx_top is perceived to be set after the buffer
 		 * pointer and that the buffer pointer is set after the annotation and
@@ -558,8 +566,6 @@ static void rxrpc_input_data(struct rxrpc_call *call, struct sk_buff *skb)
 		 * Barriers against rxrpc_recvmsg_data() and rxrpc_rotate_rx_window()
 		 * and also rxrpc_fill_out_ack().
 		 */
-		if (!terminal)
-			rxrpc_get_skb(skb, rxrpc_skb_got);
 		call->rxtx_annotations[ix] = annotation;
 		smp_wmb();
 		call->rxtx_buffer[ix] = skb;
@@ -572,14 +578,6 @@ static void rxrpc_input_data(struct rxrpc_call *call, struct sk_buff *skb)
 				ack_serial = serial;
 			}
 			immediate_ack = true;
-		}
-
-		if (terminal) {
-			/* From this point on, we're not allowed to touch the
-			 * packet any longer as its ref now belongs to the Rx
-			 * ring.
-			 */
-			skb = NULL;
 		}
 
 		if (last) {
@@ -620,7 +618,7 @@ ack:
 
 unlock:
 	spin_unlock(&call->input_lock);
-	rxrpc_free_skb(skb, rxrpc_skb_freed);
+	rxrpc_unpin_skb(skb, rxrpc_skb_unpin);
 	_leave(" [queued]");
 }
 

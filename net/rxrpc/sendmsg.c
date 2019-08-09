@@ -175,6 +175,7 @@ static int rxrpc_queue_packet(struct rxrpc_sock *rx, struct rxrpc_call *call,
 	 */
 	skb->tstamp = ktime_get_real();
 
+	atomic_set(&sp->nr_ring_pins, 1);
 	ix = seq & RXRPC_RXTX_BUFF_MASK;
 	rxrpc_get_skb(skb, rxrpc_skb_got);
 	call->rxtx_annotations[ix] = annotation;
