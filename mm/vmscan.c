@@ -2168,6 +2168,7 @@ unsigned long reclaim_pages(struct list_head *page_list)
 		}
 
 		if (nid == page_to_nid(page)) {
+			ClearPageActive(page);
 			list_move(&page->lru, &node_page_list);
 			continue;
 		}
