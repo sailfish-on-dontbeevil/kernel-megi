@@ -2497,7 +2497,7 @@ static void __split_huge_page(struct page *page, struct list_head *list,
 	pg_data_t *pgdat = page_pgdat(head);
 	struct lruvec *lruvec;
 	struct address_space *swap_cache = NULL;
-	unsigned long offset;
+	unsigned long offset = 0;
 	int i;
 
 	lruvec = mem_cgroup_page_lruvec(head, pgdat);

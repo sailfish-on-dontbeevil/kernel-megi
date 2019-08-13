@@ -329,8 +329,7 @@ static void page_cache_delete_batch(struct address_space *mapping,
 		 * page or the index is of the last sub-page of this compound
 		 * page.
 		 */
-		if (page->index + (1UL << compound_order(page)) - 1 ==
-				xas.xa_index)
+		if (page->index + compound_nr(page) - 1 == xas.xa_index)
 			i++;
 		xas_store(&xas, NULL);
 		total_pages++;
