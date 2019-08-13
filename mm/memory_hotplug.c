@@ -714,6 +714,7 @@ static void __meminit resize_pgdat_range(struct pglist_data *pgdat, unsigned lon
 		pgdat->node_start_pfn = start_pfn;
 
 	pgdat->node_spanned_pages = max(start_pfn + nr_pages, old_end_pfn) - pgdat->node_start_pfn;
+
 }
 /*
  * Associate the pfn range with the given zone, initializing the memmaps
