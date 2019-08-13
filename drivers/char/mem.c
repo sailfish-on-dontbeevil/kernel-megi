@@ -140,6 +140,9 @@ static ssize_t read_mem(struct file *file, char __user *buf,
 		int allowed, probe;
 
 		sz = size_inside_page(p, count);
+		if (IS_ENABLED(CONFIG_DEBUG_AID_FOR_SYZBOT) &&
+		    fatal_signal_pending(current))
+			printk("read_mem: sz=%ld count=%ld\n", sz, count);
 
 		err = -EPERM;
 		allowed = page_is_allowed(p >> PAGE_SHIFT);
@@ -179,9 +182,15 @@ static ssize_t read_mem(struct file *file, char __user *buf,
 	kfree(bounce);
 
 	*ppos += read;
+	if (IS_ENABLED(CONFIG_DEBUG_AID_FOR_SYZBOT) &&
+	    fatal_signal_pending(current))
+		printk("read_mem: read=%ld *ppos=%lld\n", read, *ppos);
 	return read;
 
 failed:
+	if (IS_ENABLED(CONFIG_DEBUG_AID_FOR_SYZBOT) &&
+	    fatal_signal_pending(current))
+		printk("read_mem: err=%d\n", err);
 	kfree(bounce);
 	return err;
 }
