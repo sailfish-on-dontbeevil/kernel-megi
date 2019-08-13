@@ -632,37 +632,31 @@ static void generic_online_page(struct page *page, unsigned int order)
 #endif
 }
 
-static int online_pages_blocks(unsigned long start, unsigned long nr_pages)
-{
-	unsigned long end = start + nr_pages;
-	int order, onlined_pages = 0;
-
-	while (start < end) {
-		order = min(MAX_ORDER - 1,
-			get_order(PFN_PHYS(end) - PFN_PHYS(start)));
-		/* make sure the PFN is aligned and we don't exceed the range */
-		while (!IS_ALIGNED(start, 1ul << order) ||
-		       (1ul << order) > end - start)
-			order--;
-		(*online_page_callback)(pfn_to_page(start), order);
-
-		onlined_pages += (1UL << order);
-		start += (1UL << order);
-	}
-	return onlined_pages;
-}
-
 static int online_pages_range(unsigned long start_pfn, unsigned long nr_pages,
 			void *arg)
 {
-	unsigned long onlined_pages = *(unsigned long *)arg;
+	const unsigned long end_pfn = start_pfn + nr_pages;
+	unsigned long pfn;
+	int order;
 
-	if (PageReserved(pfn_to_page(start_pfn)))
-		onlined_pages += online_pages_blocks(start_pfn, nr_pages);
+	/*
+	 * Online the pages. The callback might decide to keep some pages
+	 * PG_reserved (to add them to the buddy later), but we still account
+	 * them as being online/belonging to this zone ("present").
+	 */
+	for (pfn = start_pfn; pfn < end_pfn; pfn += 1ul << order) {
+		order = min(MAX_ORDER - 1, get_order(PFN_PHYS(end_pfn - pfn)));
+		/* make sure the PFN is aligned and we don't exceed the range */
+		while (!IS_ALIGNED(start_pfn, 1ul << order) ||
+		       (1ul << order) > end_pfn - pfn)
+			order--;
+		(*online_page_callback)(pfn_to_page(pfn), order);
+	}
 
-	online_mem_sections(start_pfn, start_pfn + nr_pages);
+	/* mark all involved sections as online */
+	online_mem_sections(start_pfn, end_pfn);
 
-	*(unsigned long *)arg = onlined_pages;
+	*(unsigned long *)arg += nr_pages;
 	return 0;
 }
 
