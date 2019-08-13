@@ -2454,7 +2454,7 @@ void mem_cgroup_handle_over_high(void)
 	clamped_high = max(high, 1UL);
 
 	overage = (u64)(usage - high) << MEMCG_DELAY_PRECISION_SHIFT;
-	do_div(overage, clamped_high);
+	overage /= clamped_high;
 
 	penalty_jiffies = ((u64)overage * overage * HZ)
 		>> (MEMCG_DELAY_PRECISION_SHIFT + MEMCG_DELAY_SCALING_SHIFT);
