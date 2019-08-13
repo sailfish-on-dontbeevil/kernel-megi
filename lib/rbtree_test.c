@@ -222,7 +222,20 @@ static void check_augmented(int nr_nodes)
 	check(nr_nodes);
 	for (rb = rb_first(&root.rb_root); rb; rb = rb_next(rb)) {
 		struct test_node *node = rb_entry(rb, struct test_node, rb);
-		WARN_ON_ONCE(node->augmented != augment_recompute(node));
+		u32 subtree, max = node->val;
+		if (node->rb.rb_left) {
+			subtree = rb_entry(node->rb.rb_left, struct test_node,
+					   rb)->augmented;
+			if (max < subtree)
+				max = subtree;
+		}
+		if (node->rb.rb_right) {
+			subtree = rb_entry(node->rb.rb_right, struct test_node,
+					   rb)->augmented;
+			if (max < subtree)
+				max = subtree;
+		}
+		WARN_ON_ONCE(node->augmented != max);
 	}
 }
 
