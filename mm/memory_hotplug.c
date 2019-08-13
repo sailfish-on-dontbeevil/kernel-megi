@@ -640,6 +640,10 @@ static int online_pages_blocks(unsigned long start, unsigned long nr_pages)
 	while (start < end) {
 		order = min(MAX_ORDER - 1,
 			get_order(PFN_PHYS(end) - PFN_PHYS(start)));
+		/* make sure the PFN is aligned and we don't exceed the range */
+		while (!IS_ALIGNED(start, 1ul << order) ||
+		       (1ul << order) > end - start)
+			order--;
 		(*online_page_callback)(pfn_to_page(start), order);
 
 		onlined_pages += (1UL << order);
