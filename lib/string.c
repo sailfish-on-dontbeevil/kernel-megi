@@ -175,7 +175,7 @@ EXPORT_SYMBOL(strlcpy);
  *
  * Returns:
  * * The number of characters copied (not including the trailing %NUL)
- * * -E2BIG if count is 0.
+ * * -E2BIG if count is 0 or @src was truncated.
  */
 ssize_t strscpy(char *dest, const char *src, size_t count)
 {
@@ -256,7 +256,7 @@ EXPORT_SYMBOL(strscpy);
  *
  * Returns:
  * * The number of characters copied (not including the trailing %NUL)
- * * -E2BIG if count is 0.
+ * * -E2BIG if count is 0 or @src was truncated.
  */
 ssize_t strscpy_pad(char *dest, const char *src, size_t count)
 {
