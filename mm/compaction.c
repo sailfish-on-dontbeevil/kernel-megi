@@ -2068,19 +2068,6 @@ bool compaction_zonelist_suitable(struct alloc_context *ac, int order,
 	return false;
 }
 
-
-/*
- * Bellow counters are used to track activities during compacting a zone.
- * Before compacting a new zone, we should init these counters first.
- */
-static void compact_zone_counters_init(struct compact_control *cc)
-{
-	cc->total_migrate_scanned = 0;
-	cc->total_free_scanned = 0;
-	cc->nr_migratepages = 0;
-	cc->nr_freepages = 0;
-}
-
 static enum compact_result
 compact_zone(struct compact_control *cc, struct capture_control *capc)
 {
@@ -2091,7 +2078,15 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 	const bool sync = cc->mode != MIGRATE_ASYNC;
 	bool update_cached;
 
-	compact_zone_counters_init(cc);
+	/*
+	 * These counters track activities during zone compaction.  Initialize
+	 * them before compacting a new zone.
+	 */
+	cc->total_migrate_scanned = 0;
+	cc->total_free_scanned = 0;
+	cc->nr_migratepages = 0;
+	cc->nr_freepages = 0;
+
 	cc->migratetype = gfpflags_to_migratetype(cc->gfp_mask);
 	ret = compaction_suitable(cc->zone, cc->order, cc->alloc_flags,
 							cc->classzone_idx);
