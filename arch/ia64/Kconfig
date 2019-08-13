@@ -68,10 +68,6 @@ config ZONE_DMA32
 	def_bool y
 	depends on !IA64_SGI_SN2
 
-config QUICKLIST
-	bool
-	default y
-
 config MMU
 	bool
 	default y
