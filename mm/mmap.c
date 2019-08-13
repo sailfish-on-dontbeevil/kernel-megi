@@ -2286,8 +2286,8 @@ find_vma_prev(struct mm_struct *mm, unsigned long addr,
 		*pprev = vma->vm_prev;
 	} else {
 		struct rb_node *rb_node = rb_last(&mm->mm_rb);
-		*pprev = !rb_node ? NULL :
-			 rb_entry(rb_node, struct vm_area_struct, vm_rb);
+
+		*pprev = rb_node ? rb_entry(rb_node, struct vm_area_struct, vm_rb) : NULL;
 	}
 	return vma;
 }
