@@ -14,16 +14,16 @@
 #define BITS_PER_BYTE		8
 
 /*
- * Create a contiguous bitmask starting at bit position @l and ending at
- * position @h. For example
+ * Create a contiguous bitmask starting at bit position @low and ending at
+ * position @high. For example
  * GENMASK_ULL(39, 21) gives us the 64bit vector 0x000000ffffe00000.
  */
-#define GENMASK(h, l) \
-	(((~UL(0)) - (UL(1) << (l)) + 1) & \
-	 (~UL(0) >> (BITS_PER_LONG - 1 - (h))))
+#define GENMASK(high, low) \
+	(((~UL(0)) - (UL(1) << (low)) + 1) & \
+	 (~UL(0) >> (BITS_PER_LONG - 1 - (high))))
 
-#define GENMASK_ULL(h, l) \
-	(((~ULL(0)) - (ULL(1) << (l)) + 1) & \
-	 (~ULL(0) >> (BITS_PER_LONG_LONG - 1 - (h))))
+#define GENMASK_ULL(high, low) \
+	(((~ULL(0)) - (ULL(1) << (low)) + 1) & \
+	 (~ULL(0) >> (BITS_PER_LONG_LONG - 1 - (high))))
 
 #endif	/* __LINUX_BITS_H */
