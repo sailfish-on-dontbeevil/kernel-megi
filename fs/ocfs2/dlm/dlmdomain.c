@@ -2052,6 +2052,7 @@ static struct dlm_ctxt *dlm_alloc_ctxt(const char *domain,
 	mlog(0, "context init: refcount %u\n",
 		  kref_read(&dlm->dlm_refs));
 
+	ret = 0;
 leave:
 	if (ret < 0 && dlm) {
 		if (dlm->master_hash)
