@@ -2451,7 +2451,7 @@ void mem_cgroup_handle_over_high(void)
 	 * Prevent division by 0 in overage calculation by acting as if it was a
 	 * threshold of 1 page
 	 */
-	clamped_high = max(high, 1);
+	clamped_high = max(high, 1UL);
 
 	overage = ((u64)(usage - high) << MEMCG_DELAY_PRECISION_SHIFT)
 		/ clamped_high;
