@@ -190,7 +190,7 @@ static bool tce_page_is_contained(struct mm_struct *mm, unsigned long hpa,
 	 * a page we just found. Otherwise the hardware can get access to
 	 * a bigger memory chunk that it should.
 	 */
-	return (PAGE_SHIFT + compound_order(compound_head(page))) >= page_shift;
+	return page_shift(compound_head(page)) >= page_shift;
 }
 
 static inline bool tce_groups_attached(struct tce_container *container)
