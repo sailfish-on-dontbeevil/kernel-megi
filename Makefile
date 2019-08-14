@@ -1307,7 +1307,6 @@ all: modules
 
 PHONY += modules
 modules: $(if $(KBUILD_BUILTIN),vmlinux) modules.order modules.builtin
-	@$(kecho) '  Building modules, stage 2.';
 	$(Q)$(MAKE) -f $(srctree)/scripts/Makefile.modpost
 	$(Q)$(CONFIG_SHELL) $(srctree)/scripts/modules-check.sh
 
@@ -1627,7 +1626,6 @@ $(objtree)/Module.symvers:
 build-dirs := $(KBUILD_EXTMOD)
 PHONY += modules
 modules: descend $(objtree)/Module.symvers
-	@$(kecho) '  Building modules, stage 2.';
 	$(Q)$(MAKE) -f $(srctree)/scripts/Makefile.modpost
 
 PHONY += modules_install
