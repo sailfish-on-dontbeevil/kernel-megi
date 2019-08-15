@@ -21,9 +21,7 @@
  *	and fixed mappings
  */
 #define VMALLOC_START		(MODULES_END)
-#define VMALLOC_END		(PAGE_OFFSET - PUD_SIZE - VMEMMAP_SIZE - SZ_64K)
-
-#define vmemmap			((struct page *)VMEMMAP_START - (memstart_addr >> PAGE_SHIFT))
+#define VMALLOC_END		(- PUD_SIZE - VMEMMAP_SIZE - SZ_64K)
 
 #define FIRST_USER_ADDRESS	0UL
 
@@ -34,6 +32,8 @@
 #include <linux/mmdebug.h>
 #include <linux/mm_types.h>
 #include <linux/sched.h>
+
+extern struct page *vmemmap;
 
 extern void __pte_error(const char *file, int line, unsigned long val);
 extern void __pmd_error(const char *file, int line, unsigned long val);
@@ -856,8 +856,8 @@ static inline void update_mmu_cache(struct vm_area_struct *vma,
 
 #define update_mmu_cache_pmd(vma, address, pmd) do { } while (0)
 
-#define kc_vaddr_to_offset(v)	((v) & ~VA_START)
-#define kc_offset_to_vaddr(o)	((o) | VA_START)
+#define kc_vaddr_to_offset(v)	((v) & ~PAGE_END)
+#define kc_offset_to_vaddr(o)	((o) | PAGE_END)
 
 #ifdef CONFIG_ARM64_PA_BITS_52
 #define phys_to_ttbr(addr)	(((addr) | ((addr) >> 46)) & TTBR_BADDR_MASK_52)
