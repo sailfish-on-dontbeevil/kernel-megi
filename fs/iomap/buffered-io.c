@@ -1241,7 +1241,7 @@ static void iomap_writepage_end_bio(struct bio *bio)
  * all bios have been submitted and the ioend is really done.
  *
  * If @error is non-zero, it means that we have a situation where some part of
- * the submission process has failed after we have marked paged for writeback
+ * the submission process has failed after we have marked pages for writeback
  * and unlocked them. In this situation, we need to fail the bio and ioend
  * rather than submit it to IO. This typically only happens on a filesystem
  * shutdown.
