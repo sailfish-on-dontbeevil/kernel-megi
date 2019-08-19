@@ -8,8 +8,6 @@
 #ifndef __ASM_IO_H
 #define __ASM_IO_H
 
-#ifdef __KERNEL__
-
 #include <linux/types.h>
 
 #include <asm/byteorder.h>
@@ -97,7 +95,7 @@ static inline u64 __raw_readq(const volatile void __iomem *addr)
 ({									\
 	unsigned long tmp;						\
 									\
-	rmb();								\
+	dma_rmb();								\
 									\
 	/*								\
 	 * Create a dummy control dependency from the IO read to any	\
@@ -111,7 +109,7 @@ static inline u64 __raw_readq(const volatile void __iomem *addr)
 })
 
 #define __io_par(v)		__iormb(v)
-#define __iowmb()		wmb()
+#define __iowmb()		dma_wmb()
 
 /*
  * Relaxed I/O memory access primitives. These follow the Device memory
@@ -207,5 +205,4 @@ extern int valid_mmap_phys_addr_range(unsigned long pfn, size_t size);
 
 extern int devmem_is_allowed(unsigned long pfn);
 
-#endif	/* __KERNEL__ */
 #endif	/* __ASM_IO_H */
