@@ -505,6 +505,8 @@ patternProperties:
     description: Lantiq Semiconductor
   "^lattice,.*":
     description: Lattice Semiconductor
+  "^leez,.*":
+    description: Leez
   "^lego,.*":
     description: LEGO Systems A/S
   "^lemaker,.*":
@@ -553,6 +555,8 @@ patternProperties:
     description: mCube
   "^meas,.*":
     description: Measurement Specialties
+  "^mecer,.*":
+    description: Mustek Limited
   "^mediatek,.*":
     description: MediaTek Inc.
   "^megachips,.*":
