@@ -20,6 +20,7 @@
 #include "volumes.h"
 #include "space-info.h"
 #include "delalloc-space.h"
+#include "block-group.h"
 
 #define BITS_PER_BITMAP		(PAGE_SIZE * 8UL)
 #define MAX_CACHE_BYTES_PER_GIG	SZ_32K
@@ -2374,6 +2375,14 @@ out:
 	}
 
 	return ret;
+}
+
+int btrfs_add_free_space(struct btrfs_block_group_cache *block_group,
+			 u64 bytenr, u64 size)
+{
+	return __btrfs_add_free_space(block_group->fs_info,
+				      block_group->free_space_ctl,
+				      bytenr, size);
 }
 
 int btrfs_remove_free_space(struct btrfs_block_group_cache *block_group,
