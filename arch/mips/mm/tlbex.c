@@ -545,7 +545,6 @@ void build_tlb_write_entry(u32 **p, struct uasm_label **l,
 		tlbw(p);
 		break;
 
-	case CPU_R4300:
 	case CPU_5KC:
 	case CPU_TX49XX:
 	case CPU_PR4450:
@@ -604,13 +603,12 @@ void build_tlb_write_entry(u32 **p, struct uasm_label **l,
 
 	case CPU_VR4131:
 	case CPU_VR4133:
-	case CPU_R5432:
 		uasm_i_nop(p);
 		uasm_i_nop(p);
 		tlbw(p);
 		break;
 
-	case CPU_JZRISC:
+	case CPU_XBURST:
 		tlbw(p);
 		uasm_i_nop(p);
 		break;
@@ -631,7 +629,7 @@ static __maybe_unused void build_convert_pte_to_entrylo(u32 **p,
 		return;
 	}
 
-	if (cpu_has_rixi && _PAGE_NO_EXEC) {
+	if (cpu_has_rixi && !!_PAGE_NO_EXEC) {
 		if (fill_includes_sw_bits) {
 			UASM_i_ROTR(p, reg, reg, ilog2(_PAGE_GLOBAL));
 		} else {
@@ -2633,10 +2631,6 @@ void build_tlb_refill_handler(void)
 #else
 		panic("No R3000 TLB refill handler");
 #endif
-		break;
-
-	case CPU_R8000:
-		panic("No R8000 TLB refill handler yet");
 		break;
 
 	default:
