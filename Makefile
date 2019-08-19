@@ -230,6 +230,8 @@ endif
 
 export KBUILD_CHECKSRC KBUILD_EXTMOD
 
+extmod-prefix = $(if $(KBUILD_EXTMOD),$(KBUILD_EXTMOD)/)
+
 ifeq ($(abs_srctree),$(abs_objtree))
         # building in the source tree
         srctree := .
@@ -271,52 +273,65 @@ no-dot-config-targets := $(clean-targets) \
 			 %asm-generic kernelversion %src-pkg
 no-sync-config-targets := $(no-dot-config-targets) install %install \
 			   kernelrelease
+single-targets := %.a %.i %.ko %.lds %.lst %.mod %.o %.s %.symtypes %/
+ifdef CONFIG_CC_IS_CLANG
+single-targets += %.ll
+endif
 
-config-targets  := 0
-mixed-targets   := 0
-dot-config      := 1
-may-sync-config := 1
+config-build	:=
+mixed-build	:=
+need-config	:= 1
+may-sync-config	:= 1
+single-build	:=
 
 ifneq ($(filter $(no-dot-config-targets), $(MAKECMDGOALS)),)
 	ifeq ($(filter-out $(no-dot-config-targets), $(MAKECMDGOALS)),)
-		dot-config := 0
+		need-config :=
 	endif
 endif
 
 ifneq ($(filter $(no-sync-config-targets), $(MAKECMDGOALS)),)
 	ifeq ($(filter-out $(no-sync-config-targets), $(MAKECMDGOALS)),)
-		may-sync-config := 0
+		may-sync-config :=
 	endif
 endif
 
 ifneq ($(KBUILD_EXTMOD),)
-	may-sync-config := 0
+	may-sync-config :=
 endif
 
 ifeq ($(KBUILD_EXTMOD),)
         ifneq ($(filter config %config,$(MAKECMDGOALS)),)
-                config-targets := 1
+		config-build := 1
                 ifneq ($(words $(MAKECMDGOALS)),1)
-                        mixed-targets := 1
+			mixed-build := 1
                 endif
         endif
+endif
+
+# We cannot build single targets and the others at the same time
+ifneq ($(filter $(single-targets), $(MAKECMDGOALS)),)
+	single-build := 1
+	ifneq ($(filter-out $(single-targets), $(MAKECMDGOALS)),)
+		mixed-build := 1
+	endif
 endif
 
 # For "make -j clean all", "make -j mrproper defconfig all", etc.
 ifneq ($(filter $(clean-targets),$(MAKECMDGOALS)),)
         ifneq ($(filter-out $(clean-targets),$(MAKECMDGOALS)),)
-                mixed-targets := 1
+		mixed-build := 1
         endif
 endif
 
 # install and modules_install need also be processed one by one
 ifneq ($(filter install,$(MAKECMDGOALS)),)
         ifneq ($(filter modules_install,$(MAKECMDGOALS)),)
-	        mixed-targets := 1
+		mixed-build := 1
         endif
 endif
 
-ifeq ($(mixed-targets),1)
+ifdef mixed-build
 # ===========================================================================
 # We're called with mixed targets (*config and build targets).
 # Handle them one by one.
@@ -332,7 +347,7 @@ __build_one_by_one:
 		$(MAKE) -f $(srctree)/Makefile $$i; \
 	done
 
-else
+else # !mixed-build
 
 include scripts/Kbuild.include
 
@@ -470,7 +485,8 @@ KBUILD_AFLAGS_KERNEL :=
 KBUILD_CFLAGS_KERNEL :=
 KBUILD_AFLAGS_MODULE  := -DMODULE
 KBUILD_CFLAGS_MODULE  := -DMODULE
-KBUILD_LDFLAGS_MODULE := -T $(srctree)/scripts/module-common.lds
+KBUILD_LDFLAGS_MODULE :=
+export KBUILD_LDS_MODULE := $(srctree)/scripts/module-common.lds
 KBUILD_LDFLAGS :=
 GCC_PLUGINS_CFLAGS :=
 CLANG_FLAGS :=
@@ -544,7 +560,7 @@ endif
 # and from include/config/auto.conf.cmd to detect the compiler upgrade.
 CC_VERSION_TEXT = $(shell $(CC) --version 2>/dev/null | head -n 1)
 
-ifeq ($(config-targets),1)
+ifdef config-build
 # ===========================================================================
 # *config targets only - make sure prerequisites are updated, and descend
 # in scripts/kconfig to make the *config target
@@ -561,7 +577,7 @@ config: scripts_basic outputmakefile FORCE
 %config: scripts_basic outputmakefile FORCE
 	$(Q)$(MAKE) $(build)=scripts/kconfig $@
 
-else
+else #!config-build
 # ===========================================================================
 # Build targets only - this includes vmlinux, arch specific targets, clean
 # targets and others. In general all targets except *config targets.
@@ -604,7 +620,7 @@ endif
 
 export KBUILD_MODULES KBUILD_BUILTIN
 
-ifeq ($(dot-config),1)
+ifdef need-config
 include include/config/auto.conf
 endif
 
@@ -652,8 +668,8 @@ ARCH_AFLAGS :=
 ARCH_CFLAGS :=
 include arch/$(SRCARCH)/Makefile
 
-ifeq ($(dot-config),1)
-ifeq ($(may-sync-config),1)
+ifdef need-config
+ifdef may-sync-config
 # Read in dependencies to all Kconfig* files, make sure to run syncconfig if
 # changes are detected. This should be included after arch/$(SRCARCH)/Makefile
 # because some architectures define CROSS_COMPILE there.
@@ -676,7 +692,7 @@ $(KCONFIG_CONFIG):
 # The syncconfig should be executed only once to make all the targets.
 %/auto.conf %/auto.conf.cmd %/tristate.conf: $(KCONFIG_CONFIG)
 	$(Q)$(MAKE) -f $(srctree)/Makefile syncconfig
-else
+else # !may-sync-config
 # External modules and some install targets need include/generated/autoconf.h
 # and include/config/auto.conf but do not care if they are up-to-date.
 # Use auto.conf to trigger the test
@@ -692,7 +708,7 @@ include/config/auto.conf:
 	/bin/false)
 
 endif # may-sync-config
-endif # $(dot-config)
+endif # need-config
 
 KBUILD_CFLAGS	+= $(call cc-option,-fno-delete-null-pointer-checks,)
 KBUILD_CFLAGS	+= $(call cc-disable-warning,frame-address,)
@@ -1003,7 +1019,7 @@ endif
 
 PHONY += prepare0
 
-export MODORDER := $(if $(KBUILD_EXTMOD),$(KBUILD_EXTMOD)/)modules.order
+export MODORDER := $(extmod-prefix)modules.order
 
 ifeq ($(KBUILD_EXTMOD),)
 core-y		+= kernel/ certs/ mm/ fs/ ipc/ security/ crypto/ block/
@@ -1015,6 +1031,9 @@ vmlinux-dirs	:= $(patsubst %/,%,$(filter %/, $(init-y) $(init-m) \
 vmlinux-alldirs	:= $(sort $(vmlinux-dirs) Documentation \
 		     $(patsubst %/,%,$(filter %/, $(init-) $(core-) \
 			$(drivers-) $(net-) $(libs-) $(virt-))))
+
+build-dirs	:= $(vmlinux-dirs)
+clean-dirs	:= $(vmlinux-alldirs)
 
 init-y		:= $(patsubst %/, %/built-in.a, $(init-y))
 core-y		:= $(patsubst %/, %/built-in.a, $(core-y))
@@ -1038,7 +1057,7 @@ vmlinux-deps := $(KBUILD_LDS) $(KBUILD_VMLINUX_OBJS) $(KBUILD_VMLINUX_LIBS)
 # Recurse until adjust_autoksyms.sh is satisfied
 PHONY += autoksyms_recursive
 ifdef CONFIG_TRIM_UNUSED_KSYMS
-autoksyms_recursive: $(vmlinux-deps) modules.order
+autoksyms_recursive: descend modules.order
 	$(Q)$(CONFIG_SHELL) $(srctree)/scripts/adjust_autoksyms.sh \
 	  "$(MAKE) -f $(srctree)/Makefile vmlinux"
 endif
@@ -1070,17 +1089,7 @@ targets := vmlinux
 
 # The actual objects are generated when descending,
 # make sure no implicit rule kicks in
-$(sort $(vmlinux-deps)): $(vmlinux-dirs) ;
-
-# Handle descending into subdirectories listed in $(vmlinux-dirs)
-# Preset locale variables to speed up the build process. Limit locale
-# tweaks to this spot to avoid wrong language settings when running
-# make menuconfig etc.
-# Error messages still appears in the original language
-
-PHONY += $(vmlinux-dirs)
-$(vmlinux-dirs): prepare
-	$(Q)$(MAKE) $(build)=$@ need-builtin=1 need-modorder=1
+$(sort $(vmlinux-deps)): descend ;
 
 filechk_kernel.release = \
 	echo "$(KERNELVERSION)$$($(CONFIG_SHELL) $(srctree)/scripts/setlocalversion $(srctree))"
@@ -1298,17 +1307,16 @@ all: modules
 
 PHONY += modules
 modules: $(if $(KBUILD_BUILTIN),vmlinux) modules.order modules.builtin
-	@$(kecho) '  Building modules, stage 2.';
 	$(Q)$(MAKE) -f $(srctree)/scripts/Makefile.modpost
 	$(Q)$(CONFIG_SHELL) $(srctree)/scripts/modules-check.sh
 
-modules.order: $(vmlinux-dirs)
-	$(Q)$(AWK) '!x[$$0]++' $(addsuffix /$@, $(vmlinux-dirs)) > $@
+modules.order: descend
+	$(Q)$(AWK) '!x[$$0]++' $(addsuffix /$@, $(build-dirs)) > $@
 
-modbuiltin-dirs := $(addprefix _modbuiltin_, $(vmlinux-dirs))
+modbuiltin-dirs := $(addprefix _modbuiltin_, $(build-dirs))
 
 modules.builtin: $(modbuiltin-dirs)
-	$(Q)$(AWK) '!x[$$0]++' $(addsuffix /$@, $(vmlinux-dirs)) > $@
+	$(Q)$(AWK) '!x[$$0]++' $(addsuffix /$@, $(build-dirs)) > $@
 
 PHONY += $(modbuiltin-dirs)
 # tristate.conf is not included from this Makefile. Add it as a prerequisite
@@ -1396,11 +1404,8 @@ DISTCLEAN_FILES += tags TAGS cscope* GPATH GTAGS GRTAGS GSYMS
 #
 clean: rm-dirs  := $(CLEAN_DIRS)
 clean: rm-files := $(CLEAN_FILES)
-clean-dirs      := $(addprefix _clean_, . $(vmlinux-alldirs))
 
-PHONY += $(clean-dirs) clean archclean vmlinuxclean
-$(clean-dirs):
-	$(Q)$(MAKE) $(clean)=$(patsubst _clean_%,%,$@)
+PHONY += archclean vmlinuxclean
 
 vmlinuxclean:
 	$(Q)$(CONFIG_SHELL) $(srctree)/scripts/link-vmlinux.sh clean
@@ -1618,13 +1623,9 @@ $(objtree)/Module.symvers:
 	echo "           is missing; modules will have no dependencies and modversions."; \
 	echo )
 
-module-dirs := $(addprefix _module_,$(KBUILD_EXTMOD))
-PHONY += $(module-dirs) modules
-$(module-dirs): prepare $(objtree)/Module.symvers
-	$(Q)$(MAKE) $(build)=$(patsubst _module_%,%,$@) need-modorder=1
-
-modules: $(module-dirs)
-	@$(kecho) '  Building modules, stage 2.';
+build-dirs := $(KBUILD_EXTMOD)
+PHONY += modules
+modules: descend $(objtree)/Module.symvers
 	$(Q)$(MAKE) -f $(srctree)/scripts/Makefile.modpost
 
 PHONY += modules_install
@@ -1640,13 +1641,12 @@ PHONY += _emodinst_post
 _emodinst_post: _emodinst_
 	$(call cmd,depmod)
 
-clean-dirs := $(addprefix _clean_,$(KBUILD_EXTMOD))
-
-PHONY += $(clean-dirs) clean
-$(clean-dirs):
-	$(Q)$(MAKE) $(clean)=$(patsubst _clean_%,%,$@)
-
+clean-dirs := $(KBUILD_EXTMOD)
 clean: rm-files := $(KBUILD_EXTMOD)/Module.symvers
+
+PHONY += /
+/:
+	@echo >&2 '"$(MAKE) /" is no longer supported. Please use "$(MAKE) ./" instead.'
 
 PHONY += help
 help:
@@ -1660,6 +1660,21 @@ help:
 
 PHONY += prepare
 endif # KBUILD_EXTMOD
+
+# Handle descending into subdirectories listed in $(build-dirs)
+# Preset locale variables to speed up the build process. Limit locale
+# tweaks to this spot to avoid wrong language settings when running
+# make menuconfig etc.
+# Error messages still appears in the original language
+PHONY += descend $(build-dirs)
+descend: $(build-dirs)
+$(build-dirs): prepare
+	$(Q)$(MAKE) $(build)=$@ single-build=$(single-build) need-builtin=1 need-modorder=1
+
+clean-dirs := $(addprefix _clean_, $(clean-dirs))
+PHONY += $(clean-dirs) clean
+$(clean-dirs):
+	$(Q)$(MAKE) $(clean)=$(patsubst _clean_%,%,$@)
 
 clean: $(clean-dirs)
 	$(call cmd,rmdirs)
@@ -1751,45 +1766,47 @@ tools/%: FORCE
 
 # Single targets
 # ---------------------------------------------------------------------------
-# Single targets are compatible with:
-# - build with mixed source and output
-# - build with separate output dir 'make O=...'
-# - external modules
+# To build individual files in subdirectories, you can do like this:
 #
-#  target-dir => where to store outputfile
-#  build-dir  => directory in kernel source tree to use
+#   make foo/bar/baz.s
+#
+# The supported suffixes for single-target are listed in 'single-targets'
+#
+# To build only under specific subdirectories, you can do like this:
+#
+#   make foo/bar/baz/
 
-build-target = $(if $(KBUILD_EXTMOD), $(KBUILD_EXTMOD)/)$@
-build-dir = $(patsubst %/,%,$(dir $(build-target)))
+ifdef single-build
 
-%.i: prepare FORCE
-	$(Q)$(MAKE) $(build)=$(build-dir) $(build-target)
-%.ll: prepare FORCE
-	$(Q)$(MAKE) $(build)=$(build-dir) $(build-target)
-%.lst: prepare FORCE
-	$(Q)$(MAKE) $(build)=$(build-dir) $(build-target)
-%.o: prepare FORCE
-	$(Q)$(MAKE) $(build)=$(build-dir) $(build-target)
-%.s: prepare FORCE
-	$(Q)$(MAKE) $(build)=$(build-dir) $(build-target)
-%.symtypes: prepare FORCE
-	$(Q)$(MAKE) $(build)=$(build-dir) $(build-target)
+single-all := $(filter $(single-targets), $(MAKECMDGOALS))
+
+# .ko is special because modpost is needed
+single-ko := $(sort $(filter %.ko, $(single-all)))
+single-no-ko := $(sort $(patsubst %.ko,%.mod, $(single-all)))
+
+$(single-ko): single_modpost
+	@:
+$(single-no-ko): descend
+	@:
+
 ifeq ($(KBUILD_EXTMOD),)
-# For the single build of an in-tree module, use a temporary file to avoid
+# For the single build of in-tree modules, use a temporary file to avoid
 # the situation of modules_install installing an invalid modules.order.
-%.ko: MODORDER := .modules.tmp
+MODORDER := .modules.tmp
 endif
-%.ko: prepare FORCE
-	$(Q)$(MAKE) $(build)=$(build-dir) $(build-target:.ko=.mod)
-	$(Q)echo $(build-target) > $(MODORDER)
+
+PHONY += single_modpost
+single_modpost: $(single-no-ko)
+	$(Q){ $(foreach m, $(single-ko), echo $(extmod-prefix)$m;) } > $(MODORDER)
 	$(Q)$(MAKE) -f $(srctree)/scripts/Makefile.modpost
 
-# Modules
-PHONY += /
-/: ./
+KBUILD_MODULES := 1
 
-%/: prepare FORCE
-	$(Q)$(MAKE) KBUILD_MODULES=1 $(build)=$(build-dir) need-modorder=1
+export KBUILD_SINGLE_TARGETS := $(addprefix $(extmod-prefix), $(single-no-ko))
+
+single-build = $(if $(filter-out $@/, $(single-no-ko)),1)
+
+endif
 
 # FIXME Should go into a make.lib or something
 # ===========================================================================
@@ -1810,9 +1827,9 @@ existing-targets := $(wildcard $(sort $(targets)))
 
 -include $(foreach f,$(existing-targets),$(dir $(f)).$(notdir $(f)).cmd)
 
-endif   # ifeq ($(config-targets),1)
-endif   # ifeq ($(mixed-targets),1)
-endif   # need-sub-make
+endif # config-targets
+endif # mixed-build
+endif # need-sub-make
 
 PHONY += FORCE
 FORCE:
