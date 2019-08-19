@@ -1626,6 +1626,18 @@ F:	drivers/clocksource/timer-atlas7.c
 N:	[^a-z]sirf
 X:	drivers/gnss
 
+ARM/CZ.NIC TURRIS MOX SUPPORT
+M:	Marek Behun <marek.behun@nic.cz>
+W:	http://mox.turris.cz
+S:	Maintained
+F:	Documentation/ABI/testing/debugfs-moxtet
+F:	Documentation/ABI/testing/sysfs-bus-moxtet-devices
+F:	Documentation/devicetree/bindings/bus/moxtet.txt
+F:	Documentation/devicetree/bindings/gpio/gpio-moxtet.txt
+F:	include/linux/moxtet.h
+F:	drivers/bus/moxtet.c
+F:	drivers/gpio/gpio-moxtet.c
+
 ARM/EBSA110 MACHINE SUPPORT
 M:	Russell King <linux@armlinux.org.uk>
 L:	linux-arm-kernel@lists.infradead.org (moderated for non-subscribers)
@@ -1749,19 +1761,10 @@ L:	linux-arm-kernel@lists.infradead.org (moderated for non-subscribers)
 S:	Maintained
 F:	arch/arm/mach-pxa/colibri-pxa270-income.c
 
-ARM/INTEL IOP13XX ARM ARCHITECTURE
-M:	Lennert Buytenhek <kernel@wantstofly.org>
-L:	linux-arm-kernel@lists.infradead.org (moderated for non-subscribers)
-S:	Maintained
-
 ARM/INTEL IOP32X ARM ARCHITECTURE
 M:	Lennert Buytenhek <kernel@wantstofly.org>
 L:	linux-arm-kernel@lists.infradead.org (moderated for non-subscribers)
 S:	Maintained
-
-ARM/INTEL IOP33X ARM ARCHITECTURE
-L:	linux-arm-kernel@lists.infradead.org (moderated for non-subscribers)
-S:	Orphan
 
 ARM/INTEL IQ81342EX MACHINE SUPPORT
 M:	Lennert Buytenhek <kernel@wantstofly.org>
@@ -1921,12 +1924,6 @@ S:	Maintained
 F:	drivers/phy/mediatek/
 F:	Documentation/devicetree/bindings/phy/phy-mtk-*
 
-ARM/MICREL KS8695 ARCHITECTURE
-M:	Greg Ungerer <gerg@uclinux.org>
-L:	linux-arm-kernel@lists.infradead.org (moderated for non-subscribers)
-F:	arch/arm/mach-ks8695/
-S:	Odd Fixes
-
 ARM/Microchip (AT91) SoC support
 M:	Nicolas Ferre <nicolas.ferre@microchip.com>
 M:	Alexandre Belloni <alexandre.belloni@bootlin.com>
@@ -1968,6 +1965,7 @@ F:	Documentation/devicetree/bindings/i2c/i2c-stu300.txt
 F:	arch/arm/mach-nomadik/
 F:	arch/arm/mach-u300/
 F:	arch/arm/mach-ux500/
+F:	drivers/soc/ux500/
 F:	arch/arm/boot/dts/ste-*
 F:	drivers/clk/clk-nomadik.c
 F:	drivers/clk/clk-u300.c
@@ -2010,22 +2008,6 @@ F:	include/dt-bindings/clock/nuvoton,npcm7xx-clock.h
 F:	drivers/*/*npcm*
 F:	Documentation/devicetree/bindings/*/*npcm*
 F:	Documentation/devicetree/bindings/*/*/*npcm*
-
-ARM/NUVOTON W90X900 ARM ARCHITECTURE
-M:	Wan ZongShun <mcuos.com@gmail.com>
-L:	linux-arm-kernel@lists.infradead.org (moderated for non-subscribers)
-W:	http://www.mcuos.com
-S:	Maintained
-F:	arch/arm/mach-w90x900/
-F:	drivers/input/keyboard/w90p910_keypad.c
-F:	drivers/input/touchscreen/w90p910_ts.c
-F:	drivers/watchdog/nuc900_wdt.c
-F:	drivers/net/ethernet/nuvoton/w90p910_ether.c
-F:	drivers/mtd/nand/raw/nuc900_nand.c
-F:	drivers/rtc/rtc-nuc900.c
-F:	drivers/spi/spi-nuc900.c
-F:	drivers/usb/host/ehci-w90x900.c
-F:	drivers/video/fbdev/nuc900fb.c
 
 ARM/OPENMOKO NEO FREERUNNER (GTA02) MACHINE SUPPORT
 L:	openmoko-kernel@lists.openmoko.org (subscribers-only)
@@ -15576,6 +15558,7 @@ F:	drivers/clk/clk-sc[mp]i.c
 F:	drivers/cpufreq/sc[mp]i-cpufreq.c
 F:	drivers/firmware/arm_scpi.c
 F:	drivers/firmware/arm_scmi/
+F:	drivers/reset/reset-scmi.c
 F:	include/linux/sc[mp]i_protocol.h
 
 SYSTEM RESET/SHUTDOWN DRIVERS

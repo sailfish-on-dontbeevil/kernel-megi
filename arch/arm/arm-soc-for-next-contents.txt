@@ -1,0 +1,76 @@
+arm/soc
+	patch
+		ARM: mach-nspire: Kill off CLCD auxdata
+		ARM: remove ks8695 platform
+		ARM: remove w90x900 platform
+		ARM: remove Intel iop33x and iop13xx support
+		dmaengine: iop-adma: include prefetch.h
+		dmaengine: iop-adma: use correct printk format strings
+		dma: iop-adma: allow building without platform headers
+		ARM: xscale: fix multi-cpu compilation
+		ARM: iop32x: make mach/uncompress.h independent of mach/hardware.h
+		ARM: iop32x: merge everything into mach-iop32x/
+	ux500/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/linusw/linux-stericsson tags/ux500-v5.4-1
+	patch
+		ARM: dove: clean up mach/*.h headers
+		ARM: orion/mvebu: unify debug-ll virtual addresses
+	lpc32xx/multiplatform
+		Merge branch 'lpc32xx/multiplatform' into arm/soc
+
+arm/dt
+	patch
+		ARM: dts: nomadik: Set up the CS GPIO right
+		ARM: dts: Update the NSPIRE DTS files for DRM
+	ux500/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/linusw/linux-stericsson tags/ux500-dts-v5.4-1
+	renesas/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-dt-bindings-for-v5.4-tag1
+	stm32/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/atorgue/stm32 tags/stm32-dt-for-v5.4-1
+	gemini/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/linusw/linux-nomadik tags/gemini-dts-v5.4-1
+	renesas/dt64
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm64-dt-for-v5.4-tag1
+	juno/update
+		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/juno-update-5.4
+	vexpress/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/vexpress-dt-updates-5.4
+
+arm/drivers
+	fsl/soc-5.3-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/leo/linux tags/soc-fsl-next-v5.3-2
+	drivers/reset
+		git://git.pengutronix.de/git/pza/linux tags/reset-for-v5.4
+	renesas/drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-drivers-for-v5.4-tag1
+	patch
+		bus: Add support for Moxtet bus
+		dt-bindings: bus: Document moxtet bus binding
+		bus: moxtet: Add sysfs and debugfs documentation
+		drivers: gpio: Add support for GPIOs over Moxtet bus
+		dt-bindings: gpio: Document GPIOs via Moxtet bus
+	drivers/scmi
+		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/scmi-updates-5.4
+	drivers/tee
+		git://git.linaro.org/people/jens.wiklander/linux-tee tags/tee-optee-for-5.4
+
+arm/defconfig
+	patch
+		arm64: defconfig: Enable the PSCI CPUidle driver
+		ARM: imx_v6_v7_defconfig: Enable the PSCI CPUidle driver
+		ARM: multi_v7_defconfig: Enable SPI_STM32_QSPI support
+	stm32/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/atorgue/stm32 tags/stm32-defconfig-for-v5.4-1
+
+arm/newsoc
+
+arm/late
+
+arm/fixes
+	<no branch> (a5580eb394c8a48afc3e64aaad68db0d44662cc6)
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-fixes-5.3-2
+	<no branch> (4a65bbb9109ed7edd4b6ed7168ced48abb8561a2)
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.3/fixes-rc4
+	<no branch> (dc7f2cb218b5ef65ab3d455a0e62d27e44075203)
+		git://git.kernel.org/pub/scm/linux/kernel/git/khilman/linux-amlogic tags/amlogic-fixes

@@ -275,7 +275,7 @@ config GPIO_ICH
 
 config GPIO_IOP
 	tristate "Intel IOP GPIO"
-	depends on ARCH_IOP32X || ARCH_IOP33X || COMPILE_TEST
+	depends on ARCH_IOP32X || COMPILE_TEST
 	select GPIO_GENERIC
 	help
 	  Say yes here to support the GPIO functionality of a number of Intel
@@ -310,6 +310,13 @@ config GPIO_LPC18XX
 	help
 	  Select this option to enable GPIO driver for
 	  NXP LPC18XX/43XX devices.
+
+config GPIO_LPC32XX
+	tristate "NXP LPC32XX GPIO support"
+	depends on OF_GPIO && (ARCH_LPC32XX || COMPILE_TEST)
+	help
+	  Select this option to enable GPIO driver for
+	  NXP LPC32XX devices.
 
 config GPIO_LYNXPOINT
 	tristate "Intel Lynxpoint GPIO support"
@@ -1444,6 +1451,15 @@ config GPIO_XRA1403
 	select REGMAP_SPI
 	help
 	  GPIO driver for EXAR XRA1403 16-bit SPI-based GPIO expander.
+
+config GPIO_MOXTET
+	tristate "Turris Mox Moxtet bus GPIO expander"
+	depends on MOXTET
+	help
+	  Say yes here if you are building for the Turris Mox router.
+	  This is the driver needed for configuring the GPIOs via the Moxtet
+	  bus. For example the Mox module with SFP cage needs this driver
+	  so that phylink can use corresponding GPIOs.
 
 endmenu
 
