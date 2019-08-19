@@ -899,6 +899,7 @@ void ext4_es_cache_extent(struct inode *inode, ext4_lblk_t lblk,
  * Return: 1 on found, 0 on not
  */
 int ext4_es_lookup_extent(struct inode *inode, ext4_lblk_t lblk,
+			  ext4_lblk_t *next_lblk,
 			  struct extent_status *es)
 {
 	struct ext4_es_tree *tree;
@@ -948,6 +949,15 @@ out:
 		if (!ext4_es_is_referenced(es1))
 			ext4_es_set_referenced(es1);
 		stats->es_stats_cache_hits++;
+		if (next_lblk) {
+			node = rb_next(&es1->rb_node);
+			if (node) {
+				es1 = rb_entry(node, struct extent_status,
+					       rb_node);
+				*next_lblk = es1->es_lblk;
+			} else
+				*next_lblk = 0;
+		}
 	} else {
 		stats->es_stats_cache_misses++;
 	}
@@ -1372,6 +1382,34 @@ static int es_reclaim_extents(struct ext4_inode_info *ei, int *nr_to_scan)
 
 	ei->i_es_tree.cache_es = NULL;
 	return nr_shrunk;
+}
+
+/*
+ * Called to support EXT4_IOC_CLEAR_ES_CACHE.  We can only remove
+ * discretionary entries from the extent status cache.  (Some entries
+ * must be present for proper operations.)
+ */
+void ext4_clear_inode_es(struct inode *inode)
+{
+	struct ext4_inode_info *ei = EXT4_I(inode);
+	struct extent_status *es;
+	struct ext4_es_tree *tree;
+	struct rb_node *node;
+
+	write_lock(&ei->i_es_lock);
+	tree = &EXT4_I(inode)->i_es_tree;
+	tree->cache_es = NULL;
+	node = rb_first(&tree->root);
+	while (node) {
+		es = rb_entry(node, struct extent_status, rb_node);
+		node = rb_next(node);
+		if (!ext4_es_is_delayed(es)) {
+			rb_erase(&es->rb_node, &tree->root);
+			ext4_es_free_extent(inode, es);
+		}
+	}
+	ext4_clear_inode_state(inode, EXT4_STATE_EXT_PRECACHED);
+	write_unlock(&ei->i_es_lock);
 }
 
 #ifdef ES_DEBUG__

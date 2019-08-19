@@ -527,7 +527,7 @@ int ext4_map_blocks(handle_t *handle, struct inode *inode,
 		return -EFSCORRUPTED;
 
 	/* Lookup extent status tree firstly */
-	if (ext4_es_lookup_extent(inode, map->m_lblk, &es)) {
+	if (ext4_es_lookup_extent(inode, map->m_lblk, NULL, &es)) {
 		if (ext4_es_is_written(&es) || ext4_es_is_unwritten(&es)) {
 			map->m_pblk = ext4_es_pblock(&es) +
 					map->m_lblk - es.es_lblk;
@@ -695,7 +695,7 @@ found:
 		 * extent status tree.
 		 */
 		if ((flags & EXT4_GET_BLOCKS_PRE_IO) &&
-		    ext4_es_lookup_extent(inode, map->m_lblk, &es)) {
+		    ext4_es_lookup_extent(inode, map->m_lblk, NULL, &es)) {
 			if (ext4_es_is_written(&es))
 				goto out_sem;
 		}
@@ -1868,7 +1868,7 @@ static int ext4_da_map_blocks(struct inode *inode, sector_t iblock,
 		  (unsigned long) map->m_lblk);
 
 	/* Lookup extent status tree firstly */
-	if (ext4_es_lookup_extent(inode, iblock, &es)) {
+	if (ext4_es_lookup_extent(inode, iblock, NULL, &es)) {
 		if (ext4_es_is_hole(&es)) {
 			retval = 0;
 			down_read(&EXT4_I(inode)->i_data_sem);
@@ -2785,15 +2785,6 @@ static int ext4_writepages(struct address_space *mapping,
 		goto out_writepages;
 	}
 
-	if (ext4_should_dioread_nolock(inode)) {
-		/*
-		 * We may need to convert up to one extent per block in
-		 * the page and we may dirty the inode.
-		 */
-		rsv_blocks = 1 + ext4_chunk_trans_blocks(inode,
-						PAGE_SIZE >> inode->i_blkbits);
-	}
-
 	/*
 	 * If we have inline data and arrive here, it means that
 	 * we will soon create the block for the 1st page, so
@@ -2810,6 +2801,15 @@ static int ext4_writepages(struct address_space *mapping,
 				EXT4_STATE_MAY_INLINE_DATA));
 		ext4_destroy_inline_data(handle, inode);
 		ext4_journal_stop(handle);
+	}
+
+	if (ext4_should_dioread_nolock(inode)) {
+		/*
+		 * We may need to convert up to one extent per block in
+		 * the page and we may dirty the inode.
+		 */
+		rsv_blocks = 1 + ext4_chunk_trans_blocks(inode,
+						PAGE_SIZE >> inode->i_blkbits);
 	}
 
 	if (wbc->range_start == 0 && wbc->range_end == LLONG_MAX)
