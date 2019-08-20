@@ -32,6 +32,7 @@
 #include "psp_v3_1.h"
 #include "psp_v10_0.h"
 #include "psp_v11_0.h"
+#include "psp_v12_0.h"
 
 static void psp_set_funcs(struct amdgpu_device *adev);
 
@@ -62,6 +63,9 @@ static int psp_early_init(void *handle)
 	case CHIP_NAVI12:
 		psp_v11_0_set_psp_funcs(psp);
 		psp->autoload_supported = true;
+		break;
+	case CHIP_RENOIR:
+		psp_v12_0_set_psp_funcs(psp);
 		break;
 	default:
 		return -EINVAL;
@@ -1019,6 +1023,10 @@ out:
 		     ucode->ucode_id == AMDGPU_UCODE_ID_CP_MEC2_JT))
 			/* skip mec JT when autoload is enabled */
 			continue;
+		/* Renoir only needs to load mec jump table one time */
+		if (adev->asic_type == CHIP_RENOIR &&
+		    ucode->ucode_id == AMDGPU_UCODE_ID_CP_MEC2_JT)
+			continue;
 
 		ret = psp_execute_np_fw_load(psp, ucode);
 		if (ret)
@@ -1354,6 +1362,15 @@ const struct amdgpu_ip_block_version psp_v11_0_ip_block =
 {
 	.type = AMD_IP_BLOCK_TYPE_PSP,
 	.major = 11,
+	.minor = 0,
+	.rev = 0,
+	.funcs = &psp_ip_funcs,
+};
+
+const struct amdgpu_ip_block_version psp_v12_0_ip_block =
+{
+	.type = AMD_IP_BLOCK_TYPE_PSP,
+	.major = 12,
 	.minor = 0,
 	.rev = 0,
 	.funcs = &psp_ip_funcs,

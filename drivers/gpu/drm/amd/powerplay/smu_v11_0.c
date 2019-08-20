@@ -274,6 +274,25 @@ static int smu_v11_0_check_fw_version(struct smu_context *smu)
 	smu_minor = (smu_version >> 8) & 0xff;
 	smu_debug = (smu_version >> 0) & 0xff;
 
+	switch (smu->adev->asic_type) {
+	case CHIP_VEGA20:
+		smu->smc_if_version = SMU11_DRIVER_IF_VERSION_VG20;
+		break;
+	case CHIP_ARCTURUS:
+		smu->smc_if_version = SMU11_DRIVER_IF_VERSION_ARCT;
+		break;
+	case CHIP_NAVI10:
+		smu->smc_if_version = SMU11_DRIVER_IF_VERSION_NV10;
+		break;
+	case CHIP_NAVI14:
+		smu->smc_if_version = SMU11_DRIVER_IF_VERSION_NV14;
+		break;
+	default:
+		pr_err("smu unsupported asic type:%d.\n", smu->adev->asic_type);
+		smu->smc_if_version = SMU11_DRIVER_IF_VERSION_INV;
+		break;
+	}
+
 	/*
 	 * 1. if_version mismatch is not critical as our fw is designed
 	 * to be backward compatible.
@@ -1214,6 +1233,10 @@ static int smu_v11_0_read_sensor(struct smu_context *smu,
 				 void *data, uint32_t *size)
 {
 	int ret = 0;
+
+	if(!data || !size)
+		return -EINVAL;
+
 	switch (sensor) {
 	case AMDGPU_PP_SENSOR_GFX_MCLK:
 		ret = smu_get_current_clk_freq(smu, SMU_UCLK, (uint32_t *)data);
@@ -1236,10 +1259,6 @@ static int smu_v11_0_read_sensor(struct smu_context *smu,
 		break;
 	}
 
-	/* try get sensor data by asic */
-	if (ret)
-		ret = smu_asic_read_sensor(smu, sensor, data, size);
-
 	if (ret)
 		*size = 0;
 
@@ -1255,7 +1274,6 @@ smu_v11_0_display_clock_voltage_request(struct smu_context *smu,
 	int ret = 0;
 	enum smu_clk_type clk_select = 0;
 	uint32_t clk_freq = clock_req->clock_freq_in_khz / 1000;
-	int clk_id;
 
 	if (!smu->pm_enabled)
 		return -EINVAL;
@@ -1290,16 +1308,8 @@ smu_v11_0_display_clock_voltage_request(struct smu_context *smu,
 		if (clk_select == SMU_UCLK && smu->disable_uclk_switch)
 			return 0;
 
-		clk_id = smu_clk_get_index(smu, clk_select);
-		if (clk_id < 0) {
-			ret = -EINVAL;
-			goto failed;
-		}
-
-
 		mutex_lock(&smu->mutex);
-		ret = smu_send_smc_msg_with_param(smu, SMU_MSG_SetHardMinByFreq,
-			(clk_id << 16) | clk_freq);
+		ret = smu_set_hard_freq_range(smu, clk_select, clk_freq, 0);
 		mutex_unlock(&smu->mutex);
 
 		if(clk_select == SMU_UCLK)

@@ -39,7 +39,7 @@
 #include "inc/hw/dmcu.h"
 #include "dml/display_mode_lib.h"
 
-#define DC_VER "3.2.42"
+#define DC_VER "3.2.46"
 
 #define MAX_SURFACES 3
 #define MAX_PLANES 6
@@ -121,7 +121,7 @@ struct dc_caps {
 struct dc_bug_wa {
 	bool no_connect_phy_config;
 	bool dedcn20_305_wa;
-	struct display_mode_lib alternate_dml;
+	bool skip_clock_update;
 };
 #endif
 
@@ -614,8 +614,11 @@ enum dc_transfer_func_predefined {
 	TRANSFER_FUNCTION_UNITY,
 	TRANSFER_FUNCTION_HLG,
 	TRANSFER_FUNCTION_HLG12,
-	TRANSFER_FUNCTION_GAMMA22
+	TRANSFER_FUNCTION_GAMMA22,
+	TRANSFER_FUNCTION_GAMMA24,
+	TRANSFER_FUNCTION_GAMMA26
 };
+
 
 struct dc_transfer_func {
 	struct kref refcount;
@@ -747,6 +750,7 @@ struct dc_plane_state {
 	bool visible;
 	bool flip_immediate;
 	bool horizontal_mirror;
+	int layer_index;
 
 	union surface_update_flags update_flags;
 	/* private to DC core */
@@ -776,6 +780,7 @@ struct dc_plane_info {
 	bool global_alpha;
 	int  global_alpha_value;
 	bool input_csc_enabled;
+	int layer_index;
 };
 
 struct dc_scaling_info {
