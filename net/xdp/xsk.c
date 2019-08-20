@@ -55,6 +55,66 @@ void xsk_umem_discard_addr(struct xdp_umem *umem)
 }
 EXPORT_SYMBOL(xsk_umem_discard_addr);
 
+void xsk_set_rx_need_wakeup(struct xdp_umem *umem)
+{
+	if (umem->need_wakeup & XDP_WAKEUP_RX)
+		return;
+
+	umem->fq->ring->flags |= XDP_RING_NEED_WAKEUP;
+	umem->need_wakeup |= XDP_WAKEUP_RX;
+}
+EXPORT_SYMBOL(xsk_set_rx_need_wakeup);
+
+void xsk_set_tx_need_wakeup(struct xdp_umem *umem)
+{
+	struct xdp_sock *xs;
+
+	if (umem->need_wakeup & XDP_WAKEUP_TX)
+		return;
+
+	rcu_read_lock();
+	list_for_each_entry_rcu(xs, &umem->xsk_list, list) {
+		xs->tx->ring->flags |= XDP_RING_NEED_WAKEUP;
+	}
+	rcu_read_unlock();
+
+	umem->need_wakeup |= XDP_WAKEUP_TX;
+}
+EXPORT_SYMBOL(xsk_set_tx_need_wakeup);
+
+void xsk_clear_rx_need_wakeup(struct xdp_umem *umem)
+{
+	if (!(umem->need_wakeup & XDP_WAKEUP_RX))
+		return;
+
+	umem->fq->ring->flags &= ~XDP_RING_NEED_WAKEUP;
+	umem->need_wakeup &= ~XDP_WAKEUP_RX;
+}
+EXPORT_SYMBOL(xsk_clear_rx_need_wakeup);
+
+void xsk_clear_tx_need_wakeup(struct xdp_umem *umem)
+{
+	struct xdp_sock *xs;
+
+	if (!(umem->need_wakeup & XDP_WAKEUP_TX))
+		return;
+
+	rcu_read_lock();
+	list_for_each_entry_rcu(xs, &umem->xsk_list, list) {
+		xs->tx->ring->flags &= ~XDP_RING_NEED_WAKEUP;
+	}
+	rcu_read_unlock();
+
+	umem->need_wakeup &= ~XDP_WAKEUP_TX;
+}
+EXPORT_SYMBOL(xsk_clear_tx_need_wakeup);
+
+bool xsk_umem_uses_need_wakeup(struct xdp_umem *umem)
+{
+	return umem->flags & XDP_UMEM_USES_NEED_WAKEUP;
+}
+EXPORT_SYMBOL(xsk_umem_uses_need_wakeup);
+
 static int __xsk_rcv(struct xdp_sock *xs, struct xdp_buff *xdp, u32 len)
 {
 	void *to_buf, *from_buf;
@@ -212,7 +272,8 @@ static int xsk_zc_xmit(struct sock *sk)
 	struct xdp_sock *xs = xdp_sk(sk);
 	struct net_device *dev = xs->dev;
 
-	return dev->netdev_ops->ndo_xsk_async_xmit(dev, xs->queue_id);
+	return dev->netdev_ops->ndo_xsk_wakeup(dev, xs->queue_id,
+					       XDP_WAKEUP_TX);
 }
 
 static void xsk_destruct_skb(struct sk_buff *skb)
@@ -319,6 +380,12 @@ static unsigned int xsk_poll(struct file *file, struct socket *sock,
 	unsigned int mask = datagram_poll(file, sock, wait);
 	struct sock *sk = sock->sk;
 	struct xdp_sock *xs = xdp_sk(sk);
+	struct net_device *dev = xs->dev;
+	struct xdp_umem *umem = xs->umem;
+
+	if (umem->need_wakeup)
+		dev->netdev_ops->ndo_xsk_wakeup(dev, xs->queue_id,
+						umem->need_wakeup);
 
 	if (xs->rx && !xskq_empty_desc(xs->rx))
 		mask |= POLLIN | POLLRDNORM;
@@ -362,6 +429,52 @@ static void xsk_unbind_dev(struct xdp_sock *xs)
 	dev_put(dev);
 }
 
+static struct xsk_map *xsk_get_map_list_entry(struct xdp_sock *xs,
+					      struct xdp_sock ***map_entry)
+{
+	struct xsk_map *map = NULL;
+	struct xsk_map_node *node;
+
+	*map_entry = NULL;
+
+	spin_lock_bh(&xs->map_list_lock);
+	node = list_first_entry_or_null(&xs->map_list, struct xsk_map_node,
+					node);
+	if (node) {
+		WARN_ON(xsk_map_inc(node->map));
+		map = node->map;
+		*map_entry = node->map_entry;
+	}
+	spin_unlock_bh(&xs->map_list_lock);
+	return map;
+}
+
+static void xsk_delete_from_maps(struct xdp_sock *xs)
+{
+	/* This function removes the current XDP socket from all the
+	 * maps it resides in. We need to take extra care here, due to
+	 * the two locks involved. Each map has a lock synchronizing
+	 * updates to the entries, and each socket has a lock that
+	 * synchronizes access to the list of maps (map_list). For
+	 * deadlock avoidance the locks need to be taken in the order
+	 * "map lock"->"socket map list lock". We start off by
+	 * accessing the socket map list, and take a reference to the
+	 * map to guarantee existence between the
+	 * xsk_get_map_list_entry() and xsk_map_try_sock_delete()
+	 * calls. Then we ask the map to remove the socket, which
+	 * tries to remove the socket from the map. Note that there
+	 * might be updates to the map between
+	 * xsk_get_map_list_entry() and xsk_map_try_sock_delete().
+	 */
+	struct xdp_sock **map_entry = NULL;
+	struct xsk_map *map;
+
+	while ((map = xsk_get_map_list_entry(xs, &map_entry))) {
+		xsk_map_try_sock_delete(map, xs, map_entry);
+		xsk_map_put(map);
+	}
+}
+
 static int xsk_release(struct socket *sock)
 {
 	struct sock *sk = sock->sk;
@@ -381,6 +494,7 @@ static int xsk_release(struct socket *sock)
 	sock_prot_inuse_add(net, sk->sk_prot, -1);
 	local_bh_enable();
 
+	xsk_delete_from_maps(xs);
 	xsk_unbind_dev(xs);
 
 	xskq_destroy(xs->rx);
@@ -427,7 +541,8 @@ static int xsk_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 		return -EINVAL;
 
 	flags = sxdp->sxdp_flags;
-	if (flags & ~(XDP_SHARED_UMEM | XDP_COPY | XDP_ZEROCOPY))
+	if (flags & ~(XDP_SHARED_UMEM | XDP_COPY | XDP_ZEROCOPY |
+		      XDP_USE_NEED_WAKEUP))
 		return -EINVAL;
 
 	rtnl_lock();
@@ -454,7 +569,8 @@ static int xsk_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 		struct xdp_sock *umem_xs;
 		struct socket *sock;
 
-		if ((flags & XDP_COPY) || (flags & XDP_ZEROCOPY)) {
+		if ((flags & XDP_COPY) || (flags & XDP_ZEROCOPY) ||
+		    (flags & XDP_USE_NEED_WAKEUP)) {
 			/* Cannot specify flags for shared sockets. */
 			err = -EINVAL;
 			goto out_unlock;
@@ -549,6 +665,9 @@ static int xsk_setsockopt(struct socket *sock, int level, int optname,
 		}
 		q = (optname == XDP_TX_RING) ? &xs->tx : &xs->rx;
 		err = xsk_init_queue(entries, q, false);
+		if (!err && optname == XDP_TX_RING)
+			/* Tx needs to be explicitly woken up the first time */
+			xs->tx->ring->flags |= XDP_RING_NEED_WAKEUP;
 		mutex_unlock(&xs->mutex);
 		return err;
 	}
@@ -610,6 +729,20 @@ static int xsk_setsockopt(struct socket *sock, int level, int optname,
 	return -ENOPROTOOPT;
 }
 
+static void xsk_enter_rxtx_offsets(struct xdp_ring_offset_v1 *ring)
+{
+	ring->producer = offsetof(struct xdp_rxtx_ring, ptrs.producer);
+	ring->consumer = offsetof(struct xdp_rxtx_ring, ptrs.consumer);
+	ring->desc = offsetof(struct xdp_rxtx_ring, desc);
+}
+
+static void xsk_enter_umem_offsets(struct xdp_ring_offset_v1 *ring)
+{
+	ring->producer = offsetof(struct xdp_umem_ring, ptrs.producer);
+	ring->consumer = offsetof(struct xdp_umem_ring, ptrs.consumer);
+	ring->desc = offsetof(struct xdp_umem_ring, desc);
+}
+
 static int xsk_getsockopt(struct socket *sock, int level, int optname,
 			  char __user *optval, int __user *optlen)
 {
@@ -649,26 +782,49 @@ static int xsk_getsockopt(struct socket *sock, int level, int optname,
 	case XDP_MMAP_OFFSETS:
 	{
 		struct xdp_mmap_offsets off;
+		struct xdp_mmap_offsets_v1 off_v1;
+		bool flags_supported = true;
+		void *to_copy;
 
-		if (len < sizeof(off))
+		if (len < sizeof(off_v1))
 			return -EINVAL;
+		else if (len < sizeof(off))
+			flags_supported = false;
 
-		off.rx.producer = offsetof(struct xdp_rxtx_ring, ptrs.producer);
-		off.rx.consumer = offsetof(struct xdp_rxtx_ring, ptrs.consumer);
-		off.rx.desc	= offsetof(struct xdp_rxtx_ring, desc);
-		off.tx.producer = offsetof(struct xdp_rxtx_ring, ptrs.producer);
-		off.tx.consumer = offsetof(struct xdp_rxtx_ring, ptrs.consumer);
-		off.tx.desc	= offsetof(struct xdp_rxtx_ring, desc);
+		if (flags_supported) {
+			/* xdp_ring_offset is identical to xdp_ring_offset_v1
+			 * except for the flags field added to the end.
+			 */
+			xsk_enter_rxtx_offsets((struct xdp_ring_offset_v1 *)
+					       &off.rx);
+			xsk_enter_rxtx_offsets((struct xdp_ring_offset_v1 *)
+					       &off.tx);
+			xsk_enter_umem_offsets((struct xdp_ring_offset_v1 *)
+					       &off.fr);
+			xsk_enter_umem_offsets((struct xdp_ring_offset_v1 *)
+					       &off.cr);
+			off.rx.flags = offsetof(struct xdp_rxtx_ring,
+						ptrs.flags);
+			off.tx.flags = offsetof(struct xdp_rxtx_ring,
+						ptrs.flags);
+			off.fr.flags = offsetof(struct xdp_umem_ring,
+						ptrs.flags);
+			off.cr.flags = offsetof(struct xdp_umem_ring,
+						ptrs.flags);
 
-		off.fr.producer = offsetof(struct xdp_umem_ring, ptrs.producer);
-		off.fr.consumer = offsetof(struct xdp_umem_ring, ptrs.consumer);
-		off.fr.desc	= offsetof(struct xdp_umem_ring, desc);
-		off.cr.producer = offsetof(struct xdp_umem_ring, ptrs.producer);
-		off.cr.consumer = offsetof(struct xdp_umem_ring, ptrs.consumer);
-		off.cr.desc	= offsetof(struct xdp_umem_ring, desc);
+			len = sizeof(off);
+			to_copy = &off;
+		} else {
+			xsk_enter_rxtx_offsets(&off_v1.rx);
+			xsk_enter_rxtx_offsets(&off_v1.tx);
+			xsk_enter_umem_offsets(&off_v1.fr);
+			xsk_enter_umem_offsets(&off_v1.cr);
 
-		len = sizeof(off);
-		if (copy_to_user(optval, &off, len))
+			len = sizeof(off_v1);
+			to_copy = &off_v1;
+		}
+
+		if (copy_to_user(optval, to_copy, len))
 			return -EFAULT;
 		if (put_user(len, optlen))
 			return -EFAULT;
@@ -854,6 +1010,9 @@ static int xsk_create(struct net *net, struct socket *sock, int protocol,
 	mutex_init(&xs->mutex);
 	spin_lock_init(&xs->rx_lock);
 	spin_lock_init(&xs->tx_completion_lock);
+
+	INIT_LIST_HEAD(&xs->map_list);
+	spin_lock_init(&xs->map_list_lock);
 
 	mutex_lock(&net->xdp.lock);
 	sk_add_node_rcu(sk, &net->xdp.list);

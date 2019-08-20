@@ -27,6 +27,9 @@ struct xdp_umem_fq_reuse {
 	u64 handles[];
 };
 
+/* Flags for the umem flags field. */
+#define XDP_UMEM_USES_NEED_WAKEUP (1 << 0)
+
 struct xdp_umem {
 	struct xsk_queue *fq;
 	struct xsk_queue *cq;
@@ -41,13 +44,25 @@ struct xdp_umem {
 	struct work_struct work;
 	struct page **pgs;
 	u32 npgs;
+	u16 queue_id;
+	u8 need_wakeup;
+	u8 flags;
 	int id;
 	struct net_device *dev;
 	struct xdp_umem_fq_reuse *fq_reuse;
-	u16 queue_id;
 	bool zc;
 	spinlock_t xsk_list_lock;
 	struct list_head xsk_list;
+};
+
+/* Nodes are linked in the struct xdp_sock map_list field, and used to
+ * track which maps a certain socket reside in.
+ */
+struct xsk_map;
+struct xsk_map_node {
+	struct list_head node;
+	struct xsk_map *map;
+	struct xdp_sock **map_entry;
 };
 
 struct xdp_sock {
@@ -75,6 +90,9 @@ struct xdp_sock {
 	/* Protects generic receive. */
 	spinlock_t rx_lock;
 	u64 rx_dropped;
+	struct list_head map_list;
+	/* Protects map_list */
+	spinlock_t map_list_lock;
 };
 
 struct xdp_buff;
@@ -95,6 +113,16 @@ struct xdp_umem_fq_reuse *xsk_reuseq_swap(struct xdp_umem *umem,
 					  struct xdp_umem_fq_reuse *newq);
 void xsk_reuseq_free(struct xdp_umem_fq_reuse *rq);
 struct xdp_umem *xdp_get_umem_from_qid(struct net_device *dev, u16 queue_id);
+void xsk_set_rx_need_wakeup(struct xdp_umem *umem);
+void xsk_set_tx_need_wakeup(struct xdp_umem *umem);
+void xsk_clear_rx_need_wakeup(struct xdp_umem *umem);
+void xsk_clear_tx_need_wakeup(struct xdp_umem *umem);
+bool xsk_umem_uses_need_wakeup(struct xdp_umem *umem);
+
+void xsk_map_try_sock_delete(struct xsk_map *map, struct xdp_sock *xs,
+			     struct xdp_sock **map_entry);
+int xsk_map_inc(struct xsk_map *map);
+void xsk_map_put(struct xsk_map *map);
 
 static inline char *xdp_umem_get_data(struct xdp_umem *umem, u64 addr)
 {
@@ -239,6 +267,27 @@ static inline void xsk_umem_discard_addr_rq(struct xdp_umem *umem)
 
 static inline void xsk_umem_fq_reuse(struct xdp_umem *umem, u64 addr)
 {
+}
+
+static inline void xsk_set_rx_need_wakeup(struct xdp_umem *umem)
+{
+}
+
+static inline void xsk_set_tx_need_wakeup(struct xdp_umem *umem)
+{
+}
+
+static inline void xsk_clear_rx_need_wakeup(struct xdp_umem *umem)
+{
+}
+
+static inline void xsk_clear_tx_need_wakeup(struct xdp_umem *umem)
+{
+}
+
+static inline bool xsk_umem_uses_need_wakeup(struct xdp_umem *umem)
+{
+	return false;
 }
 
 #endif /* CONFIG_XDP_SOCKETS */
