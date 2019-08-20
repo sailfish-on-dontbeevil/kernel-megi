@@ -1468,6 +1468,7 @@ static void __exit amdgpu_exit(void)
 	amdgpu_unregister_atpx_handler();
 	amdgpu_sync_fini();
 	amdgpu_fence_slab_fini();
+	mmu_notifier_synchronize();
 }
 
 module_init(amdgpu_init);
