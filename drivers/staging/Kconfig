@@ -122,4 +122,7 @@ source "drivers/staging/isdn/Kconfig"
 
 source "drivers/staging/qlge/Kconfig"
 
+source "drivers/staging/wusbcore/Kconfig"
+source "drivers/staging/uwb/Kconfig"
+
 endif # STAGING
