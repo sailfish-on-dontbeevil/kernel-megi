@@ -68,6 +68,9 @@ static char *ziirave_reasons[] = {"power cycle", "hw watchdog", NULL, NULL,
 #define ZIIRAVE_CMD_JUMP_TO_BOOTLOADER		0x0c
 #define ZIIRAVE_CMD_DOWNLOAD_PACKET		0x0e
 
+#define ZIIRAVE_FW_VERSION_FMT	"02.%02u.%02u"
+#define ZIIRAVE_BL_VERSION_FMT	"01.%02u.%02u"
+
 struct ziirave_wdt_rev {
 	unsigned char major;
 	unsigned char minor;
@@ -335,14 +338,18 @@ static int ziirave_firm_upload(struct watchdog_device *wdd,
 
 	ret = ziirave_firm_write_byte(wdd, ZIIRAVE_CMD_JUMP_TO_BOOTLOADER, 1,
 				      false);
-	if (ret)
+	if (ret) {
+		dev_err(&client->dev, "Failed to jump to bootloader\n");
 		return ret;
+	}
 
 	msleep(500);
 
 	ret = ziirave_firm_write_byte(wdd, ZIIRAVE_CMD_DOWNLOAD_START, 1, true);
-	if (ret)
+	if (ret) {
+		dev_err(&client->dev, "Failed to start download\n");
 		return ret;
+	}
 
 	msleep(500);
 
@@ -478,7 +485,7 @@ static ssize_t ziirave_wdt_sysfs_show_firm(struct device *dev,
 	if (ret)
 		return ret;
 
-	ret = sprintf(buf, "02.%02u.%02u", w_priv->firmware_rev.major,
+	ret = sprintf(buf, ZIIRAVE_FW_VERSION_FMT, w_priv->firmware_rev.major,
 		      w_priv->firmware_rev.minor);
 
 	mutex_unlock(&w_priv->sysfs_mutex);
@@ -501,7 +508,7 @@ static ssize_t ziirave_wdt_sysfs_show_boot(struct device *dev,
 	if (ret)
 		return ret;
 
-	ret = sprintf(buf, "01.%02u.%02u", w_priv->bootloader_rev.major,
+	ret = sprintf(buf, ZIIRAVE_BL_VERSION_FMT, w_priv->bootloader_rev.major,
 		      w_priv->bootloader_rev.minor);
 
 	mutex_unlock(&w_priv->sysfs_mutex);
@@ -568,7 +575,8 @@ static ssize_t ziirave_wdt_sysfs_store_firm(struct device *dev,
 		goto unlock_mutex;
 	}
 
-	dev_info(&client->dev, "Firmware updated to version 02.%02u.%02u\n",
+	dev_info(&client->dev,
+		 "Firmware updated to version " ZIIRAVE_FW_VERSION_FMT "\n",
 		 w_priv->firmware_rev.major, w_priv->firmware_rev.minor);
 
 	/* Restore the watchdog timeout */
@@ -658,22 +666,22 @@ static int ziirave_wdt_probe(struct i2c_client *client,
 	 */
 	if (w_priv->wdd.timeout == 0) {
 		val = i2c_smbus_read_byte_data(client, ZIIRAVE_WDT_TIMEOUT);
-		if (val < 0)
+		if (val < 0) {
+			dev_err(&client->dev, "Failed to read timeout\n");
 			return val;
+		}
 
-		if (val < ZIIRAVE_TIMEOUT_MIN)
-			return -ENODEV;
-
-		w_priv->wdd.timeout = val;
-	} else {
-		ret = ziirave_wdt_set_timeout(&w_priv->wdd,
-					      w_priv->wdd.timeout);
-		if (ret)
-			return ret;
-
-		dev_info(&client->dev, "Timeout set to %ds.",
-			 w_priv->wdd.timeout);
+		w_priv->wdd.timeout = clamp(val, ZIIRAVE_TIMEOUT_MIN,
+					    ZIIRAVE_TIMEOUT_MAX);
 	}
+
+	ret = ziirave_wdt_set_timeout(&w_priv->wdd, w_priv->wdd.timeout);
+	if (ret) {
+		dev_err(&client->dev, "Failed to set timeout\n");
+		return ret;
+	}
+
+	dev_info(&client->dev, "Timeout set to %ds\n", w_priv->wdd.timeout);
 
 	watchdog_set_nowayout(&w_priv->wdd, nowayout);
 
@@ -681,34 +689,54 @@ static int ziirave_wdt_probe(struct i2c_client *client,
 
 	/* If in unconfigured state, set to stopped */
 	val = i2c_smbus_read_byte_data(client, ZIIRAVE_WDT_STATE);
-	if (val < 0)
+	if (val < 0) {
+		dev_err(&client->dev, "Failed to read state\n");
 		return val;
+	}
 
 	if (val == ZIIRAVE_STATE_INITIAL)
 		ziirave_wdt_stop(&w_priv->wdd);
 
 	ret = ziirave_wdt_init_duration(client);
-	if (ret)
+	if (ret) {
+		dev_err(&client->dev, "Failed to init duration\n");
 		return ret;
+	}
 
 	ret = ziirave_wdt_revision(client, &w_priv->firmware_rev,
 				   ZIIRAVE_WDT_FIRM_VER_MAJOR);
-	if (ret)
+	if (ret) {
+		dev_err(&client->dev, "Failed to read firmware version\n");
 		return ret;
+	}
+
+	dev_info(&client->dev,
+		 "Firmware version: " ZIIRAVE_FW_VERSION_FMT "\n",
+		 w_priv->firmware_rev.major, w_priv->firmware_rev.minor);
 
 	ret = ziirave_wdt_revision(client, &w_priv->bootloader_rev,
 				   ZIIRAVE_WDT_BOOT_VER_MAJOR);
-	if (ret)
+	if (ret) {
+		dev_err(&client->dev, "Failed to read bootloader version\n");
 		return ret;
+	}
+
+	dev_info(&client->dev,
+		 "Bootloader version: " ZIIRAVE_BL_VERSION_FMT "\n",
+		 w_priv->bootloader_rev.major, w_priv->bootloader_rev.minor);
 
 	w_priv->reset_reason = i2c_smbus_read_byte_data(client,
 						ZIIRAVE_WDT_RESET_REASON);
-	if (w_priv->reset_reason < 0)
+	if (w_priv->reset_reason < 0) {
+		dev_err(&client->dev, "Failed to read reset reason\n");
 		return w_priv->reset_reason;
+	}
 
 	if (w_priv->reset_reason >= ARRAY_SIZE(ziirave_reasons) ||
-	    !ziirave_reasons[w_priv->reset_reason])
+	    !ziirave_reasons[w_priv->reset_reason]) {
+		dev_err(&client->dev, "Invalid reset reason\n");
 		return -ENODEV;
+	}
 
 	ret = watchdog_register_device(&w_priv->wdd);
 
