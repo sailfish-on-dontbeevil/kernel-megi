@@ -10,9 +10,10 @@
 #include <linux/debugfs.h>
 #include <linux/dma-buf.h>
 
-#include <drm/drm_damage_helper.h>
 #include <drm/drm_atomic_uapi.h>
 #include <drm/drm_gem_framebuffer_helper.h>
+#include <drm/drm_damage_helper.h>
+#include <drm/drm_file.h>
 
 #include "msm_drv.h"
 #include "dpu_kms.h"
