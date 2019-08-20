@@ -35,6 +35,7 @@
 
 #include <linux/if_ether.h>
 #include <linux/if_link.h>
+#include <linux/atomic.h>
 #include <net/devlink.h>
 #include <linux/mlx5/device.h>
 #include <linux/mlx5/eswitch.h>
@@ -180,13 +181,14 @@ struct mlx5_esw_offload {
 	struct mlx5_eswitch_rep *vport_reps;
 	struct list_head peer_flows;
 	struct mutex peer_mutex;
+	struct mutex encap_tbl_lock; /* protects encap_tbl */
 	DECLARE_HASHTABLE(encap_tbl, 8);
-	DECLARE_HASHTABLE(mod_hdr_tbl, 8);
+	struct mod_hdr_tbl mod_hdr;
 	DECLARE_HASHTABLE(termtbl_tbl, 8);
 	struct mutex termtbl_mutex; /* protects termtbl hash */
 	const struct mlx5_eswitch_rep_ops *rep_ops[NUM_REP_TYPES];
 	u8 inline_mode;
-	u64 num_flows;
+	atomic64_t num_flows;
 	enum devlink_eswitch_encap_mode encap;
 };
 
@@ -260,6 +262,8 @@ void esw_vport_disable_ingress_acl(struct mlx5_eswitch *esw,
 				   struct mlx5_vport *vport);
 void esw_vport_del_ingress_acl_modify_metadata(struct mlx5_eswitch *esw,
 					       struct mlx5_vport *vport);
+int mlx5_esw_modify_vport_rate(struct mlx5_eswitch *esw, u16 vport_num,
+			       u32 rate_mbps);
 
 /* E-Switch API */
 int mlx5_eswitch_init(struct mlx5_core_dev *dev);

@@ -1585,6 +1585,22 @@ static int esw_vport_qos_config(struct mlx5_eswitch *esw,
 	return 0;
 }
 
+int mlx5_esw_modify_vport_rate(struct mlx5_eswitch *esw, u16 vport_num,
+			       u32 rate_mbps)
+{
+	u32 ctx[MLX5_ST_SZ_DW(scheduling_context)] = {};
+	struct mlx5_vport *vport;
+
+	vport = mlx5_eswitch_get_vport(esw, vport_num);
+	MLX5_SET(scheduling_context, ctx, max_average_bw, rate_mbps);
+
+	return mlx5_modify_scheduling_element_cmd(esw->dev,
+						  SCHEDULING_HIERARCHY_E_SWITCH,
+						  ctx,
+						  vport->qos.esw_tsar_ix,
+						  MODIFY_SCHEDULING_ELEMENT_IN_MODIFY_BITMASK_MAX_AVERAGE_BW);
+}
+
 static void node_guid_gen_from_mac(u64 *node_guid, u8 mac[ETH_ALEN])
 {
 	((u8 *)node_guid)[7] = mac[0];
@@ -1983,8 +1999,11 @@ int mlx5_eswitch_init(struct mlx5_core_dev *dev)
 	if (err)
 		goto abort;
 
+	mutex_init(&esw->offloads.encap_tbl_lock);
 	hash_init(esw->offloads.encap_tbl);
-	hash_init(esw->offloads.mod_hdr_tbl);
+	mutex_init(&esw->offloads.mod_hdr.lock);
+	hash_init(esw->offloads.mod_hdr.hlist);
+	atomic64_set(&esw->offloads.num_flows, 0);
 	mutex_init(&esw->state_lock);
 
 	mlx5_esw_for_all_vports(esw, i, vport) {
@@ -2020,6 +2039,8 @@ void mlx5_eswitch_cleanup(struct mlx5_eswitch *esw)
 	esw->dev->priv.eswitch = NULL;
 	destroy_workqueue(esw->work_queue);
 	esw_offloads_cleanup_reps(esw);
+	mutex_destroy(&esw->offloads.mod_hdr.lock);
+	mutex_destroy(&esw->offloads.encap_tbl_lock);
 	kfree(esw->vports);
 	kfree(esw);
 }
@@ -2137,23 +2158,19 @@ int __mlx5_eswitch_set_vport_vlan(struct mlx5_eswitch *esw,
 	if (vlan > 4095 || qos > 7)
 		return -EINVAL;
 
-	mutex_lock(&esw->state_lock);
-
 	err = modify_esw_vport_cvlan(esw->dev, vport, vlan, qos, set_flags);
 	if (err)
-		goto unlock;
+		return err;
 
 	evport->info.vlan = vlan;
 	evport->info.qos = qos;
 	if (evport->enabled && esw->mode == MLX5_ESWITCH_LEGACY) {
 		err = esw_vport_ingress_config(esw, evport);
 		if (err)
-			goto unlock;
+			return err;
 		err = esw_vport_egress_config(esw, evport);
 	}
 
-unlock:
-	mutex_unlock(&esw->state_lock);
 	return err;
 }
 
@@ -2161,11 +2178,16 @@ int mlx5_eswitch_set_vport_vlan(struct mlx5_eswitch *esw,
 				u16 vport, u16 vlan, u8 qos)
 {
 	u8 set_flags = 0;
+	int err;
 
 	if (vlan || qos)
 		set_flags = SET_VLAN_STRIP | SET_VLAN_INSERT;
 
-	return __mlx5_eswitch_set_vport_vlan(esw, vport, vlan, qos, set_flags);
+	mutex_lock(&esw->state_lock);
+	err = __mlx5_eswitch_set_vport_vlan(esw, vport, vlan, qos, set_flags);
+	mutex_unlock(&esw->state_lock);
+
+	return err;
 }
 
 int mlx5_eswitch_set_vport_spoofchk(struct mlx5_eswitch *esw,

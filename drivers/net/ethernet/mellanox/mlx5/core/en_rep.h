@@ -75,6 +75,8 @@ struct mlx5_rep_uplink_priv {
 
 	struct mlx5_tun_entropy tun_entropy;
 
+	/* protects unready_flows */
+	struct mutex                unready_flows_lock;
 	struct list_head            unready_flows;
 	struct work_struct          reoffload_flows_work;
 };
@@ -86,6 +88,7 @@ struct mlx5e_rep_priv {
 	struct mlx5_flow_handle *vport_rx_rule;
 	struct list_head       vport_sqs_list;
 	struct mlx5_rep_uplink_priv uplink_priv; /* valid for uplink rep */
+	struct rtnl_link_stats64 prev_vf_vport_stats;
 	struct devlink_port dl_port;
 };
 
@@ -161,6 +164,9 @@ struct mlx5e_encap_entry {
 	u8 flags;
 	char *encap_header;
 	int encap_size;
+	refcount_t refcnt;
+	struct completion res_ready;
+	int compl_result;
 };
 
 struct mlx5e_rep_sq {

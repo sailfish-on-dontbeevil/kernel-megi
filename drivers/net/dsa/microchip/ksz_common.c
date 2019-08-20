@@ -18,17 +18,7 @@
 #include <net/dsa.h>
 #include <net/switchdev.h>
 
-#include "ksz_priv.h"
-
-void ksz_port_cleanup(struct ksz_device *dev, int port)
-{
-	/* Common code for port cleanup. */
-	mutex_lock(&dev->dev_mutex);
-	dev->on_ports &= ~(1 << port);
-	dev->live_ports &= ~(1 << port);
-	mutex_unlock(&dev->dev_mutex);
-}
-EXPORT_SYMBOL_GPL(ksz_port_cleanup);
+#include "ksz_common.h"
 
 void ksz_update_port_member(struct ksz_device *dev, int port)
 {
@@ -373,7 +363,8 @@ int ksz_enable_port(struct dsa_switch *ds, int port, struct phy_device *phy)
 
 	/* setup slave port */
 	dev->dev_ops->port_setup(dev, port, false);
-	dev->dev_ops->phy_setup(dev, port, phy);
+	if (dev->dev_ops->phy_setup)
+		dev->dev_ops->phy_setup(dev, port, phy);
 
 	/* port_stp_state_set() will be called after to enable the port so
 	 * there is no need to do anything.
