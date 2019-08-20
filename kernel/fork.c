@@ -118,6 +118,11 @@
 #define MAX_THREADS FUTEX_TID_MASK
 
 /*
+ * For different sizes of struct clone_args
+ */
+#define CLONE3_ARGS_SIZE_V0 64
+
+/*
  * Protected counters by write_lock_irq(&tasklist_lock)
  */
 unsigned long total_forks;	/* Handle normal Linux uptimes. */
@@ -1692,6 +1697,14 @@ static inline void rcu_copy_process(struct task_struct *p)
 #endif /* #ifdef CONFIG_TASKS_RCU */
 }
 
+struct pid *pidfd_pid(const struct file *file)
+{
+	if (file->f_op == &pidfd_fops)
+		return file->private_data;
+
+	return ERR_PTR(-EBADF);
+}
+
 static int pidfd_release(struct inode *inode, struct file *file)
 {
 	struct pid *pid = file->private_data;
@@ -2033,7 +2046,7 @@ static __latent_entropy struct task_struct *copy_process(
 	stackleak_task_init(p);
 
 	if (pid != &init_struct_pid) {
-		pid = alloc_pid(p->nsproxy->pid_ns_for_children);
+		pid = alloc_pid(p->nsproxy->pid_ns_for_children, args->set_tid);
 		if (IS_ERR(pid)) {
 			retval = PTR_ERR(pid);
 			goto bad_fork_cleanup_thread;
@@ -2537,8 +2550,12 @@ noinline static int copy_clone_args_from_user(struct kernel_clone_args *kargs,
 	if (unlikely(size > PAGE_SIZE))
 		return -E2BIG;
 
-	if (unlikely(size < sizeof(struct clone_args)))
+	if (unlikely(size < CLONE3_ARGS_SIZE_V0))
 		return -EINVAL;
+
+	if (size < sizeof(struct clone_args))
+		memset((void *)&args + size, 0,
+				sizeof(struct clone_args) - size);
 
 	if (unlikely(!access_ok(uargs, size)))
 		return -EFAULT;
@@ -2573,6 +2590,7 @@ noinline static int copy_clone_args_from_user(struct kernel_clone_args *kargs,
 		.stack		= args.stack,
 		.stack_size	= args.stack_size,
 		.tls		= args.tls,
+		.set_tid	= args.set_tid,
 	};
 
 	return 0;
