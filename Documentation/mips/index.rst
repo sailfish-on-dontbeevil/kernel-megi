@@ -5,7 +5,15 @@ MIPS-specific Documentation
 ===========================
 
 .. toctree::
-   :maxdepth: 1
+   :maxdepth: 2
    :numbered:
 
+   au1xxx_ide
    ingenic-tcu
+
+.. only::  subproject and html
+
+   Indices
+   =======
+
+   * :ref:`genindex`
