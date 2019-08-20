@@ -326,7 +326,7 @@ void lpfc_sli_bemem_bcopy(void *, void *, uint32_t);
 void lpfc_sli_abort_iocb_ring(struct lpfc_hba *, struct lpfc_sli_ring *);
 void lpfc_sli_abort_fcp_rings(struct lpfc_hba *phba);
 void lpfc_sli_hba_iocb_abort(struct lpfc_hba *);
-void lpfc_sli_flush_fcp_rings(struct lpfc_hba *);
+void lpfc_sli_flush_io_rings(struct lpfc_hba *phba);
 int lpfc_sli_ringpostbuf_put(struct lpfc_hba *, struct lpfc_sli_ring *,
 			     struct lpfc_dmabuf *);
 struct lpfc_dmabuf *lpfc_sli_ringpostbuf_get(struct lpfc_hba *,
@@ -595,6 +595,7 @@ void lpfc_release_io_buf(struct lpfc_hba *phba, struct lpfc_io_buf *ncmd,
 			 struct lpfc_sli4_hdw_queue *qp);
 void lpfc_nvme_cmd_template(void);
 void lpfc_nvmet_cmd_template(void);
+void lpfc_nvme_cancel_iocb(struct lpfc_hba *phba, struct lpfc_iocbq *pwqeIn);
 extern int lpfc_enable_nvmet_cnt;
 extern unsigned long long lpfc_enable_nvmet[];
 extern int lpfc_no_hba_reset_cnt;
