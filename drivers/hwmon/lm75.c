@@ -16,8 +16,8 @@
 #include <linux/of_device.h>
 #include <linux/of.h>
 #include <linux/regmap.h>
+#include <linux/util_macros.h>
 #include "lm75.h"
-
 
 /*
  * This driver handles the LM75 and compatible digital temperature sensors.
@@ -36,6 +36,7 @@ enum lm75_type {		/* keep sorted in alphabetical order */
 	max6626,
 	max31725,
 	mcp980x,
+	pct2075,
 	stds75,
 	stlm75,
 	tcn75,
@@ -50,6 +51,47 @@ enum lm75_type {		/* keep sorted in alphabetical order */
 	tmp75c,
 };
 
+/**
+ * struct lm75_params - lm75 configuration parameters.
+ * @set_mask:		Bits to set in configuration register when configuring
+ *			the chip.
+ * @clr_mask:		Bits to clear in configuration register when configuring
+ *			the chip.
+ * @default_resolution:	Default number of bits to represent the temperature
+ *			value.
+ * @resolution_limits:	Limit register resolution. Optional. Should be set if
+ *			the resolution of limit registers does not match the
+ *			resolution of the temperature register.
+ * @resolutions:	List of resolutions associated with sample times.
+ *			Optional. Should be set if num_sample_times is larger
+ *			than 1, and if the resolution changes with sample times.
+ *			If set, number of entries must match num_sample_times.
+ * @default_sample_time:Sample time to be set by default.
+ * @num_sample_times:	Number of possible sample times to be set. Optional.
+ *			Should be set if the number of sample times is larger
+ *			than one.
+ * @sample_times:	All the possible sample times to be set. Mandatory if
+ *			num_sample_times is larger than 1. If set, number of
+ *			entries must match num_sample_times.
+ * @sample_set_masks:	All the set_masks for the possible sample times.
+ *			Mandatory if num_sample_times is larger than 1.
+ *			If set, number of entries must match num_sample_times.
+ * @sample_clr_mask:	Clear mask used to set the sample time.
+ */
+
+struct lm75_params {
+	u8			set_mask;
+	u8			clr_mask;
+	u8			default_resolution;
+	u8			resolution_limits;
+	const u8		*resolutions;
+	unsigned int		default_sample_time;
+	u8			num_sample_times;
+	const unsigned int	*sample_times;
+	const u8		*sample_set_masks;
+	u8			sample_clr_mask;
+};
+
 /* Addresses scanned */
 static const unsigned short normal_i2c[] = { 0x48, 0x49, 0x4a, 0x4b, 0x4c,
 					0x4d, 0x4e, 0x4f, I2C_CLIENT_END };
@@ -62,19 +104,183 @@ static const unsigned short normal_i2c[] = { 0x48, 0x49, 0x4a, 0x4b, 0x4c,
 
 /* Each client has this additional data */
 struct lm75_data {
-	struct i2c_client	*client;
-	struct regmap		*regmap;
-	u8			orig_conf;
-	u8			resolution;	/* In bits, between 9 and 16 */
-	u8			resolution_limits;
-	unsigned int		sample_time;	/* In ms */
+	struct i2c_client		*client;
+	struct regmap			*regmap;
+	u8				orig_conf;
+	u8				current_conf;
+	u8				resolution;	/* In bits, 9 to 16 */
+	unsigned int			sample_time;	/* In ms */
+	enum lm75_type			kind;
+	const struct lm75_params	*params;
 };
 
 /*-----------------------------------------------------------------------*/
+/* The structure below stores the configuration values of the supported devices.
+ * In case of being supported multiple configurations, the default one must
+ * always be the first element of the array
+ */
+static const struct lm75_params device_params[] = {
+	[adt75] = {
+		.clr_mask = 1 << 5,	/* not one-shot mode */
+		.default_resolution = 12,
+		.default_sample_time = MSEC_PER_SEC / 8,
+	},
+	[ds1775] = {
+		.clr_mask = 3 << 5,
+		.set_mask = 2 << 5,	/* 11-bit mode */
+		.default_resolution = 11,
+		.default_sample_time = MSEC_PER_SEC,
+	},
+	[ds75] = {
+		.clr_mask = 3 << 5,
+		.set_mask = 2 << 5,	/* 11-bit mode */
+		.default_resolution = 11,
+		.default_sample_time = MSEC_PER_SEC,
+	},
+	[stds75] = {
+		.clr_mask = 3 << 5,
+		.set_mask = 2 << 5,	/* 11-bit mode */
+		.default_resolution = 11,
+		.default_sample_time = MSEC_PER_SEC,
+	},
+	[stlm75] = {
+		.default_resolution = 9,
+		.default_sample_time = MSEC_PER_SEC / 5,
+	},
+	[ds7505] = {
+		.set_mask = 3 << 5,	/* 12-bit mode*/
+		.default_resolution = 12,
+		.default_sample_time = MSEC_PER_SEC / 4,
+	},
+	[g751] = {
+		.default_resolution = 9,
+		.default_sample_time = MSEC_PER_SEC / 2,
+	},
+	[lm75] = {
+		.default_resolution = 9,
+		.default_sample_time = MSEC_PER_SEC / 2,
+	},
+	[lm75a] = {
+		.default_resolution = 9,
+		.default_sample_time = MSEC_PER_SEC / 2,
+	},
+	[lm75b] = {
+		.default_resolution = 11,
+		.default_sample_time = MSEC_PER_SEC / 4,
+	},
+	[max6625] = {
+		.default_resolution = 9,
+		.default_sample_time = MSEC_PER_SEC / 4,
+	},
+	[max6626] = {
+		.default_resolution = 12,
+		.default_sample_time = MSEC_PER_SEC / 4,
+		.resolution_limits = 9,
+	},
+	[max31725] = {
+		.default_resolution = 16,
+		.default_sample_time = MSEC_PER_SEC / 8,
+	},
+	[tcn75] = {
+		.default_resolution = 9,
+		.default_sample_time = MSEC_PER_SEC / 8,
+	},
+	[pct2075] = {
+		.default_resolution = 11,
+		.default_sample_time = MSEC_PER_SEC / 10,
+	},
+	[mcp980x] = {
+		.set_mask = 3 << 5,	/* 12-bit mode */
+		.clr_mask = 1 << 7,	/* not one-shot mode */
+		.default_resolution = 12,
+		.resolution_limits = 9,
+		.default_sample_time = MSEC_PER_SEC,
+	},
+	[tmp100] = {
+		.set_mask = 3 << 5,	/* 12-bit mode */
+		.clr_mask = 1 << 7,	/* not one-shot mode */
+		.default_resolution = 12,
+		.default_sample_time = MSEC_PER_SEC,
+	},
+	[tmp101] = {
+		.set_mask = 3 << 5,	/* 12-bit mode */
+		.clr_mask = 1 << 7,	/* not one-shot mode */
+		.default_resolution = 12,
+		.default_sample_time = MSEC_PER_SEC,
+	},
+	[tmp112] = {
+		.set_mask = 3 << 5,	/* 12-bit mode */
+		.clr_mask = 1 << 7,	/* no one-shot mode*/
+		.default_resolution = 12,
+		.default_sample_time = MSEC_PER_SEC / 4,
+	},
+	[tmp105] = {
+		.set_mask = 3 << 5,	/* 12-bit mode */
+		.clr_mask = 1 << 7,	/* not one-shot mode*/
+		.default_resolution = 12,
+		.default_sample_time = MSEC_PER_SEC / 2,
+	},
+	[tmp175] = {
+		.set_mask = 3 << 5,	/* 12-bit mode */
+		.clr_mask = 1 << 7,	/* not one-shot mode*/
+		.default_resolution = 12,
+		.default_sample_time = MSEC_PER_SEC / 2,
+	},
+	[tmp275] = {
+		.set_mask = 3 << 5,	/* 12-bit mode */
+		.clr_mask = 1 << 7,	/* not one-shot mode*/
+		.default_resolution = 12,
+		.default_sample_time = MSEC_PER_SEC / 2,
+	},
+	[tmp75] = {
+		.set_mask = 3 << 5,	/* 12-bit mode */
+		.clr_mask = 1 << 7,	/* not one-shot mode*/
+		.default_resolution = 12,
+		.default_sample_time = MSEC_PER_SEC / 2,
+	},
+	[tmp75b] = { /* not one-shot mode, Conversion rate 37Hz */
+		.clr_mask = 1 << 7 | 3 << 5,
+		.default_resolution = 12,
+		.sample_set_masks = (u8 []){ 0 << 5, 1 << 5, 2 << 5,
+			3 << 5 },
+		.sample_clr_mask = 3 << 5,
+		.default_sample_time = MSEC_PER_SEC / 37,
+		.sample_times = (unsigned int []){ MSEC_PER_SEC / 37,
+			MSEC_PER_SEC / 18,
+			MSEC_PER_SEC / 9, MSEC_PER_SEC / 4 },
+		.num_sample_times = 4,
+	},
+	[tmp75c] = {
+		.clr_mask = 1 << 5,	/*not one-shot mode*/
+		.default_resolution = 12,
+		.default_sample_time = MSEC_PER_SEC / 4,
+	}
+};
 
 static inline long lm75_reg_to_mc(s16 temp, u8 resolution)
 {
 	return ((temp >> (16 - resolution)) * 1000) >> (resolution - 8);
+}
+
+static int lm75_write_config(struct lm75_data *data, u8 set_mask,
+			     u8 clr_mask)
+{
+	u8 value;
+
+	clr_mask |= LM75_SHUTDOWN;
+	value = data->current_conf & ~clr_mask;
+	value |= set_mask;
+
+	if (data->current_conf != value) {
+		s32 err;
+
+		err = i2c_smbus_write_byte_data(data->client, LM75_REG_CONF,
+						value);
+		if (err)
+			return err;
+		data->current_conf = value;
+	}
+	return 0;
 }
 
 static int lm75_read(struct device *dev, enum hwmon_sensor_types type,
@@ -120,15 +326,11 @@ static int lm75_read(struct device *dev, enum hwmon_sensor_types type,
 	return 0;
 }
 
-static int lm75_write(struct device *dev, enum hwmon_sensor_types type,
-		      u32 attr, int channel, long temp)
+static int lm75_write_temp(struct device *dev, u32 attr, long temp)
 {
 	struct lm75_data *data = dev_get_drvdata(dev);
 	u8 resolution;
 	int reg;
-
-	if (type != hwmon_temp)
-		return -EINVAL;
 
 	switch (attr) {
 	case hwmon_temp_max:
@@ -145,8 +347,8 @@ static int lm75_write(struct device *dev, enum hwmon_sensor_types type,
 	 * Resolution of limit registers is assumed to be the same as the
 	 * temperature input register resolution unless given explicitly.
 	 */
-	if (data->resolution_limits)
-		resolution = data->resolution_limits;
+	if (data->params->resolution_limits)
+		resolution = data->params->resolution_limits;
 	else
 		resolution = data->resolution;
 
@@ -157,13 +359,58 @@ static int lm75_write(struct device *dev, enum hwmon_sensor_types type,
 	return regmap_write(data->regmap, reg, (u16)temp);
 }
 
+static int lm75_write_chip(struct device *dev, u32 attr, long val)
+{
+	struct lm75_data *data = dev_get_drvdata(dev);
+	u8 index;
+	s32 err;
+
+	switch (attr) {
+	case hwmon_chip_update_interval:
+		index = find_closest(val, data->params->sample_times,
+				     (int)data->params->num_sample_times);
+
+		err = lm75_write_config(data,
+					data->params->sample_set_masks[index],
+					data->params->sample_clr_mask);
+		if (err)
+			return err;
+		data->sample_time = data->params->sample_times[index];
+
+		if (data->params->resolutions)
+			data->resolution = data->params->resolutions[index];
+		break;
+	default:
+		return -EINVAL;
+	}
+	return 0;
+}
+
+static int lm75_write(struct device *dev, enum hwmon_sensor_types type,
+		      u32 attr, int channel, long val)
+{
+	switch (type) {
+	case hwmon_chip:
+		return lm75_write_chip(dev, attr, val);
+	case hwmon_temp:
+		return lm75_write_temp(dev, attr, val);
+	default:
+		return -EINVAL;
+	}
+	return 0;
+}
+
 static umode_t lm75_is_visible(const void *data, enum hwmon_sensor_types type,
 			       u32 attr, int channel)
 {
+	const struct lm75_data *config_data = data;
+
 	switch (type) {
 	case hwmon_chip:
 		switch (attr) {
 		case hwmon_chip_update_interval:
+			if (config_data->params->num_sample_times > 1)
+				return 0644;
 			return 0444;
 		}
 		break;
@@ -238,8 +485,6 @@ lm75_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	struct device *hwmon_dev;
 	struct lm75_data *data;
 	int status, err;
-	u8 set_mask, clr_mask;
-	int new;
 	enum lm75_type kind;
 
 	if (client->dev.of_node)
@@ -256,6 +501,7 @@ lm75_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		return -ENOMEM;
 
 	data->client = client;
+	data->kind = kind;
 
 	data->regmap = devm_regmap_init_i2c(client, &lm75_regmap_config);
 	if (IS_ERR(data->regmap))
@@ -264,113 +510,30 @@ lm75_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	/* Set to LM75 resolution (9 bits, 1/2 degree C) and range.
 	 * Then tweak to be more precise when appropriate.
 	 */
-	set_mask = 0;
-	clr_mask = LM75_SHUTDOWN;		/* continuous conversions */
 
-	switch (kind) {
-	case adt75:
-		clr_mask |= 1 << 5;		/* not one-shot mode */
-		data->resolution = 12;
-		data->sample_time = MSEC_PER_SEC / 8;
-		break;
-	case ds1775:
-	case ds75:
-	case stds75:
-		clr_mask |= 3 << 5;
-		set_mask |= 2 << 5;		/* 11-bit mode */
-		data->resolution = 11;
-		data->sample_time = MSEC_PER_SEC;
-		break;
-	case stlm75:
-		data->resolution = 9;
-		data->sample_time = MSEC_PER_SEC / 5;
-		break;
-	case ds7505:
-		set_mask |= 3 << 5;		/* 12-bit mode */
-		data->resolution = 12;
-		data->sample_time = MSEC_PER_SEC / 4;
-		break;
-	case g751:
-	case lm75:
-	case lm75a:
-		data->resolution = 9;
-		data->sample_time = MSEC_PER_SEC / 2;
-		break;
-	case lm75b:
-		data->resolution = 11;
-		data->sample_time = MSEC_PER_SEC / 4;
-		break;
-	case max6625:
-		data->resolution = 9;
-		data->sample_time = MSEC_PER_SEC / 4;
-		break;
-	case max6626:
-		data->resolution = 12;
-		data->resolution_limits = 9;
-		data->sample_time = MSEC_PER_SEC / 4;
-		break;
-	case max31725:
-		data->resolution = 16;
-		data->sample_time = MSEC_PER_SEC / 8;
-		break;
-	case tcn75:
-		data->resolution = 9;
-		data->sample_time = MSEC_PER_SEC / 8;
-		break;
-	case mcp980x:
-		data->resolution_limits = 9;
-		/* fall through */
-	case tmp100:
-	case tmp101:
-		set_mask |= 3 << 5;		/* 12-bit mode */
-		data->resolution = 12;
-		data->sample_time = MSEC_PER_SEC;
-		clr_mask |= 1 << 7;		/* not one-shot mode */
-		break;
-	case tmp112:
-		set_mask |= 3 << 5;		/* 12-bit mode */
-		clr_mask |= 1 << 7;		/* not one-shot mode */
-		data->resolution = 12;
-		data->sample_time = MSEC_PER_SEC / 4;
-		break;
-	case tmp105:
-	case tmp175:
-	case tmp275:
-	case tmp75:
-		set_mask |= 3 << 5;		/* 12-bit mode */
-		clr_mask |= 1 << 7;		/* not one-shot mode */
-		data->resolution = 12;
-		data->sample_time = MSEC_PER_SEC / 2;
-		break;
-	case tmp75b:  /* not one-shot mode, Conversion rate 37Hz */
-		clr_mask |= 1 << 7 | 0x3 << 5;
-		data->resolution = 12;
-		data->sample_time = MSEC_PER_SEC / 37;
-		break;
-	case tmp75c:
-		clr_mask |= 1 << 5;		/* not one-shot mode */
-		data->resolution = 12;
-		data->sample_time = MSEC_PER_SEC / 4;
-		break;
-	}
+	data->params = &device_params[data->kind];
 
-	/* configure as specified */
+	/* Save default sample time and resolution*/
+	data->sample_time = data->params->default_sample_time;
+	data->resolution = data->params->default_resolution;
+
+	/* Cache original configuration */
 	status = i2c_smbus_read_byte_data(client, LM75_REG_CONF);
 	if (status < 0) {
 		dev_dbg(dev, "Can't read config? %d\n", status);
 		return status;
 	}
 	data->orig_conf = status;
-	new = status & ~clr_mask;
-	new |= set_mask;
-	if (status != new)
-		i2c_smbus_write_byte_data(client, LM75_REG_CONF, new);
+	data->current_conf = status;
+
+	err = lm75_write_config(data, data->params->set_mask,
+				data->params->clr_mask);
+	if (err)
+		return err;
 
 	err = devm_add_action_or_reset(dev, lm75_remove, data);
 	if (err)
 		return err;
-
-	dev_dbg(dev, "Config %02x\n", new);
 
 	hwmon_dev = devm_hwmon_device_register_with_info(dev, client->name,
 							 data, &lm75_chip_info,
@@ -397,6 +560,7 @@ static const struct i2c_device_id lm75_ids[] = {
 	{ "max31725", max31725, },
 	{ "max31726", max31725, },
 	{ "mcp980x", mcp980x, },
+	{ "pct2075", pct2075, },
 	{ "stds75", stds75, },
 	{ "stlm75", stlm75, },
 	{ "tcn75", tcn75, },
@@ -465,6 +629,10 @@ static const struct of_device_id __maybe_unused lm75_of_match[] = {
 	{
 		.compatible = "maxim,mcp980x",
 		.data = (void *)mcp980x
+	},
+	{
+		.compatible = "nxp,pct2075",
+		.data = (void *)pct2075
 	},
 	{
 		.compatible = "st,stds75",
