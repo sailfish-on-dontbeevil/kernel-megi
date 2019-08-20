@@ -11,7 +11,6 @@
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
 #include <linux/gpio.h>
-#include <linux/of_gpio.h>
 #include <linux/idr.h>
 #include <linux/slab.h>
 #include <linux/acpi.h>
@@ -30,6 +29,8 @@
 #include <uapi/linux/gpio.h>
 
 #include "gpiolib.h"
+#include "gpiolib-of.h"
+#include "gpiolib-acpi.h"
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/gpio.h>
@@ -350,7 +351,7 @@ static unsigned long *gpiochip_allocate_mask(struct gpio_chip *chip)
 {
 	unsigned long *p;
 
-	p = kmalloc_array(BITS_TO_LONGS(chip->ngpio), sizeof(*p), GFP_KERNEL);
+	p = bitmap_alloc(chip->ngpio, GFP_KERNEL);
 	if (!p)
 		return NULL;
 
@@ -360,22 +361,15 @@ static unsigned long *gpiochip_allocate_mask(struct gpio_chip *chip)
 	return p;
 }
 
-static int gpiochip_alloc_valid_mask(struct gpio_chip *gpiochip)
+static int gpiochip_alloc_valid_mask(struct gpio_chip *gc)
 {
-#ifdef CONFIG_OF_GPIO
-	int size;
-	struct device_node *np = gpiochip->of_node;
-
-	size = of_property_count_u32_elems(np,  "gpio-reserved-ranges");
-	if (size > 0 && size % 2 == 0)
-		gpiochip->need_valid_mask = true;
-#endif
-
-	if (!gpiochip->need_valid_mask)
+	if (of_gpio_need_valid_mask(gc))
+		gc->need_valid_mask = true;
+	if (!gc->need_valid_mask)
 		return 0;
 
-	gpiochip->valid_mask = gpiochip_allocate_mask(gpiochip);
-	if (!gpiochip->valid_mask)
+	gc->valid_mask = gpiochip_allocate_mask(gc);
+	if (!gc->valid_mask)
 		return -ENOMEM;
 
 	return 0;
@@ -391,7 +385,7 @@ static int gpiochip_init_valid_mask(struct gpio_chip *gpiochip)
 
 static void gpiochip_free_valid_mask(struct gpio_chip *gpiochip)
 {
-	kfree(gpiochip->valid_mask);
+	bitmap_free(gpiochip->valid_mask);
 	gpiochip->valid_mask = NULL;
 }
 
@@ -1091,9 +1085,11 @@ static long gpio_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		if (test_bit(FLAG_ACTIVE_LOW, &desc->flags))
 			lineinfo.flags |= GPIOLINE_FLAG_ACTIVE_LOW;
 		if (test_bit(FLAG_OPEN_DRAIN, &desc->flags))
-			lineinfo.flags |= GPIOLINE_FLAG_OPEN_DRAIN;
+			lineinfo.flags |= (GPIOLINE_FLAG_OPEN_DRAIN |
+					   GPIOLINE_FLAG_IS_OUT);
 		if (test_bit(FLAG_OPEN_SOURCE, &desc->flags))
-			lineinfo.flags |= GPIOLINE_FLAG_OPEN_SOURCE;
+			lineinfo.flags |= (GPIOLINE_FLAG_OPEN_SOURCE |
+					   GPIOLINE_FLAG_IS_OUT);
 
 		if (copy_to_user(ip, &lineinfo, sizeof(lineinfo)))
 			return -EFAULT;
@@ -1633,7 +1629,7 @@ static int gpiochip_irqchip_init_valid_mask(struct gpio_chip *gpiochip)
 
 static void gpiochip_irqchip_free_valid_mask(struct gpio_chip *gpiochip)
 {
-	kfree(gpiochip->irq.valid_mask);
+	bitmap_free(gpiochip->irq.valid_mask);
 	gpiochip->irq.valid_mask = NULL;
 }
 
@@ -1733,6 +1729,273 @@ void gpiochip_set_nested_irqchip(struct gpio_chip *gpiochip,
 }
 EXPORT_SYMBOL_GPL(gpiochip_set_nested_irqchip);
 
+#ifdef CONFIG_IRQ_DOMAIN_HIERARCHY
+
+/**
+ * gpiochip_set_hierarchical_irqchip() - connects a hierarchical irqchip
+ * to a gpiochip
+ * @gc: the gpiochip to set the irqchip hierarchical handler to
+ * @irqchip: the irqchip to handle this level of the hierarchy, the interrupt
+ * will then percolate up to the parent
+ */
+static void gpiochip_set_hierarchical_irqchip(struct gpio_chip *gc,
+					      struct irq_chip *irqchip)
+{
+	/* DT will deal with mapping each IRQ as we go along */
+	if (is_of_node(gc->irq.fwnode))
+		return;
+
+	/*
+	 * This is for legacy and boardfile "irqchip" fwnodes: allocate
+	 * irqs upfront instead of dynamically since we don't have the
+	 * dynamic type of allocation that hardware description languages
+	 * provide. Once all GPIO drivers using board files are gone from
+	 * the kernel we can delete this code, but for a transitional period
+	 * it is necessary to keep this around.
+	 */
+	if (is_fwnode_irqchip(gc->irq.fwnode)) {
+		int i;
+		int ret;
+
+		for (i = 0; i < gc->ngpio; i++) {
+			struct irq_fwspec fwspec;
+			unsigned int parent_hwirq;
+			unsigned int parent_type;
+			struct gpio_irq_chip *girq = &gc->irq;
+
+			/*
+			 * We call the child to parent translation function
+			 * only to check if the child IRQ is valid or not.
+			 * Just pick the rising edge type here as that is what
+			 * we likely need to support.
+			 */
+			ret = girq->child_to_parent_hwirq(gc, i,
+							  IRQ_TYPE_EDGE_RISING,
+							  &parent_hwirq,
+							  &parent_type);
+			if (ret) {
+				chip_err(gc, "skip set-up on hwirq %d\n",
+					 i);
+				continue;
+			}
+
+			fwspec.fwnode = gc->irq.fwnode;
+			/* This is the hwirq for the GPIO line side of things */
+			fwspec.param[0] = girq->child_offset_to_irq(gc, i);
+			/* Just pick something */
+			fwspec.param[1] = IRQ_TYPE_EDGE_RISING;
+			fwspec.param_count = 2;
+			ret = __irq_domain_alloc_irqs(gc->irq.domain,
+						      /* just pick something */
+						      -1,
+						      1,
+						      NUMA_NO_NODE,
+						      &fwspec,
+						      false,
+						      NULL);
+			if (ret < 0) {
+				chip_err(gc,
+					 "can not allocate irq for GPIO line %d parent hwirq %d in hierarchy domain: %d\n",
+					 i, parent_hwirq,
+					 ret);
+			}
+		}
+	}
+
+	chip_err(gc, "%s unknown fwnode type proceed anyway\n", __func__);
+
+	return;
+}
+
+static int gpiochip_hierarchy_irq_domain_translate(struct irq_domain *d,
+						   struct irq_fwspec *fwspec,
+						   unsigned long *hwirq,
+						   unsigned int *type)
+{
+	/* We support standard DT translation */
+	if (is_of_node(fwspec->fwnode) && fwspec->param_count == 2) {
+		return irq_domain_translate_twocell(d, fwspec, hwirq, type);
+	}
+
+	/* This is for board files and others not using DT */
+	if (is_fwnode_irqchip(fwspec->fwnode)) {
+		int ret;
+
+		ret = irq_domain_translate_twocell(d, fwspec, hwirq, type);
+		if (ret)
+			return ret;
+		WARN_ON(*type == IRQ_TYPE_NONE);
+		return 0;
+	}
+	return -EINVAL;
+}
+
+static int gpiochip_hierarchy_irq_domain_alloc(struct irq_domain *d,
+					       unsigned int irq,
+					       unsigned int nr_irqs,
+					       void *data)
+{
+	struct gpio_chip *gc = d->host_data;
+	irq_hw_number_t hwirq;
+	unsigned int type = IRQ_TYPE_NONE;
+	struct irq_fwspec *fwspec = data;
+	struct irq_fwspec parent_fwspec;
+	unsigned int parent_hwirq;
+	unsigned int parent_type;
+	struct gpio_irq_chip *girq = &gc->irq;
+	int ret;
+
+	/*
+	 * The nr_irqs parameter is always one except for PCI multi-MSI
+	 * so this should not happen.
+	 */
+	WARN_ON(nr_irqs != 1);
+
+	ret = gc->irq.child_irq_domain_ops.translate(d, fwspec, &hwirq, &type);
+	if (ret)
+		return ret;
+
+	chip_info(gc, "allocate IRQ %d, hwirq %lu\n", irq,  hwirq);
+
+	ret = girq->child_to_parent_hwirq(gc, hwirq, type,
+					  &parent_hwirq, &parent_type);
+	if (ret) {
+		chip_err(gc, "can't look up hwirq %lu\n", hwirq);
+		return ret;
+	}
+	chip_info(gc, "found parent hwirq %u\n", parent_hwirq);
+
+	/*
+	 * We set handle_bad_irq because the .set_type() should
+	 * always be invoked and set the right type of handler.
+	 */
+	irq_domain_set_info(d,
+			    irq,
+			    hwirq,
+			    gc->irq.chip,
+			    gc,
+			    girq->handler,
+			    NULL, NULL);
+	irq_set_probe(irq);
+
+	/*
+	 * Create a IRQ fwspec to send up to the parent irqdomain:
+	 * specify the hwirq we address on the parent and tie it
+	 * all together up the chain.
+	 */
+	parent_fwspec.fwnode = d->parent->fwnode;
+	/* This parent only handles asserted level IRQs */
+	girq->populate_parent_fwspec(gc, &parent_fwspec, parent_hwirq,
+				     parent_type);
+	chip_info(gc, "alloc_irqs_parent for %d parent hwirq %d\n",
+		  irq, parent_hwirq);
+	ret = irq_domain_alloc_irqs_parent(d, irq, 1, &parent_fwspec);
+	if (ret)
+		chip_err(gc,
+			 "failed to allocate parent hwirq %d for hwirq %lu\n",
+			 parent_hwirq, hwirq);
+
+	return ret;
+}
+
+static unsigned int gpiochip_child_offset_to_irq_noop(struct gpio_chip *chip,
+						      unsigned int offset)
+{
+	return offset;
+}
+
+static void gpiochip_hierarchy_setup_domain_ops(struct irq_domain_ops *ops)
+{
+	ops->activate = gpiochip_irq_domain_activate;
+	ops->deactivate = gpiochip_irq_domain_deactivate;
+	ops->alloc = gpiochip_hierarchy_irq_domain_alloc;
+	ops->free = irq_domain_free_irqs_common;
+
+	/*
+	 * We only allow overriding the translate() function for
+	 * hierarchical chips, and this should only be done if the user
+	 * really need something other than 1:1 translation.
+	 */
+	if (!ops->translate)
+		ops->translate = gpiochip_hierarchy_irq_domain_translate;
+}
+
+static int gpiochip_hierarchy_add_domain(struct gpio_chip *gc)
+{
+	if (!gc->irq.child_to_parent_hwirq ||
+	    !gc->irq.fwnode) {
+		chip_err(gc, "missing irqdomain vital data\n");
+		return -EINVAL;
+	}
+
+	if (!gc->irq.child_offset_to_irq)
+		gc->irq.child_offset_to_irq = gpiochip_child_offset_to_irq_noop;
+
+	if (!gc->irq.populate_parent_fwspec)
+		gc->irq.populate_parent_fwspec =
+			gpiochip_populate_parent_fwspec_twocell;
+
+	gpiochip_hierarchy_setup_domain_ops(&gc->irq.child_irq_domain_ops);
+
+	gc->irq.domain = irq_domain_create_hierarchy(
+		gc->irq.parent_domain,
+		0,
+		gc->ngpio,
+		gc->irq.fwnode,
+		&gc->irq.child_irq_domain_ops,
+		gc);
+
+	if (!gc->irq.domain)
+		return -ENOMEM;
+
+	gpiochip_set_hierarchical_irqchip(gc, gc->irq.chip);
+
+	return 0;
+}
+
+static bool gpiochip_hierarchy_is_hierarchical(struct gpio_chip *gc)
+{
+	return !!gc->irq.parent_domain;
+}
+
+void gpiochip_populate_parent_fwspec_twocell(struct gpio_chip *chip,
+					     struct irq_fwspec *fwspec,
+					     unsigned int parent_hwirq,
+					     unsigned int parent_type)
+{
+	fwspec->param_count = 2;
+	fwspec->param[0] = parent_hwirq;
+	fwspec->param[1] = parent_type;
+}
+EXPORT_SYMBOL_GPL(gpiochip_populate_parent_fwspec_twocell);
+
+void gpiochip_populate_parent_fwspec_fourcell(struct gpio_chip *chip,
+					      struct irq_fwspec *fwspec,
+					      unsigned int parent_hwirq,
+					      unsigned int parent_type)
+{
+	fwspec->param_count = 4;
+	fwspec->param[0] = 0;
+	fwspec->param[1] = parent_hwirq;
+	fwspec->param[2] = 0;
+	fwspec->param[3] = parent_type;
+}
+EXPORT_SYMBOL_GPL(gpiochip_populate_parent_fwspec_fourcell);
+
+#else
+
+static int gpiochip_hierarchy_add_domain(struct gpio_chip *gc)
+{
+	return -EINVAL;
+}
+
+static bool gpiochip_hierarchy_is_hierarchical(struct gpio_chip *gc)
+{
+	return false;
+}
+
+#endif /* CONFIG_IRQ_DOMAIN_HIERARCHY */
+
 /**
  * gpiochip_irq_map() - maps an IRQ into a GPIO irqchip
  * @d: the irqdomain used by this irqchip
@@ -1801,6 +2064,11 @@ static const struct irq_domain_ops gpiochip_domain_ops = {
 	.xlate	= irq_domain_xlate_twocell,
 };
 
+/*
+ * TODO: move these activate/deactivate in under the hierarchicial
+ * irqchip implementation as static once SPMI and SSBI (all external
+ * users) are phased over.
+ */
 /**
  * gpiochip_irq_domain_activate() - Lock a GPIO to be used as an IRQ
  * @domain: The IRQ domain used by this IRQ chip
@@ -1840,10 +2108,25 @@ EXPORT_SYMBOL_GPL(gpiochip_irq_domain_deactivate);
 
 static int gpiochip_to_irq(struct gpio_chip *chip, unsigned offset)
 {
+	struct irq_domain *domain = chip->irq.domain;
+
 	if (!gpiochip_irqchip_irq_valid(chip, offset))
 		return -ENXIO;
 
-	return irq_create_mapping(chip->irq.domain, offset);
+#ifdef CONFIG_IRQ_DOMAIN_HIERARCHY
+	if (irq_domain_is_hierarchy(domain)) {
+		struct irq_fwspec spec;
+
+		spec.fwnode = domain->fwnode;
+		spec.param_count = 2;
+		spec.param[0] = chip->irq.child_offset_to_irq(chip, offset);
+		spec.param[1] = IRQ_TYPE_NONE;
+
+		return irq_create_fwspec_mapping(&spec);
+	}
+#endif
+
+	return irq_create_mapping(domain, offset);
 }
 
 static int gpiochip_irq_reqres(struct irq_data *d)
@@ -1920,7 +2203,7 @@ static int gpiochip_add_irqchip(struct gpio_chip *gpiochip,
 				struct lock_class_key *request_key)
 {
 	struct irq_chip *irqchip = gpiochip->irq.chip;
-	const struct irq_domain_ops *ops;
+	const struct irq_domain_ops *ops = NULL;
 	struct device_node *np;
 	unsigned int type;
 	unsigned int i;
@@ -1956,16 +2239,25 @@ static int gpiochip_add_irqchip(struct gpio_chip *gpiochip,
 	gpiochip->irq.lock_key = lock_key;
 	gpiochip->irq.request_key = request_key;
 
-	if (gpiochip->irq.domain_ops)
-		ops = gpiochip->irq.domain_ops;
-	else
-		ops = &gpiochip_domain_ops;
+	/* If a parent irqdomain is provided, let's build a hierarchy */
+	if (gpiochip_hierarchy_is_hierarchical(gpiochip)) {
+		int ret = gpiochip_hierarchy_add_domain(gpiochip);
+		if (ret)
+			return ret;
+	} else {
+		/* Some drivers provide custom irqdomain ops */
+		if (gpiochip->irq.domain_ops)
+			ops = gpiochip->irq.domain_ops;
 
-	gpiochip->irq.domain = irq_domain_add_simple(np, gpiochip->ngpio,
-						     gpiochip->irq.first,
-						     ops, gpiochip);
-	if (!gpiochip->irq.domain)
-		return -EINVAL;
+		if (!ops)
+			ops = &gpiochip_domain_ops;
+		gpiochip->irq.domain = irq_domain_add_simple(np,
+			gpiochip->ngpio,
+			gpiochip->irq.first,
+			ops, gpiochip);
+		if (!gpiochip->irq.domain)
+			return -EINVAL;
+	}
 
 	if (gpiochip->irq.parent_handler) {
 		void *data = gpiochip->irq.parent_handler_data ?: gpiochip;
@@ -4000,27 +4292,6 @@ static struct gpio_desc *gpiod_find(struct device *dev, const char *con_id,
 	return desc;
 }
 
-static int dt_gpio_count(struct device *dev, const char *con_id)
-{
-	int ret;
-	char propname[32];
-	unsigned int i;
-
-	for (i = 0; i < ARRAY_SIZE(gpio_suffixes); i++) {
-		if (con_id)
-			snprintf(propname, sizeof(propname), "%s-%s",
-				 con_id, gpio_suffixes[i]);
-		else
-			snprintf(propname, sizeof(propname), "%s",
-				 gpio_suffixes[i]);
-
-		ret = of_gpio_named_count(dev->of_node, propname);
-		if (ret > 0)
-			break;
-	}
-	return ret ? ret : -ENOENT;
-}
-
 static int platform_gpio_count(struct device *dev, const char *con_id)
 {
 	struct gpiod_lookup_table *table;
@@ -4053,7 +4324,7 @@ int gpiod_count(struct device *dev, const char *con_id)
 	int count = -ENOENT;
 
 	if (IS_ENABLED(CONFIG_OF) && dev && dev->of_node)
-		count = dt_gpio_count(dev, con_id);
+		count = of_gpio_get_count(dev, con_id);
 	else if (IS_ENABLED(CONFIG_ACPI) && dev && ACPI_HANDLE(dev))
 		count = acpi_gpio_count(dev, con_id);
 
@@ -4253,75 +4524,6 @@ struct gpio_desc *__must_check gpiod_get_index(struct device *dev,
 	return desc;
 }
 EXPORT_SYMBOL_GPL(gpiod_get_index);
-
-/**
- * gpiod_get_from_of_node() - obtain a GPIO from an OF node
- * @node:	handle of the OF node
- * @propname:	name of the DT property representing the GPIO
- * @index:	index of the GPIO to obtain for the consumer
- * @dflags:	GPIO initialization flags
- * @label:	label to attach to the requested GPIO
- *
- * Returns:
- * On successful request the GPIO pin is configured in accordance with
- * provided @dflags.
- *
- * In case of error an ERR_PTR() is returned.
- */
-struct gpio_desc *gpiod_get_from_of_node(struct device_node *node,
-					 const char *propname, int index,
-					 enum gpiod_flags dflags,
-					 const char *label)
-{
-	unsigned long lflags = GPIO_LOOKUP_FLAGS_DEFAULT;
-	struct gpio_desc *desc;
-	enum of_gpio_flags flags;
-	bool active_low = false;
-	bool single_ended = false;
-	bool open_drain = false;
-	bool transitory = false;
-	int ret;
-
-	desc = of_get_named_gpiod_flags(node, propname,
-					index, &flags);
-
-	if (!desc || IS_ERR(desc)) {
-		return desc;
-	}
-
-	active_low = flags & OF_GPIO_ACTIVE_LOW;
-	single_ended = flags & OF_GPIO_SINGLE_ENDED;
-	open_drain = flags & OF_GPIO_OPEN_DRAIN;
-	transitory = flags & OF_GPIO_TRANSITORY;
-
-	ret = gpiod_request(desc, label);
-	if (ret == -EBUSY && (flags & GPIOD_FLAGS_BIT_NONEXCLUSIVE))
-		return desc;
-	if (ret)
-		return ERR_PTR(ret);
-
-	if (active_low)
-		lflags |= GPIO_ACTIVE_LOW;
-
-	if (single_ended) {
-		if (open_drain)
-			lflags |= GPIO_OPEN_DRAIN;
-		else
-			lflags |= GPIO_OPEN_SOURCE;
-	}
-
-	if (transitory)
-		lflags |= GPIO_TRANSITORY;
-
-	ret = gpiod_configure_flags(desc, propname, lflags, dflags);
-	if (ret < 0) {
-		gpiod_put(desc);
-		return ERR_PTR(ret);
-	}
-
-	return desc;
-}
-EXPORT_SYMBOL(gpiod_get_from_of_node);
 
 /**
  * fwnode_get_named_gpiod - obtain a GPIO from firmware node

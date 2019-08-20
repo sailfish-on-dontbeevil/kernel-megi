@@ -18,6 +18,7 @@
 #include <linux/pinctrl/pinctrl.h>
 
 #include "gpiolib.h"
+#include "gpiolib-acpi.h"
 
 /**
  * struct acpi_gpio_event - ACPI GPIO event handler data
@@ -381,6 +382,13 @@ int acpi_dev_add_driver_gpios(struct acpi_device *adev,
 	return -EINVAL;
 }
 EXPORT_SYMBOL_GPL(acpi_dev_add_driver_gpios);
+
+void acpi_dev_remove_driver_gpios(struct acpi_device *adev)
+{
+	if (adev)
+		adev->driver_gpios = NULL;
+}
+EXPORT_SYMBOL_GPL(acpi_dev_remove_driver_gpios);
 
 static void devm_acpi_dev_release_driver_gpios(struct device *dev, void *res)
 {
