@@ -1,21 +1,16 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/drivers/staging/erofs/super.c
  *
  * Copyright (C) 2017-2018 HUAWEI, Inc.
  *             http://www.huawei.com/
  * Created by Gao Xiang <gaoxiang25@huawei.com>
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file COPYING in the main directory of the Linux
- * distribution for more details.
  */
 #include <linux/module.h>
 #include <linux/buffer_head.h>
 #include <linux/statfs.h>
 #include <linux/parser.h>
 #include <linux/seq_file.h>
-#include "internal.h"
 #include "xattr.h"
 
 #define CREATE_TRACE_POINTS
@@ -129,15 +124,6 @@ static int superblock_read(struct super_block *sb)
 	sbi->xattr_blkaddr = le32_to_cpu(layout->xattr_blkaddr);
 #endif
 	sbi->islotbits = ffs(sizeof(struct erofs_inode_v1)) - 1;
-#ifdef CONFIG_EROFS_FS_ZIP
-	/* TODO: clusterbits should be related to inode */
-	sbi->clusterbits = blkszbits;
-
-	if (1 << (sbi->clusterbits - PAGE_SHIFT) > Z_EROFS_CLUSTER_MAX_PAGES)
-		errln("clusterbits %u is not supported on this kernel",
-		      sbi->clusterbits);
-#endif
-
 	sbi->root_nid = le16_to_cpu(layout->root_nid);
 	sbi->inos = le64_to_cpu(layout->inos);
 
@@ -211,17 +197,50 @@ static unsigned int erofs_get_fault_rate(struct erofs_sb_info *sbi)
 }
 #endif
 
-static void default_options(struct erofs_sb_info *sbi)
-{
-	/* set up some FS parameters */
 #ifdef CONFIG_EROFS_FS_ZIP
-	sbi->max_sync_decompress_pages = DEFAULT_MAX_SYNC_DECOMPRESS_PAGES;
+static int erofs_build_cache_strategy(struct erofs_sb_info *sbi,
+				      substring_t *args)
+{
+	const char *cs = match_strdup(args);
+	int err = 0;
+
+	if (!cs) {
+		errln("Not enough memory to store cache strategy");
+		return -ENOMEM;
+	}
+
+	if (!strcmp(cs, "disabled")) {
+		sbi->cache_strategy = EROFS_ZIP_CACHE_DISABLED;
+	} else if (!strcmp(cs, "readahead")) {
+		sbi->cache_strategy = EROFS_ZIP_CACHE_READAHEAD;
+	} else if (!strcmp(cs, "readaround")) {
+		sbi->cache_strategy = EROFS_ZIP_CACHE_READAROUND;
+	} else {
+		errln("Unrecognized cache strategy \"%s\"", cs);
+		err = -EINVAL;
+	}
+	kfree(cs);
+	return err;
+}
+#else
+static int erofs_build_cache_strategy(struct erofs_sb_info *sbi,
+				      substring_t *args)
+{
+	infoln("EROFS compression is disabled, so cache strategy is ignored");
+	return 0;
+}
 #endif
 
+/* set up default EROFS parameters */
+static void default_options(struct erofs_sb_info *sbi)
+{
+#ifdef CONFIG_EROFS_FS_ZIP
+	sbi->cache_strategy = EROFS_ZIP_CACHE_READAROUND;
+	sbi->max_sync_decompress_pages = 3;
+#endif
 #ifdef CONFIG_EROFS_FS_XATTR
 	set_opt(sbi, XATTR_USER);
 #endif
-
 #ifdef CONFIG_EROFS_FS_POSIX_ACL
 	set_opt(sbi, POSIX_ACL);
 #endif
@@ -233,6 +252,7 @@ enum {
 	Opt_acl,
 	Opt_noacl,
 	Opt_fault_injection,
+	Opt_cache_strategy,
 	Opt_err
 };
 
@@ -242,6 +262,7 @@ static match_table_t erofs_tokens = {
 	{Opt_acl, "acl"},
 	{Opt_noacl, "noacl"},
 	{Opt_fault_injection, "fault_injection=%u"},
+	{Opt_cache_strategy, "cache_strategy=%s"},
 	{Opt_err, NULL}
 };
 
@@ -299,18 +320,20 @@ static int parse_options(struct super_block *sb, char *options)
 			if (err)
 				return err;
 			break;
-
+		case Opt_cache_strategy:
+			err = erofs_build_cache_strategy(EROFS_SB(sb), args);
+			if (err)
+				return err;
+			break;
 		default:
-			errln("Unrecognized mount option \"%s\" "
-					"or missing value", p);
+			errln("Unrecognized mount option \"%s\" or missing value", p);
 			return -EINVAL;
 		}
 	}
 	return 0;
 }
 
-#ifdef EROFS_FS_HAS_MANAGED_CACHE
-
+#ifdef CONFIG_EROFS_FS_ZIP
 static const struct address_space_operations managed_cache_aops;
 
 static int managed_cache_releasepage(struct page *page, gfp_t gfp_mask)
@@ -348,53 +371,52 @@ static const struct address_space_operations managed_cache_aops = {
 	.invalidatepage = managed_cache_invalidatepage,
 };
 
-static struct inode *erofs_init_managed_cache(struct super_block *sb)
+static int erofs_init_managed_cache(struct super_block *sb)
 {
-	struct inode *inode = new_inode(sb);
+	struct erofs_sb_info *const sbi = EROFS_SB(sb);
+	struct inode *const inode = new_inode(sb);
 
 	if (unlikely(!inode))
-		return ERR_PTR(-ENOMEM);
+		return -ENOMEM;
 
 	set_nlink(inode, 1);
 	inode->i_size = OFFSET_MAX;
 
 	inode->i_mapping->a_ops = &managed_cache_aops;
 	mapping_set_gfp_mask(inode->i_mapping,
-			     GFP_NOFS | __GFP_HIGHMEM |
-			     __GFP_MOVABLE |  __GFP_NOFAIL);
-	return inode;
+			     GFP_NOFS | __GFP_HIGHMEM | __GFP_MOVABLE);
+	sbi->managed_cache = inode;
+	return 0;
 }
-
+#else
+static int erofs_init_managed_cache(struct super_block *sb) { return 0; }
 #endif
 
-static int erofs_read_super(struct super_block *sb,
-			    const char *dev_name,
-			    void *data, int silent)
+static int erofs_fill_super(struct super_block *sb, void *data, int silent)
 {
 	struct inode *inode;
 	struct erofs_sb_info *sbi;
-	int err = -EINVAL;
+	int err;
 
-	infoln("read_super, device -> %s", dev_name);
+	infoln("fill_super, device -> %s", sb->s_id);
 	infoln("options -> %s", (char *)data);
+
+	sb->s_magic = EROFS_SUPER_MAGIC;
 
 	if (unlikely(!sb_set_blocksize(sb, EROFS_BLKSIZ))) {
 		errln("failed to set erofs blksize");
-		goto err;
+		return -EINVAL;
 	}
 
 	sbi = kzalloc(sizeof(*sbi), GFP_KERNEL);
-	if (unlikely(!sbi)) {
-		err = -ENOMEM;
-		goto err;
-	}
-	sb->s_fs_info = sbi;
+	if (unlikely(!sbi))
+		return -ENOMEM;
 
+	sb->s_fs_info = sbi;
 	err = superblock_read(sb);
 	if (err)
-		goto err_sbread;
+		return err;
 
-	sb->s_magic = EROFS_SUPER_MAGIC;
 	sb->s_flags |= SB_RDONLY | SB_NOATIME;
 	sb->s_maxbytes = MAX_LFS_FILESIZE;
 	sb->s_time_gran = 1;
@@ -404,13 +426,12 @@ static int erofs_read_super(struct super_block *sb,
 #ifdef CONFIG_EROFS_FS_XATTR
 	sb->s_xattr = erofs_xattr_handlers;
 #endif
-
 	/* set erofs default mount options */
 	default_options(sbi);
 
 	err = parse_options(sb, data);
-	if (err)
-		goto err_parseopt;
+	if (unlikely(err))
+		return err;
 
 	if (!silent)
 		infoln("root inode @ nid %llu", ROOT_NID(sbi));
@@ -424,139 +445,71 @@ static int erofs_read_super(struct super_block *sb,
 	INIT_RADIX_TREE(&sbi->workstn_tree, GFP_ATOMIC);
 #endif
 
-#ifdef EROFS_FS_HAS_MANAGED_CACHE
-	sbi->managed_cache = erofs_init_managed_cache(sb);
-	if (IS_ERR(sbi->managed_cache)) {
-		err = PTR_ERR(sbi->managed_cache);
-		goto err_init_managed_cache;
-	}
-#endif
-
 	/* get the root inode */
 	inode = erofs_iget(sb, ROOT_NID(sbi), true);
-	if (IS_ERR(inode)) {
-		err = PTR_ERR(inode);
-		goto err_iget;
-	}
+	if (IS_ERR(inode))
+		return PTR_ERR(inode);
 
-	if (!S_ISDIR(inode->i_mode)) {
+	if (unlikely(!S_ISDIR(inode->i_mode))) {
 		errln("rootino(nid %llu) is not a directory(i_mode %o)",
 		      ROOT_NID(sbi), inode->i_mode);
-		err = -EINVAL;
 		iput(inode);
-		goto err_iget;
+		return -EINVAL;
 	}
 
 	sb->s_root = d_make_root(inode);
-	if (!sb->s_root) {
-		err = -ENOMEM;
-		goto err_iget;
-	}
+	if (unlikely(!sb->s_root))
+		return -ENOMEM;
 
-	/* save the device name to sbi */
-	sbi->dev_name = __getname();
-	if (!sbi->dev_name) {
-		err = -ENOMEM;
-		goto err_devname;
-	}
-
-	snprintf(sbi->dev_name, PATH_MAX, "%s", dev_name);
-	sbi->dev_name[PATH_MAX - 1] = '\0';
-
-	erofs_register_super(sb);
+	erofs_shrinker_register(sb);
+	/* sb->s_umount is already locked, SB_ACTIVE and SB_BORN are not set */
+	err = erofs_init_managed_cache(sb);
+	if (unlikely(err))
+		return err;
 
 	if (!silent)
-		infoln("mounted on %s with opts: %s.", dev_name,
-		       (char *)data);
+		infoln("mounted on %s with opts: %s.", sb->s_id, (char *)data);
 	return 0;
-	/*
-	 * please add a label for each exit point and use
-	 * the following name convention, thus new features
-	 * can be integrated easily without renaming labels.
-	 */
-err_devname:
-	dput(sb->s_root);
-	sb->s_root = NULL;
-err_iget:
-#ifdef EROFS_FS_HAS_MANAGED_CACHE
-	iput(sbi->managed_cache);
-err_init_managed_cache:
-#endif
-err_parseopt:
-err_sbread:
-	sb->s_fs_info = NULL;
-	kfree(sbi);
-err:
-	return err;
+}
+
+static struct dentry *erofs_mount(struct file_system_type *fs_type, int flags,
+				  const char *dev_name, void *data)
+{
+	return mount_bdev(fs_type, flags, dev_name, data, erofs_fill_super);
 }
 
 /*
  * could be triggered after deactivate_locked_super()
  * is called, thus including umount and failed to initialize.
  */
-static void erofs_put_super(struct super_block *sb)
+static void erofs_kill_sb(struct super_block *sb)
 {
-	struct erofs_sb_info *sbi = EROFS_SB(sb);
-
-	/* for cases which are failed in "read_super" */
-	if (!sbi)
-		return;
+	struct erofs_sb_info *sbi;
 
 	WARN_ON(sb->s_magic != EROFS_SUPER_MAGIC);
+	infoln("unmounting for %s", sb->s_id);
 
-	infoln("unmounted for %s", sbi->dev_name);
-	__putname(sbi->dev_name);
+	kill_block_super(sb);
 
-#ifdef EROFS_FS_HAS_MANAGED_CACHE
-	iput(sbi->managed_cache);
-#endif
-
-	mutex_lock(&sbi->umount_mutex);
-
-#ifdef CONFIG_EROFS_FS_ZIP
-	/* clean up the compression space of this sb */
-	erofs_shrink_workstation(EROFS_SB(sb), ~0UL, true);
-#endif
-
-	erofs_unregister_super(sb);
-	mutex_unlock(&sbi->umount_mutex);
-
+	sbi = EROFS_SB(sb);
+	if (!sbi)
+		return;
 	kfree(sbi);
 	sb->s_fs_info = NULL;
 }
 
-
-struct erofs_mount_private {
-	const char *dev_name;
-	char *options;
-};
-
-/* support mount_bdev() with options */
-static int erofs_fill_super(struct super_block *sb,
-			    void *_priv, int silent)
+/* called when ->s_root is non-NULL */
+static void erofs_put_super(struct super_block *sb)
 {
-	struct erofs_mount_private *priv = _priv;
+	struct erofs_sb_info *const sbi = EROFS_SB(sb);
 
-	return erofs_read_super(sb, priv->dev_name,
-		priv->options, silent);
-}
+	DBG_BUGON(!sbi);
 
-static struct dentry *erofs_mount(
-	struct file_system_type *fs_type, int flags,
-	const char *dev_name, void *data)
-{
-	struct erofs_mount_private priv = {
-		.dev_name = dev_name,
-		.options = data
-	};
-
-	return mount_bdev(fs_type, flags, dev_name,
-		&priv, erofs_fill_super);
-}
-
-static void erofs_kill_sb(struct super_block *sb)
-{
-	kill_block_super(sb);
+	erofs_shrinker_unregister(sb);
+#ifdef CONFIG_EROFS_FS_ZIP
+	iput(sbi->managed_cache);
+	sbi->managed_cache = NULL;
+#endif
 }
 
 static struct file_system_type erofs_fs_type = {
@@ -579,7 +532,7 @@ static int __init erofs_module_init(void)
 	if (err)
 		goto icache_err;
 
-	err = register_shrinker(&erofs_shrinker_info);
+	err = erofs_init_shrinker();
 	if (err)
 		goto shrinker_err;
 
@@ -597,7 +550,7 @@ static int __init erofs_module_init(void)
 fs_err:
 	z_erofs_exit_zip_subsystem();
 zip_err:
-	unregister_shrinker(&erofs_shrinker_info);
+	erofs_exit_shrinker();
 shrinker_err:
 	erofs_exit_inode_cache();
 icache_err:
@@ -608,7 +561,7 @@ static void __exit erofs_module_exit(void)
 {
 	unregister_filesystem(&erofs_fs_type);
 	z_erofs_exit_zip_subsystem();
-	unregister_shrinker(&erofs_shrinker_info);
+	erofs_exit_shrinker();
 	erofs_exit_inode_cache();
 	infoln("successfully finalize erofs");
 }
@@ -654,6 +607,18 @@ static int erofs_show_options(struct seq_file *seq, struct dentry *root)
 	if (test_opt(sbi, FAULT_INJECTION))
 		seq_printf(seq, ",fault_injection=%u",
 			   erofs_get_fault_rate(sbi));
+#ifdef CONFIG_EROFS_FS_ZIP
+	if (sbi->cache_strategy == EROFS_ZIP_CACHE_DISABLED) {
+		seq_puts(seq, ",cache_strategy=disabled");
+	} else if (sbi->cache_strategy == EROFS_ZIP_CACHE_READAHEAD) {
+		seq_puts(seq, ",cache_strategy=readahead");
+	} else if (sbi->cache_strategy == EROFS_ZIP_CACHE_READAROUND) {
+		seq_puts(seq, ",cache_strategy=readaround");
+	} else {
+		seq_puts(seq, ",cache_strategy=(unknown)");
+		DBG_BUGON(1);
+	}
+#endif
 	return 0;
 }
 
@@ -696,6 +661,6 @@ module_init(erofs_module_init);
 module_exit(erofs_module_exit);
 
 MODULE_DESCRIPTION("Enhanced ROM File System");
-MODULE_AUTHOR("Gao Xiang, Yu Chao, Miao Xie, CONSUMER BG, HUAWEI Inc.");
+MODULE_AUTHOR("Gao Xiang, Chao Yu, Miao Xie, CONSUMER BG, HUAWEI Inc.");
 MODULE_LICENSE("GPL");
 
