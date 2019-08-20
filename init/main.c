@@ -556,6 +556,7 @@ static void __init mm_init(void)
 	report_meminit();
 	mem_init();
 	kmem_cache_init();
+	kmemleak_init();
 	pgtable_init();
 	debug_objects_mem_init();
 	vmalloc_init();
@@ -594,7 +595,6 @@ asmlinkage __visible void __init start_kernel(void)
 	page_address_init();
 	pr_notice("%s", linux_banner);
 	setup_arch(&command_line);
-	mm_init_cpumask(&init_mm);
 	setup_command_line(command_line);
 	setup_nr_cpu_ids();
 	setup_per_cpu_areas();
@@ -740,7 +740,6 @@ asmlinkage __visible void __init start_kernel(void)
 		initrd_start = 0;
 	}
 #endif
-	kmemleak_init();
 	setup_per_cpu_pageset();
 	numa_policy_init();
 	acpi_early_init();

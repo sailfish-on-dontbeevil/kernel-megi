@@ -1007,6 +1007,7 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 				struct zap_details *details)
 {
 	struct mm_struct *mm = tlb->mm;
+	int progress = 0;
 	int force_flush = 0;
 	int rss[NR_MM_COUNTERS];
 	spinlock_t *ptl;
@@ -1022,7 +1023,15 @@ again:
 	flush_tlb_batched_pending(mm);
 	arch_enter_lazy_mmu_mode();
 	do {
-		pte_t ptent = *pte;
+		pte_t ptent;
+
+		if (progress++ >= 32) {
+			progress = 0;
+			if (need_resched())
+				break;
+		}
+
+		ptent = *pte;
 		if (pte_none(ptent))
 			continue;
 
@@ -1093,7 +1102,6 @@ again:
 		if (unlikely(details))
 			continue;
 
-		entry = pte_to_swp_entry(ptent);
 		if (!non_swap_entry(entry))
 			rss[MM_SWAPENTS]--;
 		else if (is_migration_entry(entry)) {
@@ -1124,8 +1132,11 @@ again:
 	if (force_flush) {
 		force_flush = 0;
 		tlb_flush_mmu(tlb);
-		if (addr != end)
-			goto again;
+	}
+
+	if (addr != end) {
+		progress = 0;
+		goto again;
 	}
 
 	return addr;
@@ -2877,7 +2888,6 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
 	flush_icache_page(vma, page);
 	if (pte_swp_soft_dirty(vmf->orig_pte))
 		pte = pte_mksoft_dirty(pte);
-	set_pte_at(vma->vm_mm, vmf->address, vmf->pte, pte);
 	arch_do_swap_page(vma->vm_mm, vma, vmf->address, pte, vmf->orig_pte);
 	vmf->orig_pte = pte;
 
@@ -2891,6 +2901,7 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
 		mem_cgroup_commit_charge(page, memcg, true, false);
 		activate_page(page);
 	}
+	set_pte_at(vma->vm_mm, vmf->address, vmf->pte, pte);
 
 	swap_free(entry);
 	if (mem_cgroup_swap_full(page) ||

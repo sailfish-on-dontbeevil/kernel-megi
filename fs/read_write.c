@@ -710,6 +710,9 @@ static ssize_t do_loop_readv_writev(struct file *filp, struct iov_iter *iter,
 		struct iovec iovec = iov_iter_iovec(iter);
 		ssize_t nr;
 
+		if (IS_ENABLED(CONFIG_DEBUG_AID_FOR_SYZBOT) &&
+		    fatal_signal_pending(current))
+			printk("do_loop_readv_writev: iter->count=%zd iovec.iov_len=%zd\n", iter->count, iovec.iov_len);
 		if (type == READ) {
 			nr = filp->f_op->read(filp, iovec.iov_base,
 					      iovec.iov_len, ppos);
@@ -717,6 +720,9 @@ static ssize_t do_loop_readv_writev(struct file *filp, struct iov_iter *iter,
 			nr = filp->f_op->write(filp, iovec.iov_base,
 					       iovec.iov_len, ppos);
 		}
+		if (IS_ENABLED(CONFIG_DEBUG_AID_FOR_SYZBOT) &&
+		    fatal_signal_pending(current))
+			printk("do_loop_readv_writev: nr=%zd\n", nr);
 
 		if (nr < 0) {
 			if (!ret)

@@ -607,7 +607,7 @@ static int shmem_add_to_page_cache(struct page *page,
 {
 	XA_STATE_ORDER(xas, &mapping->i_pages, index, compound_order(page));
 	unsigned long i = 0;
-	unsigned long nr = 1UL << compound_order(page);
+	unsigned long nr = compound_nr(page);
 
 	VM_BUG_ON_PAGE(PageTail(page), page);
 	VM_BUG_ON_PAGE(index != round_down(index, nr), page);
@@ -629,7 +629,7 @@ static int shmem_add_to_page_cache(struct page *page,
 		if (xas_error(&xas))
 			goto unlock;
 next:
-		xas_store(&xas, page + i);
+		xas_store(&xas, page);
 		if (++i < nr) {
 			xas_next(&xas);
 			goto next;
@@ -1882,7 +1882,7 @@ alloc_nohuge:
 	lru_cache_add_anon(page);
 
 	spin_lock_irq(&info->lock);
-	info->alloced += 1 << compound_order(page);
+	info->alloced += compound_nr(page);
 	inode->i_blocks += BLOCKS_PER_PAGE << compound_order(page);
 	shmem_recalc_inode(inode);
 	spin_unlock_irq(&info->lock);
@@ -1923,7 +1923,7 @@ clear:
 		struct page *head = compound_head(page);
 		int i;
 
-		for (i = 0; i < (1 << compound_order(head)); i++) {
+		for (i = 0; i < compound_nr(head); i++) {
 			clear_highpage(head + i);
 			flush_dcache_page(head + i);
 		}
@@ -1950,7 +1950,7 @@ clear:
 	 * Error recovery.
 	 */
 unacct:
-	shmem_inode_unacct_blocks(inode, 1 << compound_order(page));
+	shmem_inode_unacct_blocks(inode, compound_nr(page));
 
 	if (PageTransHuge(page)) {
 		unlock_page(page);

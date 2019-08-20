@@ -45,8 +45,7 @@ static inline void xen_dma_map_page(struct device *hwdev, struct page *page,
 {
 	unsigned long page_pfn = page_to_xen_pfn(page);
 	unsigned long dev_pfn = XEN_PFN_DOWN(dev_addr);
-	unsigned long compound_pages =
-		(1<<compound_order(page)) * XEN_PFN_PER_PAGE;
+	unsigned long compound_pages = compound_nr(page) * XEN_PFN_PER_PAGE;
 	bool local = (page_pfn <= dev_pfn) &&
 		(dev_pfn - page_pfn < compound_pages);
 

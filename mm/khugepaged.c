@@ -48,6 +48,7 @@ enum scan_result {
 	SCAN_CGROUP_CHARGE_FAIL,
 	SCAN_EXCEED_SWAP_PTE,
 	SCAN_TRUNCATED,
+	SCAN_PAGE_HAS_PRIVATE,
 };
 
 #define CREATE_TRACE_POINTS
@@ -404,7 +405,11 @@ static bool hugepage_vma_check(struct vm_area_struct *vma,
 	    (vm_flags & VM_NOHUGEPAGE) ||
 	    test_bit(MMF_DISABLE_THP, &vma->vm_mm->flags))
 		return false;
-	if (shmem_file(vma->vm_file)) {
+
+	if (shmem_file(vma->vm_file) ||
+	    (IS_ENABLED(CONFIG_READ_ONLY_THP_FOR_FS) &&
+	     vma->vm_file &&
+	     (vm_flags & VM_DENYWRITE))) {
 		if (!IS_ENABLED(CONFIG_TRANSPARENT_HUGE_PAGECACHE))
 			return false;
 		return IS_ALIGNED((vma->vm_start >> PAGE_SHIFT) - vma->vm_pgoff,
@@ -456,8 +461,9 @@ int khugepaged_enter_vma_merge(struct vm_area_struct *vma,
 	unsigned long hstart, hend;
 
 	/*
-	 * khugepaged does not yet work on non-shmem files or special
-	 * mappings. And file-private shmem THP is not supported.
+	 * khugepaged only supports read-only files for non-shmem files.
+	 * khugepaged does not yet work on special mappings. And
+	 * file-private shmem THP is not supported.
 	 */
 	if (!hugepage_vma_check(vma, vm_flags))
 		return 0;
@@ -1287,12 +1293,12 @@ static void retract_page_tables(struct address_space *mapping, pgoff_t pgoff)
 }
 
 /**
- * collapse_shmem - collapse small tmpfs/shmem pages into huge one.
+ * collapse_file - collapse filemap/tmpfs/shmem pages into huge one.
  *
  * Basic scheme is simple, details are more complex:
  *  - allocate and lock a new huge page;
  *  - scan page cache replacing old pages with the new one
- *    + swap in pages if necessary;
+ *    + swap/gup in pages if necessary;
  *    + fill in gaps;
  *    + keep old pages around in case rollback is required;
  *  - if replacing succeeds:
@@ -1304,10 +1310,11 @@ static void retract_page_tables(struct address_space *mapping, pgoff_t pgoff)
  *    + restore gaps in the page cache;
  *    + unlock and free huge page;
  */
-static void collapse_shmem(struct mm_struct *mm,
-		struct address_space *mapping, pgoff_t start,
+static void collapse_file(struct mm_struct *mm,
+		struct file *file, pgoff_t start,
 		struct page **hpage, int node)
 {
+	struct address_space *mapping = file->f_mapping;
 	gfp_t gfp;
 	struct page *new_page;
 	struct mem_cgroup *memcg;
@@ -1315,7 +1322,9 @@ static void collapse_shmem(struct mm_struct *mm,
 	LIST_HEAD(pagelist);
 	XA_STATE_ORDER(xas, &mapping->i_pages, start, HPAGE_PMD_ORDER);
 	int nr_none = 0, result = SCAN_SUCCEED;
+	bool is_shmem = shmem_file(file);
 
+	VM_BUG_ON(!IS_ENABLED(CONFIG_READ_ONLY_THP_FOR_FS) && !is_shmem);
 	VM_BUG_ON(start & (HPAGE_PMD_NR - 1));
 
 	/* Only allocate from the target node */
@@ -1347,7 +1356,8 @@ static void collapse_shmem(struct mm_struct *mm,
 	} while (1);
 
 	__SetPageLocked(new_page);
-	__SetPageSwapBacked(new_page);
+	if (is_shmem)
+		__SetPageSwapBacked(new_page);
 	new_page->index = start;
 	new_page->mapping = mapping;
 
@@ -1362,41 +1372,75 @@ static void collapse_shmem(struct mm_struct *mm,
 		struct page *page = xas_next(&xas);
 
 		VM_BUG_ON(index != xas.xa_index);
-		if (!page) {
-			/*
-			 * Stop if extent has been truncated or hole-punched,
-			 * and is now completely empty.
-			 */
-			if (index == start) {
-				if (!xas_next_entry(&xas, end - 1)) {
-					result = SCAN_TRUNCATED;
+		if (is_shmem) {
+			if (!page) {
+				/*
+				 * Stop if extent has been truncated or
+				 * hole-punched, and is now completely
+				 * empty.
+				 */
+				if (index == start) {
+					if (!xas_next_entry(&xas, end - 1)) {
+						result = SCAN_TRUNCATED;
+						goto xa_locked;
+					}
+					xas_set(&xas, index);
+				}
+				if (!shmem_charge(mapping->host, 1)) {
+					result = SCAN_FAIL;
 					goto xa_locked;
 				}
-				xas_set(&xas, index);
+				xas_store(&xas, new_page);
+				nr_none++;
+				continue;
 			}
-			if (!shmem_charge(mapping->host, 1)) {
-				result = SCAN_FAIL;
+
+			if (xa_is_value(page) || !PageUptodate(page)) {
+				xas_unlock_irq(&xas);
+				/* swap in or instantiate fallocated page */
+				if (shmem_getpage(mapping->host, index, &page,
+						  SGP_NOHUGE)) {
+					result = SCAN_FAIL;
+					goto xa_unlocked;
+				}
+			} else if (trylock_page(page)) {
+				get_page(page);
+				xas_unlock_irq(&xas);
+			} else {
+				result = SCAN_PAGE_LOCK;
 				goto xa_locked;
 			}
-			xas_store(&xas, new_page + (index % HPAGE_PMD_NR));
-			nr_none++;
-			continue;
-		}
-
-		if (xa_is_value(page) || !PageUptodate(page)) {
-			xas_unlock_irq(&xas);
-			/* swap in or instantiate fallocated page */
-			if (shmem_getpage(mapping->host, index, &page,
-						SGP_NOHUGE)) {
+		} else {	/* !is_shmem */
+			if (!page || xa_is_value(page)) {
+				xas_unlock_irq(&xas);
+				page_cache_sync_readahead(mapping, &file->f_ra,
+							  file, index,
+							  PAGE_SIZE);
+				/* drain pagevecs to help isolate_lru_page() */
+				lru_add_drain();
+				page = find_lock_page(mapping, index);
+				if (unlikely(page == NULL)) {
+					result = SCAN_FAIL;
+					goto xa_unlocked;
+				}
+			} else if (!PageUptodate(page)) {
+				xas_unlock_irq(&xas);
+				wait_on_page_locked(page);
+				if (!trylock_page(page)) {
+					result = SCAN_PAGE_LOCK;
+					goto xa_unlocked;
+				}
+				get_page(page);
+			} else if (PageDirty(page)) {
 				result = SCAN_FAIL;
-				goto xa_unlocked;
+				goto xa_locked;
+			} else if (trylock_page(page)) {
+				get_page(page);
+				xas_unlock_irq(&xas);
+			} else {
+				result = SCAN_PAGE_LOCK;
+				goto xa_locked;
 			}
-		} else if (trylock_page(page)) {
-			get_page(page);
-			xas_unlock_irq(&xas);
-		} else {
-			result = SCAN_PAGE_LOCK;
-			goto xa_locked;
 		}
 
 		/*
@@ -1422,6 +1466,12 @@ static void collapse_shmem(struct mm_struct *mm,
 
 		if (isolate_lru_page(page)) {
 			result = SCAN_DEL_PAGE_LRU;
+			goto out_unlock;
+		}
+
+		if (page_has_private(page) &&
+		    !try_to_release_page(page, GFP_KERNEL)) {
+			result = SCAN_PAGE_HAS_PRIVATE;
 			goto out_unlock;
 		}
 
@@ -1454,7 +1504,7 @@ static void collapse_shmem(struct mm_struct *mm,
 		list_add_tail(&page->lru, &pagelist);
 
 		/* Finally, replace with the new page. */
-		xas_store(&xas, new_page + (index % HPAGE_PMD_NR));
+		xas_store(&xas, new_page);
 		continue;
 out_unlock:
 		unlock_page(page);
@@ -1462,12 +1512,20 @@ out_unlock:
 		goto xa_unlocked;
 	}
 
-	__inc_node_page_state(new_page, NR_SHMEM_THPS);
+	if (is_shmem)
+		__inc_node_page_state(new_page, NR_SHMEM_THPS);
+	else {
+		__inc_node_page_state(new_page, NR_FILE_THPS);
+		filemap_nr_thps_inc(mapping);
+	}
+
 	if (nr_none) {
 		struct zone *zone = page_zone(new_page);
 
 		__mod_node_page_state(zone->zone_pgdat, NR_FILE_PAGES, nr_none);
-		__mod_node_page_state(zone->zone_pgdat, NR_SHMEM, nr_none);
+		if (is_shmem)
+			__mod_node_page_state(zone->zone_pgdat,
+					      NR_SHMEM, nr_none);
 	}
 
 xa_locked:
@@ -1505,10 +1563,15 @@ xa_unlocked:
 
 		SetPageUptodate(new_page);
 		page_ref_add(new_page, HPAGE_PMD_NR - 1);
-		set_page_dirty(new_page);
 		mem_cgroup_commit_charge(new_page, memcg, false, true);
+
+		if (is_shmem) {
+			set_page_dirty(new_page);
+			lru_cache_add_anon(new_page);
+		} else {
+			lru_cache_add_file(new_page);
+		}
 		count_memcg_events(memcg, THP_COLLAPSE_ALLOC, 1);
-		lru_cache_add_anon(new_page);
 
 		/*
 		 * Remove pte page tables, so we can re-fault the page as huge.
@@ -1523,7 +1586,9 @@ xa_unlocked:
 		/* Something went wrong: roll back page cache changes */
 		xas_lock_irq(&xas);
 		mapping->nrpages -= nr_none;
-		shmem_uncharge(mapping->host, nr_none);
+
+		if (is_shmem)
+			shmem_uncharge(mapping->host, nr_none);
 
 		xas_set(&xas, start);
 		xas_for_each(&xas, page, end - 1) {
@@ -1563,11 +1628,11 @@ out:
 	/* TODO: tracepoints */
 }
 
-static void khugepaged_scan_shmem(struct mm_struct *mm,
-		struct address_space *mapping,
-		pgoff_t start, struct page **hpage)
+static void khugepaged_scan_file(struct mm_struct *mm,
+		struct file *file, pgoff_t start, struct page **hpage)
 {
 	struct page *page = NULL;
+	struct address_space *mapping = file->f_mapping;
 	XA_STATE(xas, &mapping->i_pages, start);
 	int present, swap;
 	int node = NUMA_NO_NODE;
@@ -1606,7 +1671,8 @@ static void khugepaged_scan_shmem(struct mm_struct *mm,
 			break;
 		}
 
-		if (page_count(page) != 1 + page_mapcount(page)) {
+		if (page_count(page) !=
+		    1 + page_mapcount(page) + page_has_private(page)) {
 			result = SCAN_PAGE_COUNT;
 			break;
 		}
@@ -1631,16 +1697,15 @@ static void khugepaged_scan_shmem(struct mm_struct *mm,
 			result = SCAN_EXCEED_NONE_PTE;
 		} else {
 			node = khugepaged_find_target_node();
-			collapse_shmem(mm, mapping, start, hpage, node);
+			collapse_file(mm, file, start, hpage, node);
 		}
 	}
 
 	/* TODO: tracepoints */
 }
 #else
-static void khugepaged_scan_shmem(struct mm_struct *mm,
-		struct address_space *mapping,
-		pgoff_t start, struct page **hpage)
+static void khugepaged_scan_file(struct mm_struct *mm,
+		struct file *file, pgoff_t start, struct page **hpage)
 {
 	BUILD_BUG();
 }
@@ -1713,17 +1778,18 @@ skip:
 			VM_BUG_ON(khugepaged_scan.address < hstart ||
 				  khugepaged_scan.address + HPAGE_PMD_SIZE >
 				  hend);
-			if (shmem_file(vma->vm_file)) {
+			if (IS_ENABLED(CONFIG_SHMEM) && vma->vm_file) {
 				struct file *file;
 				pgoff_t pgoff = linear_page_index(vma,
 						khugepaged_scan.address);
-				if (!shmem_huge_enabled(vma))
+
+				if (shmem_file(vma->vm_file)
+				    && !shmem_huge_enabled(vma))
 					goto skip;
 				file = get_file(vma->vm_file);
 				up_read(&mm->mmap_sem);
 				ret = 1;
-				khugepaged_scan_shmem(mm, file->f_mapping,
-						pgoff, hpage);
+				khugepaged_scan_file(mm, file, pgoff, hpage);
 				fput(file);
 			} else {
 				ret = khugepaged_scan_pmd(mm, vma,

@@ -178,6 +178,4 @@ static inline void update_mmu_cache(struct vm_area_struct *vma,
  */
 #define pgtable_cache_init()	do { } while (0)
 
-#define check_pgt_cache()	do { } while (0)
-
 #endif /* _M68K_PGTABLE_H */
