@@ -91,6 +91,7 @@ struct omap_desc {
 	bool using_ll;
 	enum dma_transfer_direction dir;
 	dma_addr_t dev_addr;
+	bool polled;
 
 	int32_t fi;		/* for OMAP_DMA_SYNC_PACKET / double indexing */
 	int16_t ei;		/* for double indexing */
@@ -202,6 +203,7 @@ static const unsigned es_bytes[] = {
 	[CSDP_DATA_TYPE_32] = 4,
 };
 
+static bool omap_dma_filter_fn(struct dma_chan *chan, void *param);
 static struct of_dma_filter_info omap_dma_info = {
 	.filter_fn = omap_dma_filter_fn,
 };
@@ -815,28 +817,20 @@ static enum dma_status omap_dma_tx_status(struct dma_chan *chan,
 	struct virt_dma_desc *vd;
 	enum dma_status ret;
 	unsigned long flags;
+	struct omap_desc *d = NULL;
 
 	ret = dma_cookie_status(chan, cookie, txstate);
-
-	if (!c->paused && c->running) {
-		uint32_t ccr = omap_dma_chan_read(c, CCR);
-		/*
-		 * The channel is no longer active, set the return value
-		 * accordingly
-		 */
-		if (!(ccr & CCR_ENABLE))
-			ret = DMA_COMPLETE;
-	}
-
-	if (ret == DMA_COMPLETE || !txstate)
+	if (ret == DMA_COMPLETE)
 		return ret;
 
 	spin_lock_irqsave(&c->vc.lock, flags);
-	vd = vchan_find_desc(&c->vc, cookie);
-	if (vd) {
-		txstate->residue = omap_dma_desc_size(to_omap_dma_desc(&vd->tx));
-	} else if (c->desc && c->desc->vd.tx.cookie == cookie) {
-		struct omap_desc *d = c->desc;
+	if (c->desc && c->desc->vd.tx.cookie == cookie)
+		d = c->desc;
+
+	if (!txstate)
+		goto out;
+
+	if (d) {
 		dma_addr_t pos;
 
 		if (d->dir == DMA_MEM_TO_DEV)
@@ -847,11 +841,29 @@ static enum dma_status omap_dma_tx_status(struct dma_chan *chan,
 			pos = 0;
 
 		txstate->residue = omap_dma_desc_size_pos(d, pos);
+	} else if ((vd = vchan_find_desc(&c->vc, cookie))) {
+		txstate->residue = omap_dma_desc_size(to_omap_dma_desc(&vd->tx));
 	} else {
 		txstate->residue = 0;
 	}
-	if (ret == DMA_IN_PROGRESS && c->paused)
+
+out:
+	if (ret == DMA_IN_PROGRESS && c->paused) {
 		ret = DMA_PAUSED;
+	} else if (d && d->polled && c->running) {
+		uint32_t ccr = omap_dma_chan_read(c, CCR);
+		/*
+		 * The channel is no longer active, set the return value
+		 * accordingly and mark it as completed
+		 */
+		if (!(ccr & CCR_ENABLE)) {
+			struct omap_desc *d = c->desc;
+			ret = DMA_COMPLETE;
+			omap_dma_start_desc(c);
+			vchan_cookie_complete(&d->vd);
+		}
+	}
+
 	spin_unlock_irqrestore(&c->vc.lock, flags);
 
 	return ret;
@@ -1178,7 +1190,10 @@ static struct dma_async_tx_descriptor *omap_dma_prep_dma_memcpy(
 	d->ccr = c->ccr;
 	d->ccr |= CCR_DST_AMODE_POSTINC | CCR_SRC_AMODE_POSTINC;
 
-	d->cicr = CICR_DROP_IE | CICR_FRAME_IE;
+	if (tx_flags & DMA_PREP_INTERRUPT)
+		d->cicr |= CICR_FRAME_IE;
+	else
+		d->polled = true;
 
 	d->csdp = data_type;
 
@@ -1637,7 +1652,7 @@ static struct platform_driver omap_dma_driver = {
 	},
 };
 
-bool omap_dma_filter_fn(struct dma_chan *chan, void *param)
+static bool omap_dma_filter_fn(struct dma_chan *chan, void *param)
 {
 	if (chan->device->dev->driver == &omap_dma_driver.driver) {
 		struct omap_dmadev *od = to_omap_dma_dev(chan->device);
@@ -1651,7 +1666,6 @@ bool omap_dma_filter_fn(struct dma_chan *chan, void *param)
 	}
 	return false;
 }
-EXPORT_SYMBOL_GPL(omap_dma_filter_fn);
 
 static int omap_dma_init(void)
 {
