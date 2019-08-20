@@ -10,12 +10,13 @@
 #include <soc/fsl/dpaa2-io.h>
 #include <soc/fsl/dpaa2-fd.h>
 #include <linux/threads.h>
+#include <linux/netdevice.h>
 #include "dpseci.h"
 #include "desc_constr.h"
 
 #define DPAA2_CAAM_STORE_SIZE	16
 /* NAPI weight *must* be a multiple of the store size. */
-#define DPAA2_CAAM_NAPI_WEIGHT	64
+#define DPAA2_CAAM_NAPI_WEIGHT	512
 
 /* The congestion entrance threshold was chosen so that on LS2088
  * we support the maximum throughput for the available memory
@@ -64,6 +65,7 @@ struct dpaa2_caam_priv {
 	struct iommu_domain *domain;
 
 	struct dpaa2_caam_priv_per_cpu __percpu *ppriv;
+	struct dentry *dfs_root;
 };
 
 /**

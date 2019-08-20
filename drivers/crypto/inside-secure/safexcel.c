@@ -404,17 +404,9 @@ static int safexcel_hw_init(struct safexcel_crypto_priv *priv)
 		      EIP197_PE_EIP96_TOKEN_CTRL_POST_REUSE_CTX;
 		writel(val, EIP197_PE(priv) + EIP197_PE_EIP96_TOKEN_CTRL(pe));
 
-		/* H/W capabilities selection */
-		val = EIP197_FUNCTION_RSVD;
-		val |= EIP197_PROTOCOL_ENCRYPT_ONLY | EIP197_PROTOCOL_HASH_ONLY;
-		val |= EIP197_PROTOCOL_ENCRYPT_HASH | EIP197_PROTOCOL_HASH_DECRYPT;
-		val |= EIP197_ALG_DES_ECB | EIP197_ALG_DES_CBC;
-		val |= EIP197_ALG_3DES_ECB | EIP197_ALG_3DES_CBC;
-		val |= EIP197_ALG_AES_ECB | EIP197_ALG_AES_CBC;
-		val |= EIP197_ALG_MD5 | EIP197_ALG_HMAC_MD5;
-		val |= EIP197_ALG_SHA1 | EIP197_ALG_HMAC_SHA1;
-		val |= EIP197_ALG_SHA2 | EIP197_ALG_HMAC_SHA2;
-		writel(val, EIP197_PE(priv) + EIP197_PE_EIP96_FUNCTION_EN(pe));
+		/* H/W capabilities selection: just enable everything */
+		writel(EIP197_FUNCTION_ALL,
+		       EIP197_PE(priv) + EIP197_PE_EIP96_FUNCTION_EN(pe));
 	}
 
 	/* Command Descriptor Rings prepare */
@@ -589,16 +581,32 @@ finalize:
 inline int safexcel_rdesc_check_errors(struct safexcel_crypto_priv *priv,
 				       struct safexcel_result_desc *rdesc)
 {
-	if (likely(!rdesc->result_data.error_code))
+	if (likely((!rdesc->descriptor_overflow) &&
+		   (!rdesc->buffer_overflow) &&
+		   (!rdesc->result_data.error_code)))
 		return 0;
 
-	if (rdesc->result_data.error_code & 0x407f) {
-		/* Fatal error (bits 0-7, 14) */
+	if (rdesc->descriptor_overflow)
+		dev_err(priv->dev, "Descriptor overflow detected");
+
+	if (rdesc->buffer_overflow)
+		dev_err(priv->dev, "Buffer overflow detected");
+
+	if (rdesc->result_data.error_code & 0x4066) {
+		/* Fatal error (bits 1,2,5,6 & 14) */
 		dev_err(priv->dev,
-			"cipher: result: result descriptor error (0x%x)\n",
+			"result descriptor error (%x)",
 			rdesc->result_data.error_code);
+		return -EIO;
+	} else if (rdesc->result_data.error_code &
+		   (BIT(7) | BIT(4) | BIT(3) | BIT(0))) {
+		/*
+		 * Give priority over authentication fails:
+		 * Blocksize, length & overflow errors,
+		 * something wrong with the input!
+		 */
 		return -EINVAL;
-	} else if (rdesc->result_data.error_code == BIT(9)) {
+	} else if (rdesc->result_data.error_code & BIT(9)) {
 		/* Authentication failed */
 		return -EBADMSG;
 	}
@@ -843,6 +851,7 @@ static struct safexcel_alg_template *safexcel_algs[] = {
 	&safexcel_alg_cbc_des3_ede,
 	&safexcel_alg_ecb_aes,
 	&safexcel_alg_cbc_aes,
+	&safexcel_alg_ctr_aes,
 	&safexcel_alg_md5,
 	&safexcel_alg_sha1,
 	&safexcel_alg_sha224,
@@ -860,6 +869,12 @@ static struct safexcel_alg_template *safexcel_algs[] = {
 	&safexcel_alg_authenc_hmac_sha256_cbc_aes,
 	&safexcel_alg_authenc_hmac_sha384_cbc_aes,
 	&safexcel_alg_authenc_hmac_sha512_cbc_aes,
+	&safexcel_alg_authenc_hmac_sha1_cbc_des3_ede,
+	&safexcel_alg_authenc_hmac_sha1_ctr_aes,
+	&safexcel_alg_authenc_hmac_sha224_ctr_aes,
+	&safexcel_alg_authenc_hmac_sha256_ctr_aes,
+	&safexcel_alg_authenc_hmac_sha384_ctr_aes,
+	&safexcel_alg_authenc_hmac_sha512_ctr_aes,
 };
 
 static int safexcel_register_algorithms(struct safexcel_crypto_priv *priv)
@@ -984,7 +999,6 @@ static void safexcel_init_register_offsets(struct safexcel_crypto_priv *priv)
 static int safexcel_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	struct resource *res;
 	struct safexcel_crypto_priv *priv;
 	int i, ret;
 
@@ -1000,8 +1014,7 @@ static int safexcel_probe(struct platform_device *pdev)
 
 	safexcel_init_register_offsets(priv);
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	priv->base = devm_ioremap_resource(dev, res);
+	priv->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(priv->base)) {
 		dev_err(dev, "failed to get resource\n");
 		return PTR_ERR(priv->base);
