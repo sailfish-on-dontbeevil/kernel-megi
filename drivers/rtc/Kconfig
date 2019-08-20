@@ -500,6 +500,7 @@ config RTC_DRV_M41T80_WDT
 	  watchdog timer in the ST M41T60 and M41T80 RTC chips series.
 config RTC_DRV_BD70528
 	tristate "ROHM BD70528 PMIC RTC"
+	depends on MFD_ROHM_BD70528 && (BD70528_WATCHDOG || !BD70528_WATCHDOG)
 	help
 	  If you say Y here you will get support for the RTC
 	  on ROHM BD70528 Power Management IC.
@@ -1246,13 +1247,6 @@ config RTC_DRV_AB8500
 	help
 	  Select this to enable the ST-Ericsson AB8500 power management IC RTC
 	  support. This chip contains a battery- and capacitor-backed RTC.
-
-config RTC_DRV_NUC900
-	tristate "NUC910/NUC920 RTC driver"
-	depends on ARCH_W90X900 || COMPILE_TEST
-	help
-	  If you say yes here you get support for the RTC subsystem of the
-	  NUC910/NUC920 used in embedded systems.
 
 config RTC_DRV_OPAL
 	tristate "IBM OPAL RTC driver"
