@@ -131,15 +131,26 @@ static inline int __init fsverity_sysctl_init(void)
 }
 #endif /* !CONFIG_SYSCTL */
 
+static struct key_acl fsverity_acl = {
+	.usage	= REFCOUNT_INIT(1),
+	.possessor_viewable = false,
+	.nr_ace	= 2,
+	.aces = {
+		KEY_POSSESSOR_ACE(KEY_ACE_SEARCH | KEY_ACE_JOIN |
+				  KEY_ACE_INVAL),
+		KEY_OWNER_ACE(KEY_ACE_VIEW | KEY_ACE_READ | KEY_ACE_WRITE |
+			      KEY_ACE_CLEAR | KEY_ACE_SEARCH | KEY_ACE_INVAL | KEY_ACE_JOIN |
+			      KEY_ACE_SET_SECURITY | KEY_ACE_REVOKE),
+	}
+};
+
 int __init fsverity_init_signature(void)
 {
 	struct key *ring;
 	int err;
 
 	ring = keyring_alloc(".fs-verity", KUIDT_INIT(0), KGIDT_INIT(0),
-			     current_cred(), KEY_POS_SEARCH |
-				KEY_USR_VIEW | KEY_USR_READ | KEY_USR_WRITE |
-				KEY_USR_SEARCH | KEY_USR_SETATTR,
+			     current_cred(), &fsverity_acl,
 			     KEY_ALLOC_NOT_IN_QUOTA, NULL, NULL);
 	if (IS_ERR(ring))
 		return PTR_ERR(ring);
