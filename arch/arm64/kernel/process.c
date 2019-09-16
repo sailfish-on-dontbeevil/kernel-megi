@@ -52,6 +52,7 @@
 #include <asm/exec.h>
 #include <asm/fpsimd.h>
 #include <asm/mmu_context.h>
+#include <asm/mte.h>
 #include <asm/processor.h>
 #include <asm/pointer_auth.h>
 #include <asm/stacktrace.h>
@@ -338,6 +339,7 @@ void flush_thread(void)
 	tls_thread_flush();
 	flush_ptrace_hw_breakpoint(current);
 	flush_tagged_addr_state();
+	flush_mte_state();
 }
 
 void release_thread(struct task_struct *dead_task)
@@ -369,6 +371,9 @@ int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
 	 */
 	dst->thread.sve_state = NULL;
 	clear_tsk_thread_flag(dst, TIF_SVE);
+
+	/* clear any pending asynchronous tag fault raised by the parent */
+	clear_tsk_thread_flag(dst, TIF_MTE_ASYNC_FAULT);
 
 	return 0;
 }
