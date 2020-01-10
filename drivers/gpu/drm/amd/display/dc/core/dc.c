@@ -1040,14 +1040,6 @@ static void program_timing_sync(
 				status->timing_sync_info.master = false;
 
 		}
-		/* remove any other pipes with plane as they have already been synced */
-		for (j = j + 1; j < group_size; j++) {
-			if (pipe_set[j]->plane_state) {
-				group_size--;
-				pipe_set[j] = pipe_set[group_size];
-				j--;
-			}
-		}
 
 		if (group_size > 1) {
 			dc->hwss.enable_timing_synchronization(
