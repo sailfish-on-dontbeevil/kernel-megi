@@ -379,6 +379,7 @@ static int sun6i_video_format_try(struct sun6i_video *video,
 {
 	struct v4l2_pix_format *pix_format = &format->fmt.pix;
 	int bpp;
+	u32 bpl_packed;
 
 	if (!sun6i_video_format_check(pix_format->pixelformat))
 		pix_format->pixelformat = sun6i_video_formats[0];
@@ -387,7 +388,13 @@ static int sun6i_video_format_try(struct sun6i_video *video,
 			      &pix_format->height, MIN_HEIGHT, MAX_WIDTH, 1, 1);
 
 	bpp = sun6i_csi_get_bpp(pix_format->pixelformat);
-	pix_format->bytesperline = (pix_format->width * bpp) >> 3;
+        bpl_packed = (pix_format->width * bpp) / 8;
+
+	//XXX: only allow for YUYV and friends
+	if (pix_format->bytesperline < bpl_packed
+		|| pix_format->bytesperline > bpl_packed + 256)
+		pix_format->bytesperline = bpl_packed;
+
 	pix_format->sizeimage = pix_format->bytesperline * pix_format->height;
 
 	if (pix_format->field == V4L2_FIELD_ANY)
