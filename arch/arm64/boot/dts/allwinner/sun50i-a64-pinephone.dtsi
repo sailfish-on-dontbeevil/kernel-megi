@@ -553,6 +553,7 @@
 	cd-gpios = <&pio 5 6 GPIO_ACTIVE_LOW>; /* PF6 */
 	disable-wp;
 	bus-width = <4>;
+	post-power-on-delay-ms = <1>; /* power is already turned on by the bootloader */
 	status = "okay";
 };
 
@@ -563,6 +564,7 @@
 	vqmmc-supply = <&reg_dldo4>;
 	bus-width = <4>;
 	non-removable;
+	post-power-on-delay-ms = <1>; /* wifi power is always on */
 	status = "okay";
 
 	rtl8723cs: wifi@1 {
@@ -578,6 +580,7 @@
 	bus-width = <8>;
 	non-removable;
 	cap-mmc-hw-reset;
+	post-power-on-delay-ms = <1>; /* power is already turned on by the bootloader */
 	status = "okay";
 };
 
