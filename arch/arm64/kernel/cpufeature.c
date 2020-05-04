@@ -75,6 +75,7 @@
 #include <asm/cpu_ops.h>
 #include <asm/fpsimd.h>
 #include <asm/mmu_context.h>
+#include <asm/mte.h>
 #include <asm/processor.h>
 #include <asm/sysreg.h>
 #include <asm/traps.h>
@@ -1689,6 +1690,12 @@ static int __init system_enable_mte(void)
 
 	/* Ensure the TLB does not have stale MAIR attributes */
 	flush_tlb_all();
+
+	/*
+	 * Clear the tags in the zero page. This needs to be done via the
+	 * linear map which has the Tagged attribute.
+	 */
+	mte_clear_page_tags(lm_alias(empty_zero_page));
 
 	return 0;
 }
