@@ -175,6 +175,12 @@ int gen4_init_dev(struct intel_ntb_dev *ndev)
 	u16 lnkctl;
 	int rc;
 
+	if (!pdev_is_ICX(pdev)) {
+		dev_warn(&pdev->dev,
+			 "Incorrect device revision: %d.\n", pdev->revision);
+		return -ENODEV;
+	}
+
 	ndev->reg = &gen4_reg;
 
 	ppd1 = ioread32(ndev->self_mmio + GEN4_PPD1_OFFSET);
