@@ -63,7 +63,7 @@ __modpost:
 else
 
 # modpost options for modules (both in-kernel and external)
-MODPOST += $(subst -i,-n,$(filter -i,$(MAKEFLAGS))) -s \
+MODPOST += $(subst -i,-n,$(filter -i,$(MAKEFLAGS))) \
 	$(if $(CONFIG_MODULE_ALLOW_MISSING_NAMESPACE_IMPORTS)$(KBUILD_NSDEPS),-N) \
 	$(if $(KBUILD_NSDEPS),-d $(MODULES_NSDEPS))
 
