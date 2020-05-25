@@ -37,6 +37,18 @@ arm/soc
 		ARM: mvebu: Drop unneeded select of HAVE_SMP
 		ARM: prima2: Drop unneeded select of HAVE_SMP
 		ARM: socfpga: Drop unneeded select of PCI_DOMAINS_GENERIC
+		bus: arm-integrator-lm: Fix return value check in integrator_ap_lm_probe()
+	imx/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-soc-5.8
+	omap/timer
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.8/timer-signed
+	patch
+		ARM: pxa: remove Compulab pxa2xx boards
+		MAINTAINERS: pxa: remove Compulab arm/pxa support
+	mvebu/arm
+		git://git.infradead.org/linux-mvebu tags/mvebu-arm-5.8-1
+	rockchip/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.8-rockchip-soc32-1
 
 arm/dt
 	patch
@@ -119,8 +131,63 @@ arm/dt
 		ARM: dts: mmp3: Add the fifth SD HCI
 	mmp/fixes
 		Merge branch 'mmp/fixes' into arm/dt
+	amlogic/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/khilman/linux-amlogic tags/amlogic-dt
+	amlogic/dt64
+		git://git.kernel.org/pub/scm/linux/kernel/git/khilman/linux-amlogic tags/amlogic-dt64
+	tegra/dt64
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.8-arm64-dt-v2
+	imx/dt-bindings
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-bindings-5.8
+	imx/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-dt-5.8
+	imx/dt64
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-dt64-5.8
+	mediatek/dt-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v5.7-next-dts64.2
 
 arm/drivers
+	drivers/scmi
+		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/scmi-updates-5.8
+	renesas/drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-drivers-for-v5.8-tag1
+	drivers/tee
+		git://git.linaro.org/people/jens.wiklander/linux-tee tags/tee-subsys-for-5.8
+	renesas/drivers-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-drivers-for-v5.8-tag2
+	tegra/firmware
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.8-firmware-v2
+	mediatek/mmsys
+		git://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v5.7-next-soc
+	drivers/tee-fix
+		git://git.linaro.org/people/jens.wiklander/linux-tee tags/tee-smatch-for-5.8
+	amlogic/ee-power-control
+		git://git.kernel.org/pub/scm/linux/kernel/git/khilman/linux-amlogic tags/amlogic-drivers
+	<no branch> (697fa27dc5fb4c669471e728e97f176687982f95)
+		git://git.pengutronix.de/pza/linux tags/reset-for-v5.8
+	drivers/tee-login
+		git://git.linaro.org/people/jens.wiklander/linux-tee tags/tee-login-for-5.8
+	mediatek/soc-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v5.7-next-soc.2
+	qcom/drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-drivers-for-5.8
+	samsung/drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-drivers-5.8
+	tegra/cpufreq
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.8-cpufreq
+	tegra/cpuidle
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.8-cpuidle
+	tegra/of
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.8-of
+	tegra/media
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.8-media
+		contains tegra/dt-bindings
+	tegra/soc-driver
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.8-soc-v2
+	imx/drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-drivers-5.8
+	hisi/logic_pio
+		git://github.com/hisilicon/linux-hisi tags/hisi-drivers-for-5.8
 
 arm/defconfig
 	ux500/defconfig
@@ -131,7 +198,7 @@ arm/defconfig
 		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.8/defconfig
 	samsung/defconfig
 		git://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-defconfig-5.8
-	<no branch> (44b6141ebe936808fc59b386e3e259bef6c9bba6)
+	renesas/defconfig-2
 		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-defconfig-for-v5.8-tag2
 	sunxi/defconfig
 		git://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-config-for-5.8-1
@@ -143,6 +210,10 @@ arm/defconfig
 		git://git.kernel.org/pub/scm/linux/kernel/git/khilman/linux-amlogic tags/amlogic-defconfig
 	hisi/defconfig
 		git://github.com/hisilicon/linux-hisi tags/hisi-arm64-defconfig-for-5.8
+	socfpga/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/dinguyen/linux tags/arm64_defconfig_for_v5.8
+	imx/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-defconfig-5.8
 
 arm/newsoc
 
@@ -151,4 +222,12 @@ arm/late
 arm/fixes
 	mmp/fixes
 		Merge branch 'mmp/fixes' into arm/fixes
+	<no branch> (665e7c73a7724a393b4ec92d1ae1e029925ef2b7)
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-fixes-5.7-2
+	<no branch> (34c4e4072603ff5c174df73b973896abb76cbb51)
+		git://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux v5.7-fixes
+	<no branch> (be0ec060b54f0481fb95d59086c1484a949c903c)
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.7/devicetree-fixes-part2-v2
+	<no branch> (fb6823a6f9801dbe86b6551103f477dd3c5d115a)
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.7/cpsw-fixes-signed
 
