@@ -3686,6 +3686,7 @@ static enum ia_css_err create_host_video_pipeline(struct ia_css_pipe *pipe)
 	}
 	if (video_stage) {
 		int frm;
+
 		for (frm = 0; frm < NUM_TNR_FRAMES; frm++) {
 			video_stage->args.tnr_frames[frm] =
 			    pipe->pipe_settings.video.tnr_frames[frm];
@@ -6685,7 +6686,8 @@ static enum ia_css_err load_low_light_binaries(
 	return err;
 }
 
-static bool copy_on_sp(struct ia_css_pipe *pipe) {
+static bool copy_on_sp(struct ia_css_pipe *pipe)
+{
 	bool rval;
 
 	assert(pipe);
@@ -7379,7 +7381,8 @@ unload_yuvpp_binaries(struct ia_css_pipe *pipe) {
 	return IA_CSS_SUCCESS;
 }
 
-static enum ia_css_err yuvpp_start(struct ia_css_pipe *pipe) {
+static enum ia_css_err yuvpp_start(struct ia_css_pipe *pipe)
+{
 	struct ia_css_binary *copy_binary;
 	enum ia_css_err err = IA_CSS_SUCCESS;
 	enum sh_css_pipe_config_override copy_ovrd;
@@ -8406,7 +8409,8 @@ remove_firmware(struct ia_css_fw_info **l, struct ia_css_fw_info *firmware) {
 	return; /* removing single and multiple firmware is handled in acc_unload_extension() */
 }
 
-static enum ia_css_err upload_isp_code(struct ia_css_fw_info *firmware) {
+static enum ia_css_err upload_isp_code(struct ia_css_fw_info *firmware)
+{
 	ia_css_ptr binary;
 
 	if (!firmware) {
@@ -8663,7 +8667,8 @@ enum ia_css_err ia_css_stream_capture(
 	return return_err;
 }
 
-void ia_css_stream_request_flash(struct ia_css_stream *stream) {
+void ia_css_stream_request_flash(struct ia_css_stream *stream)
+{
 	(void)stream;
 
 	assert(stream);
@@ -8764,7 +8769,8 @@ sh_css_init_host_sp_control_vars(void) {
 /*
     * create the internal structures and fill in the configuration data
     */
-void ia_css_pipe_config_defaults(struct ia_css_pipe_config *pipe_config) {
+void ia_css_pipe_config_defaults(struct ia_css_pipe_config *pipe_config)
+{
 	ia_css_debug_dtrace(IA_CSS_DEBUG_TRACE, "ia_css_pipe_config_defaults()\n");
 	*pipe_config = DEFAULT_PIPE_CONFIG;
 }
@@ -8786,7 +8792,8 @@ ia_css_pipe_extra_config_defaults(struct ia_css_pipe_extra_config
 	extra_config->enable_fractional_ds = false;
 }
 
-void ia_css_stream_config_defaults(struct ia_css_stream_config *stream_config) {
+void ia_css_stream_config_defaults(struct ia_css_stream_config *stream_config)
+{
 	ia_css_debug_dtrace(IA_CSS_DEBUG_TRACE, "ia_css_stream_config_defaults()\n");
 	assert(stream_config);
 	memset(stream_config, 0, sizeof(*stream_config));
@@ -8840,6 +8847,7 @@ ia_css_pipe_create(const struct ia_css_pipe_config *config,
 	if (!pipe)
 #else
 }
+
 if (!pipe)
 {
 	IA_CSS_LEAVE_ERR_PRIVATE(IA_CSS_ERR_INVALID_ARGUMENTS);
@@ -9059,7 +9067,8 @@ ia_css_pipe_get_info(const struct ia_css_pipe *pipe,
 	return IA_CSS_SUCCESS;
 }
 
-bool ia_css_pipe_has_dvs_stats(struct ia_css_pipe_info *pipe_info) {
+bool ia_css_pipe_has_dvs_stats(struct ia_css_pipe_info *pipe_info)
+{
 	unsigned int i;
 
 	if (pipe_info) {
@@ -9915,7 +9924,6 @@ ia_css_stream_get_info(const struct ia_css_stream *stream,
     */
 enum ia_css_err
 ia_css_stream_load(struct ia_css_stream *stream) {
-
 	if (!atomisp_hw_is_isp2401) {
 		int i;
 		enum ia_css_err err;
@@ -10492,7 +10500,8 @@ ia_css_update_continuous_frames(struct ia_css_stream *stream) {
 	return IA_CSS_SUCCESS;
 }
 
-void ia_css_pipe_map_queue(struct ia_css_pipe *pipe, bool map) {
+void ia_css_pipe_map_queue(struct ia_css_pipe *pipe, bool map)
+{
 	unsigned int thread_id;
 	enum ia_css_pipe_id pipe_id;
 	unsigned int pipe_num;
@@ -10755,7 +10764,7 @@ ia_css_pipe_get_qos_ext_state(struct ia_css_pipe *pipe, uint32_t fw_handle,
 /* ISP2401 */
 enum ia_css_err
 ia_css_pipe_update_qos_ext_mapped_arg(struct ia_css_pipe *pipe,
-					uint32_t fw_handle,
+					u32 fw_handle,
 					struct ia_css_isp_param_css_segments *css_seg,
 					struct ia_css_isp_param_isp_segments *isp_seg) {
 	unsigned int HIVE_ADDR_sp_group;
