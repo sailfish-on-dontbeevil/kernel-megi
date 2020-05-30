@@ -393,56 +393,62 @@ struct page *__read_swap_cache_async(swp_entry_t entry, gfp_t gfp_mask,
 			return NULL;
 
 		/*
+		 * Get a new page to read into from swap.  Allocate it now,
+		 * before marking swap_map SWAP_HAS_CACHE, when -EEXIST will
+		 * cause any racers to loop around until we add it to cache.
+		 */
+		page = alloc_page_vma(gfp_mask, vma, addr);
+		if (!page)
+			return NULL;
+
+		/*
 		 * Swap entry may have been freed since our caller observed it.
 		 */
 		err = swapcache_prepare(entry);
 		if (!err)
 			break;
 
-		if (err == -EEXIST) {
-			/*
-			 * We might race against get_swap_page() and stumble
-			 * across a SWAP_HAS_CACHE swap_map entry whose page
-			 * has not been brought into the swapcache yet.
-			 */
-			cond_resched();
-			continue;
-		}
+		put_page(page);
+		if (err != -EEXIST)
+			return NULL;
 
-		return NULL;
+		/*
+		 * We might race against __delete_from_swap_cache(), and
+		 * stumble across a swap_map entry whose SWAP_HAS_CACHE
+		 * has not yet been cleared.  Or race against another
+		 * __read_swap_cache_async(), which has set SWAP_HAS_CACHE
+		 * in swap_map, but not yet added its page to swap cache.
+		 */
+		cond_resched();
 	}
 
 	/*
-	 * The swap entry is ours to swap in. Prepare a new page.
+	 * The swap entry is ours to swap in. Prepare the new page.
 	 */
-
-	page = alloc_page_vma(gfp_mask, vma, addr);
-	if (!page)
-		goto fail_free;
 
 	__SetPageLocked(page);
 	__SetPageSwapBacked(page);
 
 	/* May fail (-ENOMEM) if XArray node allocation failed. */
-	if (add_to_swap_cache(page, entry, gfp_mask & GFP_KERNEL))
+	if (add_to_swap_cache(page, entry, gfp_mask & GFP_KERNEL)) {
+		put_swap_page(page, entry);
 		goto fail_unlock;
+	}
 
-	if (mem_cgroup_charge(page, NULL, gfp_mask & GFP_KERNEL, false))
-		goto fail_delete;
+	if (mem_cgroup_charge(page, NULL, gfp_mask, false)) {
+		delete_from_swap_cache(page);
+		goto fail_unlock;
+	}
 
-	/* Initiate read into locked page */
+	/* Caller will initiate read into locked page */
 	SetPageWorkingset(page);
 	lru_cache_add_anon(page);
 	*new_page_allocated = true;
 	return page;
 
-fail_delete:
-	delete_from_swap_cache(page);
 fail_unlock:
 	unlock_page(page);
 	put_page(page);
-fail_free:
-	swap_free(entry);
 	return NULL;
 }
 
