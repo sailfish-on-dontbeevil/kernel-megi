@@ -1379,7 +1379,7 @@ DEFINE_IDTENTRY_RAW_ERRORCODE(exc_page_fault)
 	unsigned long address = read_cr2();
 	bool rcu_exit;
 
-	prefetchw(&current->mm->mmap_sem);
+	prefetchw(&current->mm->mmap_lock);
 
 	/*
 	 * KVM has two types of events that are, logically, interrupts, but
