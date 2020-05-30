@@ -75,7 +75,8 @@ extern char _text[];
 
 static inline bool kaslr_enabled(void)
 {
-	return !!(boot_params.hdr.loadflags & KASLR_FLAG);
+	return IS_ENABLED(CONFIG_RANDOMIZE_MEMORY) &&
+		!!(boot_params.hdr.loadflags & KASLR_FLAG);
 }
 
 /*
