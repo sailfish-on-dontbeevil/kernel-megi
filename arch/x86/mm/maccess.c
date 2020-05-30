@@ -29,6 +29,6 @@ bool probe_kernel_read_allowed(const void *unsafe_src, size_t size, bool strict)
 {
 	if (!strict)
 		return true;
-	return (unsigned long)vaddr >= TASK_SIZE_MAX;
+	return (unsigned long)unsafe_src >= TASK_SIZE_MAX;
 }
 #endif
