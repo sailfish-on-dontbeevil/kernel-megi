@@ -107,8 +107,6 @@ void flush_cache_page(struct vm_area_struct*,
 #define flush_cache_page  local_flush_cache_page
 #endif
 
-#define flush_icache_user_range flush_icache_range
-
 #define local_flush_cache_all()						\
 	do {								\
 		__flush_invalidate_dcache_all();			\
@@ -146,6 +144,8 @@ void local_flush_cache_page(struct vm_area_struct *vma,
 #define flush_cache_range(vma, start, end)		do { } while (0)
 
 #endif
+
+#define flush_icache_user_range flush_icache_range
 
 /* Ensure consistency between data and instruction cache. */
 #define local_flush_icache_range(start, end)				\
