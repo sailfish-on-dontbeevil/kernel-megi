@@ -528,9 +528,8 @@ static void release_pte_pages(pte_t *pte, pte_t *_pte)
 
 static bool is_refcount_suitable(struct page *page)
 {
-	int expected_refcount, refcount;
+	int expected_refcount;
 
-	refcount = page_count(page);
 	expected_refcount = total_mapcount(page);
 	if (PageSwapCache(page))
 		expected_refcount += compound_nr(page);
