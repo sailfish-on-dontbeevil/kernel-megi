@@ -613,7 +613,8 @@ new_cluster:
 		} else if (!cluster_list_empty(&si->discard_clusters)) {
 			/*
 			 * we don't have free cluster but have some clusters in
-			 * discarding, do discard now and reclaim them
+			 * discarding, do discard now and reclaim them, then
+			 * reread cluster_next_cpu since we dropped si->lock
 			 */
 			swap_do_scheduled_discard(si);
 			*scan_base = this_cpu_read(*si->cluster_next_cpu);
@@ -745,7 +746,7 @@ static void set_cluster_next(struct swap_info_struct *si, unsigned long next)
 			return;
 		next = si->lowest_bit +
 			prandom_u32_max(si->highest_bit - si->lowest_bit + 1);
-		next = ALIGN(next, SWAP_ADDRESS_SPACE_PAGES);
+		next = ALIGN_DOWN(next, SWAP_ADDRESS_SPACE_PAGES);
 		next = max_t(unsigned int, next, si->lowest_bit);
 	}
 	this_cpu_write(*si->cluster_next_cpu, next);
