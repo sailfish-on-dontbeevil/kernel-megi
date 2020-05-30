@@ -282,10 +282,10 @@ static void note_page(struct ptdump_state *pt_st, unsigned long addr, int level,
 	struct seq_file *m = st->seq;
 
 	new_prot = val & PTE_FLAGS_MASK;
-	new_eff = st->prot_levels[level];
-
 	if (!val)
 		new_eff = 0;
+	else
+		new_eff = st->prot_levels[level];
 
 	/*
 	 * If we have a "break" in the series, we need to flush the state that
