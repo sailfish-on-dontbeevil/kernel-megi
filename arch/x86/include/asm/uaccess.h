@@ -527,11 +527,11 @@ do {									\
 
 #define __get_kernel_nofault(dst, src, type, err_label)			\
 do {									\
-        int __kr_err;							\
+	int __kr_err;							\
 									\
 	__get_user_size(*((type *)dst), (__force type __user *)src,	\
 			sizeof(type), __kr_err);			\
-        if (unlikely(__kr_err))						\
+	if (unlikely(__kr_err))						\
 		goto err_label;						\
 } while (0)
 
