@@ -807,8 +807,6 @@ recheck_buffers:
 
 	} while (bh != head);
 
-	SetPagePrivate(newpage);
-
 	if (mode != MIGRATE_SYNC_NO_COPY)
 		migrate_page_copy(newpage, page);
 	else
