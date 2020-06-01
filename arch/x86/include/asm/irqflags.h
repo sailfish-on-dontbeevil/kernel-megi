@@ -172,38 +172,4 @@ static inline int arch_irqs_disabled(void)
 }
 #endif /* !__ASSEMBLY__ */
 
-#ifdef __ASSEMBLY__
-#ifdef CONFIG_TRACE_IRQFLAGS
-#  define TRACE_IRQS_ON		call trace_hardirqs_on_thunk;
-#  define TRACE_IRQS_OFF	call trace_hardirqs_off_thunk;
-#else
-#  define TRACE_IRQS_ON
-#  define TRACE_IRQS_OFF
-#endif
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
-#  ifdef CONFIG_X86_64
-#    define LOCKDEP_SYS_EXIT		call lockdep_sys_exit_thunk
-#    define LOCKDEP_SYS_EXIT_IRQ \
-	TRACE_IRQS_ON; \
-	sti; \
-	call lockdep_sys_exit_thunk; \
-	cli; \
-	TRACE_IRQS_OFF;
-#  else
-#    define LOCKDEP_SYS_EXIT \
-	pushl %eax;				\
-	pushl %ecx;				\
-	pushl %edx;				\
-	call lockdep_sys_exit;			\
-	popl %edx;				\
-	popl %ecx;				\
-	popl %eax;
-#    define LOCKDEP_SYS_EXIT_IRQ
-#  endif
-#else
-#  define LOCKDEP_SYS_EXIT
-#  define LOCKDEP_SYS_EXIT_IRQ
-#endif
-#endif /* __ASSEMBLY__ */
-
 #endif
