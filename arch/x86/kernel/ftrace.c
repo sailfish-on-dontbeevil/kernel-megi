@@ -441,7 +441,7 @@ void set_ftrace_ops_ro(void)
 			end_offset = (unsigned long)ftrace_regs_caller_end;
 		} else {
 			start_offset = (unsigned long)ftrace_caller;
-			end_offset = (unsigned long)ftrace_epilogue;
+			end_offset = (unsigned long)ftrace_caller_end;
 		}
 		size = end_offset - start_offset;
 		size = size + RET_SIZE + sizeof(void *);
