@@ -554,6 +554,9 @@ static int handle_hca_cap(struct mlx5_core_dev *dev, void *set_ctx)
 			 num_vhca_ports,
 			 MLX5_CAP_GEN_MAX(dev, num_vhca_ports));
 
+	if (MLX5_CAP_GEN_MAX(dev, release_all_pages))
+		MLX5_SET(cmd_hca_cap, set_hca_cap, release_all_pages, 1);
+
 	return set_caps(dev, set_ctx, MLX5_SET_HCA_CAP_OP_MOD_GENERAL_DEVICE);
 }
 
@@ -674,26 +677,6 @@ int mlx5_core_disable_hca(struct mlx5_core_dev *dev, u16 func_id)
 	return mlx5_cmd_exec_in(dev, disable_hca, in);
 }
 
-u64 mlx5_read_internal_timer(struct mlx5_core_dev *dev,
-			     struct ptp_system_timestamp *sts)
-{
-	u32 timer_h, timer_h1, timer_l;
-
-	timer_h = ioread32be(&dev->iseg->internal_timer_h);
-	ptp_read_system_prets(sts);
-	timer_l = ioread32be(&dev->iseg->internal_timer_l);
-	ptp_read_system_postts(sts);
-	timer_h1 = ioread32be(&dev->iseg->internal_timer_h);
-	if (timer_h != timer_h1) {
-		/* wrap around */
-		ptp_read_system_prets(sts);
-		timer_l = ioread32be(&dev->iseg->internal_timer_l);
-		ptp_read_system_postts(sts);
-	}
-
-	return (u64)timer_l | (u64)timer_h1 << 32;
-}
-
 static int mlx5_core_set_issi(struct mlx5_core_dev *dev)
 {
 	u32 query_out[MLX5_ST_SZ_DW(query_issi_out)] = {};
@@ -789,7 +772,7 @@ static int mlx5_pci_init(struct mlx5_core_dev *dev, struct pci_dev *pdev,
 	}
 
 	mlx5_pci_vsc_init(dev);
-
+	dev->caps.embedded_cpu = mlx5_read_embedded_cpu(dev);
 	return 0;
 
 err_clr_master:
@@ -1187,7 +1170,6 @@ int mlx5_load_one(struct mlx5_core_dev *dev, bool boot)
 {
 	int err = 0;
 
-	dev->caps.embedded_cpu = mlx5_read_embedded_cpu(dev);
 	mutex_lock(&dev->intf_state_mutex);
 	if (test_bit(MLX5_INTERFACE_STATE_UP, &dev->intf_state)) {
 		mlx5_core_warn(dev, "interface is up, NOP\n");
@@ -1224,10 +1206,9 @@ int mlx5_load_one(struct mlx5_core_dev *dev, bool boot)
 		mlx5_register_device(dev);
 
 	set_bit(MLX5_INTERFACE_STATE_UP, &dev->intf_state);
-out:
-	mutex_unlock(&dev->intf_state_mutex);
 
-	return err;
+	mutex_unlock(&dev->intf_state_mutex);
+	return 0;
 
 err_devlink_reg:
 	mlx5_unload(dev);
@@ -1238,17 +1219,15 @@ function_teardown:
 	mlx5_function_teardown(dev, boot);
 err_function:
 	dev->state = MLX5_DEVICE_STATE_INTERNAL_ERROR;
+out:
 	mutex_unlock(&dev->intf_state_mutex);
-
 	return err;
 }
 
 void mlx5_unload_one(struct mlx5_core_dev *dev, bool cleanup)
 {
-	if (cleanup) {
+	if (cleanup)
 		mlx5_unregister_device(dev);
-		mlx5_drain_health_wq(dev);
-	}
 
 	mutex_lock(&dev->intf_state_mutex);
 	if (!test_bit(MLX5_INTERFACE_STATE_UP, &dev->intf_state)) {
@@ -1298,7 +1277,7 @@ static int mlx5_mdev_init(struct mlx5_core_dev *dev, int profile_idx)
 					    mlx5_debugfs_root);
 	if (!priv->dbg_root) {
 		dev_err(dev->device, "mlx5_core: error, Cannot create debugfs dir, aborting\n");
-		return -ENOMEM;
+		goto err_dbg_root;
 	}
 
 	err = mlx5_health_init(dev);
@@ -1315,15 +1294,27 @@ err_pagealloc_init:
 	mlx5_health_cleanup(dev);
 err_health_init:
 	debugfs_remove(dev->priv.dbg_root);
-
+err_dbg_root:
+	mutex_destroy(&priv->pgdir_mutex);
+	mutex_destroy(&priv->alloc_mutex);
+	mutex_destroy(&priv->bfregs.wc_head.lock);
+	mutex_destroy(&priv->bfregs.reg_head.lock);
+	mutex_destroy(&dev->intf_state_mutex);
 	return err;
 }
 
 static void mlx5_mdev_uninit(struct mlx5_core_dev *dev)
 {
+	struct mlx5_priv *priv = &dev->priv;
+
 	mlx5_pagealloc_cleanup(dev);
 	mlx5_health_cleanup(dev);
 	debugfs_remove_recursive(dev->priv.dbg_root);
+	mutex_destroy(&priv->pgdir_mutex);
+	mutex_destroy(&priv->alloc_mutex);
+	mutex_destroy(&priv->bfregs.wc_head.lock);
+	mutex_destroy(&priv->bfregs.reg_head.lock);
+	mutex_destroy(&dev->intf_state_mutex);
 }
 
 #define MLX5_IB_MOD "mlx5_ib"
@@ -1391,6 +1382,7 @@ static void remove_one(struct pci_dev *pdev)
 	mlx5_crdump_disable(dev);
 	mlx5_devlink_unregister(devlink);
 
+	mlx5_drain_health_wq(dev);
 	mlx5_unload_one(dev, true);
 	mlx5_pci_close(dev);
 	mlx5_mdev_uninit(dev);
