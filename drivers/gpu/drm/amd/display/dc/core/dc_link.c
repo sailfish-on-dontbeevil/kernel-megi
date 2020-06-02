@@ -521,11 +521,11 @@ static void link_disconnect_remap(struct dc_sink *prev_sink, struct dc_link *lin
 }
 
 #if defined(CONFIG_DRM_AMD_DC_HDCP)
-bool dc_link_is_hdcp14(struct dc_link *link)
+bool dc_link_is_hdcp14(struct dc_link *link, enum signal_type signal)
 {
 	bool ret = false;
 
-	switch (link->connector_signal)	{
+	switch (signal)	{
 	case SIGNAL_TYPE_DISPLAY_PORT:
 	case SIGNAL_TYPE_DISPLAY_PORT_MST:
 		ret = link->hdcp_caps.bcaps.bits.HDCP_CAPABLE;
@@ -545,11 +545,11 @@ bool dc_link_is_hdcp14(struct dc_link *link)
 	return ret;
 }
 
-bool dc_link_is_hdcp22(struct dc_link *link)
+bool dc_link_is_hdcp22(struct dc_link *link, enum signal_type signal)
 {
 	bool ret = false;
 
-	switch (link->connector_signal)	{
+	switch (signal)	{
 	case SIGNAL_TYPE_DISPLAY_PORT:
 	case SIGNAL_TYPE_DISPLAY_PORT_MST:
 		ret = (link->hdcp_caps.bcaps.bits.HDCP_CAPABLE &&
@@ -691,10 +691,9 @@ static bool detect_dp(struct dc_link *link,
 	if (sink_caps->transaction_type == DDC_TRANSACTION_TYPE_I2C_OVER_AUX) {
 		sink_caps->signal = SIGNAL_TYPE_DISPLAY_PORT;
 
-		dpcd_set_source_specific_data(link);
-
 		if (!detect_dp_sink_caps(link))
 			return false;
+		dpcd_set_source_specific_data(link);
 
 		if (is_mst_supported(link)) {
 			sink_caps->signal = SIGNAL_TYPE_DISPLAY_PORT_MST;

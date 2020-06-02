@@ -186,9 +186,10 @@ static bool create_links(
 			bool should_destory_link = false;
 
 			if (link->connector_signal == SIGNAL_TYPE_EDP) {
-				if (dc->config.edp_not_connected)
-					should_destory_link = true;
-				else if (dc->debug.remove_disconnect_edp) {
+				if (dc->config.edp_not_connected) {
+					if (!IS_DIAG_DC(dc->ctx->dce_environment))
+						should_destory_link = true;
+				} else {
 					enum dc_connection_type type;
 					dc_link_detect_sink(link, &type);
 					if (type == dc_connection_none)
@@ -1038,14 +1039,6 @@ static void program_timing_sync(
 			else
 				status->timing_sync_info.master = false;
 
-		}
-		/* remove any other pipes with plane as they have already been synced */
-		for (j = j + 1; j < group_size; j++) {
-			if (pipe_set[j]->plane_state) {
-				group_size--;
-				pipe_set[j] = pipe_set[group_size];
-				j--;
-			}
 		}
 
 		if (group_size > 1) {

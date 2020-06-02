@@ -2015,6 +2015,10 @@ int dcn20_populate_dml_pipes_from_context(
 			pipe_cnt = i;
 			continue;
 		}
+
+		if (res_ctx->pipe_ctx[pipe_cnt].stream == res_ctx->pipe_ctx[i].stream)
+			continue;
+
 		if (dc->debug.disable_timing_sync || !resource_are_streams_timing_synchronizable(
 				res_ctx->pipe_ctx[pipe_cnt].stream,
 				res_ctx->pipe_ctx[i].stream)) {
@@ -2836,8 +2840,8 @@ bool dcn20_fast_validate_bw(
 					dcn20_split_stream_for_mpc(
 							&context->res_ctx, dc->res_pool,
 							pipe, hsplit_pipe);
-					if (!resource_build_scaling_params(pipe) || !resource_build_scaling_params(hsplit_pipe))
-						goto validate_fail;
+					resource_build_scaling_params(pipe);
+					resource_build_scaling_params(hsplit_pipe);
 				}
 				pipe_split_from[hsplit_pipe->pipe_idx] = pipe_idx;
 			}
@@ -4053,8 +4057,12 @@ static bool dcn20_resource_construct(
 	// to be consumed. We could have created dcn20_init_hw to get
 	// the same effect by checking ASIC rev, but there was a
 	// request at some point to not check ASIC rev on hw sequencer.
-	if (ASICREV_IS_NAVI12_P(dc->ctx->asic_id.hw_internal_rev))
+	if (ASICREV_IS_NAVI12_P(dc->ctx->asic_id.hw_internal_rev)) {
 		dc->hwseq->funcs.enable_power_gating_plane = NULL;
+		dc->debug.disable_dpp_power_gate = true;
+		dc->debug.disable_hubp_power_gate = true;
+	}
+
 
 	dc->caps.max_planes =  pool->base.pipe_count;
 

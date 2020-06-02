@@ -291,12 +291,20 @@ void dcn20_init_blank(
 
 	/* get the OPTC source */
 	tg->funcs->get_optc_source(tg, &num_opps, &opp_id_src0, &opp_id_src1);
-	ASSERT(opp_id_src0 < dc->res_pool->res_cap->num_opp);
+
+	if (opp_id_src0 >= dc->res_pool->res_cap->num_opp) {
+		ASSERT(false);
+		return;
+	}
 	opp = dc->res_pool->opps[opp_id_src0];
 
 	if (num_opps == 2) {
 		otg_active_width = otg_active_width / 2;
-		ASSERT(opp_id_src1 < dc->res_pool->res_cap->num_opp);
+
+		if (opp_id_src1 >= dc->res_pool->res_cap->num_opp) {
+			ASSERT(false);
+			return;
+		}
 		bottom_opp = dc->res_pool->opps[opp_id_src1];
 	}
 
@@ -996,8 +1004,7 @@ void dcn20_blank_pixel_data(
 
 	if (!blank)
 		if (stream_res->abm) {
-			stream_res->abm->funcs->set_pipe(stream_res->abm, stream_res->tg->inst + 1,
-					stream->link->panel_cntl->inst);
+			dc->hwss.set_pipe(pipe_ctx);
 			stream_res->abm->funcs->set_abm_level(stream_res->abm, stream->abm_level);
 		}
 }
@@ -1153,13 +1160,20 @@ void dcn20_pipe_control_lock(
 
 static void dcn20_detect_pipe_changes(struct pipe_ctx *old_pipe, struct pipe_ctx *new_pipe)
 {
+	bool plane_state_update = false;
 	new_pipe->update_flags.raw = 0;
 
 	/* Exit on unchanged, unused pipe */
 	if (!old_pipe->plane_state && !new_pipe->plane_state)
 		return;
+
+	/* Detect plane state update */
+	if (old_pipe->plane_state && new_pipe->plane_state
+			&& (old_pipe->plane_state != new_pipe->plane_state)) {
+		plane_state_update = true;
+	}
 	/* Detect pipe enable/disable */
-	if (!old_pipe->plane_state && new_pipe->plane_state) {
+	if ((!old_pipe->plane_state && new_pipe->plane_state) || plane_state_update) {
 		new_pipe->update_flags.bits.enable = 1;
 		new_pipe->update_flags.bits.mpcc = 1;
 		new_pipe->update_flags.bits.dppclk = 1;
@@ -1435,9 +1449,6 @@ static void dcn20_update_dchubp_dpp(
 			0);
 		hubp->power_gated = false;
 	}
-
-	if (hubp->funcs->apply_PLAT_54186_wa && viewport_changed)
-		hubp->funcs->apply_PLAT_54186_wa(hubp, &plane_state->address);
 
 	if (pipe_ctx->update_flags.bits.enable || plane_state->update_flags.bits.addr_update)
 		hws->funcs.update_plane_addr(dc, pipe_ctx);
