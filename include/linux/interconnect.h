@@ -11,7 +11,7 @@
 #include <linux/types.h>
 
 /* macros for converting to icc units */
-#define Bps_to_icc(x)	((x) / 1000)
+#define Bps_to_icc(x)	div_u64((x), 1000)
 #define kBps_to_icc(x)	(x)
 #define MBps_to_icc(x)	((x) * 1000)
 #define GBps_to_icc(x)	((x) * 1000 * 1000)
