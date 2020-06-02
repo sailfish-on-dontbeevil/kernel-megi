@@ -619,7 +619,7 @@ BPF_CALL_5(bpf_seq_printf, struct seq_file *, m, char *, fmt, u32, fmt_size,
 				goto out;
 			}
 
-			err = strncpy_from_unsafe_strict(bufs->buf[memcpy_cnt],
+			err = strncpy_from_kernel_nofault(bufs->buf[memcpy_cnt],
 							 (void *) (long) args[fmt_cnt],
 							 MAX_SEQ_PRINTF_STR_LEN);
 			if (err < 0)
