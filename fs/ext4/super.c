@@ -1324,6 +1324,9 @@ static int ext4_set_context(struct inode *inode, const void *ctx, size_t len,
 	if (WARN_ON_ONCE(IS_DAX(inode) && i_size_read(inode)))
 		return -EINVAL;
 
+	if (ext4_test_inode_flag(inode, EXT4_INODE_DAX))
+		return -EOPNOTSUPP;
+
 	res = ext4_convert_inline_data(inode);
 	if (res)
 		return res;
@@ -1349,7 +1352,7 @@ static int ext4_set_context(struct inode *inode, const void *ctx, size_t len,
 			 * Update inode->i_flags - S_ENCRYPTED will be enabled,
 			 * S_DAX may be disabled
 			 */
-			ext4_set_inode_flags(inode);
+			ext4_set_inode_flags(inode, false);
 		}
 		return res;
 	}
@@ -1376,7 +1379,7 @@ retry:
 		 * Update inode->i_flags - S_ENCRYPTED will be enabled,
 		 * S_DAX may be disabled
 		 */
-		ext4_set_inode_flags(inode);
+		ext4_set_inode_flags(inode, false);
 		res = ext4_mark_inode_dirty(handle, inode);
 		if (res)
 			EXT4_ERROR_INODE(inode, "Failed to mark inode dirty");
@@ -1514,7 +1517,8 @@ enum {
 	Opt_usrjquota, Opt_grpjquota, Opt_offusrjquota, Opt_offgrpjquota,
 	Opt_jqfmt_vfsold, Opt_jqfmt_vfsv0, Opt_jqfmt_vfsv1, Opt_quota,
 	Opt_noquota, Opt_barrier, Opt_nobarrier, Opt_err,
-	Opt_usrquota, Opt_grpquota, Opt_prjquota, Opt_i_version, Opt_dax,
+	Opt_usrquota, Opt_grpquota, Opt_prjquota, Opt_i_version,
+	Opt_dax, Opt_dax_always, Opt_dax_inode, Opt_dax_never,
 	Opt_stripe, Opt_delalloc, Opt_nodelalloc, Opt_warn_on_error,
 	Opt_nowarn_on_error, Opt_mblk_io_submit,
 	Opt_lazytime, Opt_nolazytime, Opt_debug_want_extra_isize,
@@ -1581,6 +1585,9 @@ static const match_table_t tokens = {
 	{Opt_nobarrier, "nobarrier"},
 	{Opt_i_version, "i_version"},
 	{Opt_dax, "dax"},
+	{Opt_dax_always, "dax=always"},
+	{Opt_dax_inode, "dax=inode"},
+	{Opt_dax_never, "dax=never"},
 	{Opt_stripe, "stripe=%u"},
 	{Opt_delalloc, "delalloc"},
 	{Opt_warn_on_error, "warn_on_error"},
@@ -1729,6 +1736,7 @@ static int clear_qf_name(struct super_block *sb, int qtype)
 #define MOPT_NO_EXT3	0x0200
 #define MOPT_EXT4_ONLY	(MOPT_NO_EXT2 | MOPT_NO_EXT3)
 #define MOPT_STRING	0x0400
+#define MOPT_NO_REMOUNT	0x0800
 
 static const struct mount_opts {
 	int	token;
@@ -1778,12 +1786,15 @@ static const struct mount_opts {
 	{Opt_min_batch_time, 0, MOPT_GTE0},
 	{Opt_inode_readahead_blks, 0, MOPT_GTE0},
 	{Opt_init_itable, 0, MOPT_GTE0},
-	{Opt_dax, EXT4_MOUNT_DAX, MOPT_SET},
+	{Opt_dax, 0, MOPT_NO_REMOUNT},
+	{Opt_dax_always, 0, MOPT_NO_REMOUNT},
+	{Opt_dax_inode, 0, MOPT_NO_REMOUNT},
+	{Opt_dax_never, 0, MOPT_NO_REMOUNT},
 	{Opt_stripe, 0, MOPT_GTE0},
 	{Opt_resuid, 0, MOPT_GTE0},
 	{Opt_resgid, 0, MOPT_GTE0},
-	{Opt_journal_dev, 0, MOPT_NO_EXT2 | MOPT_GTE0},
-	{Opt_journal_path, 0, MOPT_NO_EXT2 | MOPT_STRING},
+	{Opt_journal_dev, 0, MOPT_NO_EXT2 | MOPT_GTE0 | MOPT_NO_REMOUNT},
+	{Opt_journal_path, 0, MOPT_NO_EXT2 | MOPT_STRING | MOPT_NO_REMOUNT},
 	{Opt_journal_ioprio, 0, MOPT_NO_EXT2 | MOPT_GTE0},
 	{Opt_data_journal, EXT4_MOUNT_JOURNAL_DATA, MOPT_NO_EXT2 | MOPT_DATAJ},
 	{Opt_data_ordered, EXT4_MOUNT_ORDERED_DATA, MOPT_NO_EXT2 | MOPT_DATAJ},
@@ -1820,7 +1831,7 @@ static const struct mount_opts {
 	{Opt_jqfmt_vfsv1, QFMT_VFS_V1, MOPT_QFMT},
 	{Opt_max_dir_size_kb, 0, MOPT_GTE0},
 	{Opt_test_dummy_encryption, 0, MOPT_STRING},
-	{Opt_nombcache, EXT4_MOUNT_NO_MBCACHE, MOPT_SET},
+	{Opt_nombcache, EXT4_MOUNT_NO_MBCACHE, MOPT_SET | MOPT_NO_REMOUNT},
 	{Opt_err, 0, 0}
 };
 
@@ -1960,6 +1971,12 @@ static int handle_mount_opt(struct super_block *sb, char *opt, int token,
 			 "Mount option \"%s\" incompatible with ext3", opt);
 		return -1;
 	}
+	if ((m->flags & MOPT_NO_REMOUNT) && is_remount) {
+		ext4_msg(sb, KERN_ERR,
+			 "Mount option \"%s\" not supported when remounting",
+			 opt);
+		return -1;
+	}
 
 	if (args->from && !(m->flags & MOPT_STRING) && match_int(args, &arg))
 		return -1;
@@ -2039,11 +2056,6 @@ static int handle_mount_opt(struct super_block *sb, char *opt, int token,
 		}
 		sbi->s_resgid = gid;
 	} else if (token == Opt_journal_dev) {
-		if (is_remount) {
-			ext4_msg(sb, KERN_ERR,
-				 "Cannot specify journal on remount");
-			return -1;
-		}
 		*journal_devnum = arg;
 	} else if (token == Opt_journal_path) {
 		char *journal_path;
@@ -2051,11 +2063,6 @@ static int handle_mount_opt(struct super_block *sb, char *opt, int token,
 		struct path path;
 		int error;
 
-		if (is_remount) {
-			ext4_msg(sb, KERN_ERR,
-				 "Cannot specify journal on remount");
-			return -1;
-		}
 		journal_path = match_strdup(&args[0]);
 		if (!journal_path) {
 			ext4_msg(sb, KERN_ERR, "error: could not dup "
@@ -2123,13 +2130,32 @@ static int handle_mount_opt(struct super_block *sb, char *opt, int token,
 		}
 		sbi->s_jquota_fmt = m->mount_opt;
 #endif
-	} else if (token == Opt_dax) {
+	} else if (token == Opt_dax || token == Opt_dax_always ||
+		   token == Opt_dax_inode || token == Opt_dax_never) {
 #ifdef CONFIG_FS_DAX
-		ext4_msg(sb, KERN_WARNING,
-		"DAX enabled. Warning: EXPERIMENTAL, use at your own risk");
-		sbi->s_mount_opt |= m->mount_opt;
+		switch (token) {
+		case Opt_dax:
+		case Opt_dax_always:
+			ext4_msg(sb, KERN_WARNING,
+				"DAX enabled. Warning: EXPERIMENTAL, use at your own risk");
+			sbi->s_mount_opt |= EXT4_MOUNT_DAX_ALWAYS;
+			sbi->s_mount_opt2 &= ~EXT4_MOUNT2_DAX_NEVER;
+			break;
+		case Opt_dax_never:
+			sbi->s_mount_opt2 |= EXT4_MOUNT2_DAX_NEVER;
+			sbi->s_mount_opt &= ~EXT4_MOUNT_DAX_ALWAYS;
+			break;
+		case Opt_dax_inode:
+			sbi->s_mount_opt &= ~EXT4_MOUNT_DAX_ALWAYS;
+			sbi->s_mount_opt2 &= ~EXT4_MOUNT2_DAX_NEVER;
+			/* Strictly for printing options */
+			sbi->s_mount_opt2 |= EXT4_MOUNT2_DAX_INODE;
+			break;
+		}
 #else
 		ext4_msg(sb, KERN_INFO, "dax option not supported");
+		sbi->s_mount_opt2 |= EXT4_MOUNT2_DAX_NEVER;
+		sbi->s_mount_opt &= ~EXT4_MOUNT_DAX_ALWAYS;
 		return -1;
 #endif
 	} else if (token == Opt_data_err_abort) {
@@ -2352,6 +2378,17 @@ static int _ext4_show_options(struct seq_file *seq, struct super_block *sb,
 		SEQ_OPTS_PUTS("data_err=abort");
 
 	fscrypt_show_test_dummy_encryption(seq, sep, sb);
+
+	if (test_opt(sb, DAX_ALWAYS)) {
+		if (IS_EXT2_SB(sb))
+			SEQ_OPTS_PUTS("dax");
+		else
+			SEQ_OPTS_PUTS("dax=always");
+	} else if (test_opt2(sb, DAX_NEVER)) {
+		SEQ_OPTS_PUTS("dax=never");
+	} else if (test_opt2(sb, DAX_INODE)) {
+		SEQ_OPTS_PUTS("dax=inode");
+	}
 
 	ext4_show_quota_options(seq, sb);
 	return 0;
@@ -3718,7 +3755,7 @@ static int ext4_fill_super(struct super_block *sb, void *data, int silent)
 	int blocksize, clustersize;
 	unsigned int db_count;
 	unsigned int i;
-	int needs_recovery, has_huge_files, has_bigalloc;
+	int needs_recovery, has_huge_files;
 	__u64 blocks_count;
 	int err = 0;
 	unsigned int journal_ioprio = DEFAULT_JOURNAL_IOPRIO;
@@ -4010,18 +4047,14 @@ static int ext4_fill_super(struct super_block *sb, void *data, int silent)
 
 	if (test_opt(sb, DATA_FLAGS) == EXT4_MOUNT_JOURNAL_DATA) {
 		printk_once(KERN_WARNING "EXT4-fs: Warning: mounting with data=journal disables delayed allocation, dioread_nolock, and O_DIRECT support!\n");
+		/* can't mount with both data=journal and dioread_nolock. */
 		clear_opt(sb, DIOREAD_NOLOCK);
 		if (test_opt2(sb, EXPLICIT_DELALLOC)) {
 			ext4_msg(sb, KERN_ERR, "can't mount with "
 				 "both data=journal and delalloc");
 			goto failed_mount;
 		}
-		if (test_opt(sb, DIOREAD_NOLOCK)) {
-			ext4_msg(sb, KERN_ERR, "can't mount with "
-				 "both data=journal and dioread_nolock");
-			goto failed_mount;
-		}
-		if (test_opt(sb, DAX)) {
+		if (test_opt(sb, DAX_ALWAYS)) {
 			ext4_msg(sb, KERN_ERR, "can't mount with "
 				 "both data=journal and dax");
 			goto failed_mount;
@@ -4131,13 +4164,16 @@ static int ext4_fill_super(struct super_block *sb, void *data, int silent)
 		goto failed_mount;
 	}
 
-	if (sbi->s_mount_opt & EXT4_MOUNT_DAX) {
+	if (bdev_dax_supported(sb->s_bdev, blocksize))
+		set_bit(EXT4_FLAGS_BDEV_IS_DAX, &sbi->s_ext4_flags);
+
+	if (sbi->s_mount_opt & EXT4_MOUNT_DAX_ALWAYS) {
 		if (ext4_has_feature_inline_data(sb)) {
 			ext4_msg(sb, KERN_ERR, "Cannot use DAX on a filesystem"
 					" that may contain inline data");
 			goto failed_mount;
 		}
-		if (!bdev_dax_supported(sb->s_bdev, blocksize)) {
+		if (!test_bit(EXT4_FLAGS_BDEV_IS_DAX, &sbi->s_ext4_flags)) {
 			ext4_msg(sb, KERN_ERR,
 				"DAX unsupported by block device.");
 			goto failed_mount;
@@ -4237,8 +4273,7 @@ static int ext4_fill_super(struct super_block *sb, void *data, int silent)
 
 	/* Handle clustersize */
 	clustersize = BLOCK_SIZE << le32_to_cpu(es->s_log_cluster_size);
-	has_bigalloc = ext4_has_feature_bigalloc(sb);
-	if (has_bigalloc) {
+	if (ext4_has_feature_bigalloc(sb)) {
 		if (clustersize < blocksize) {
 			ext4_msg(sb, KERN_ERR,
 				 "cluster size (%d) smaller than "
@@ -5452,7 +5487,7 @@ static int ext4_remount(struct super_block *sb, int *flags, char *data)
 			err = -EINVAL;
 			goto restore_opts;
 		}
-		if (test_opt(sb, DAX)) {
+		if (test_opt(sb, DAX_ALWAYS)) {
 			ext4_msg(sb, KERN_ERR, "can't mount with "
 				 "both data=journal and dax");
 			err = -EINVAL;
@@ -5465,18 +5500,6 @@ static int ext4_remount(struct super_block *sb, int *flags, char *data)
 			err = -EINVAL;
 			goto restore_opts;
 		}
-	}
-
-	if ((sbi->s_mount_opt ^ old_opts.s_mount_opt) & EXT4_MOUNT_NO_MBCACHE) {
-		ext4_msg(sb, KERN_ERR, "can't enable nombcache during remount");
-		err = -EINVAL;
-		goto restore_opts;
-	}
-
-	if ((sbi->s_mount_opt ^ old_opts.s_mount_opt) & EXT4_MOUNT_DAX) {
-		ext4_msg(sb, KERN_WARNING, "warning: refusing change of "
-			"dax flag with busy inodes while remounting");
-		sbi->s_mount_opt ^= EXT4_MOUNT_DAX;
 	}
 
 	if (sbi->s_mount_flags & EXT4_MF_FS_ABORTED)
@@ -5925,7 +5948,7 @@ static int ext4_quota_on(struct super_block *sb, int type, int format_id,
 		EXT4_I(inode)->i_flags |= EXT4_NOATIME_FL | EXT4_IMMUTABLE_FL;
 		inode_set_flags(inode, S_NOATIME | S_IMMUTABLE,
 				S_NOATIME | S_IMMUTABLE);
-		ext4_mark_inode_dirty(handle, inode);
+		err = ext4_mark_inode_dirty(handle, inode);
 		ext4_journal_stop(handle);
 	unlock_inode:
 		inode_unlock(inode);
@@ -6027,12 +6050,14 @@ static int ext4_quota_off(struct super_block *sb, int type)
 	 * this is not a hard failure and quotas are already disabled.
 	 */
 	handle = ext4_journal_start(inode, EXT4_HT_QUOTA, 1);
-	if (IS_ERR(handle))
+	if (IS_ERR(handle)) {
+		err = PTR_ERR(handle);
 		goto out_unlock;
+	}
 	EXT4_I(inode)->i_flags &= ~(EXT4_NOATIME_FL | EXT4_IMMUTABLE_FL);
 	inode_set_flags(inode, 0, S_NOATIME | S_IMMUTABLE);
 	inode->i_mtime = inode->i_ctime = current_time(inode);
-	ext4_mark_inode_dirty(handle, inode);
+	err = ext4_mark_inode_dirty(handle, inode);
 	ext4_journal_stop(handle);
 out_unlock:
 	inode_unlock(inode);
@@ -6090,7 +6115,7 @@ static ssize_t ext4_quota_write(struct super_block *sb, int type,
 {
 	struct inode *inode = sb_dqopt(sb)->files[type];
 	ext4_lblk_t blk = off >> EXT4_BLOCK_SIZE_BITS(sb);
-	int err, offset = off & (sb->s_blocksize - 1);
+	int err = 0, err2 = 0, offset = off & (sb->s_blocksize - 1);
 	int retries = 0;
 	struct buffer_head *bh;
 	handle_t *handle = journal_current_handle();
@@ -6138,9 +6163,11 @@ out:
 	if (inode->i_size < off + len) {
 		i_size_write(inode, off + len);
 		EXT4_I(inode)->i_disksize = inode->i_size;
-		ext4_mark_inode_dirty(handle, inode);
+		err2 = ext4_mark_inode_dirty(handle, inode);
+		if (unlikely(err2 && !err))
+			err = err2;
 	}
-	return len;
+	return err ? err : len;
 }
 #endif
 
