@@ -53,14 +53,13 @@ void sync_initial_page_table(void);
 #define kpte_clear_flush(ptep, vaddr)		\
 do {						\
 	pte_clear(&init_mm, (vaddr), (ptep));	\
-	__flush_tlb_one_kernel((vaddr));		\
+	flush_tlb_one_kernel((vaddr));		\
 } while (0)
 
 #endif /* !__ASSEMBLY__ */
 
 /*
- * kern_addr_valid() is (1) for FLATMEM and (0) for
- * SPARSEMEM and DISCONTIGMEM
+ * kern_addr_valid() is (1) for FLATMEM and (0) for SPARSEMEM
  */
 #ifdef CONFIG_FLATMEM
 #define kern_addr_valid(addr)	(1)

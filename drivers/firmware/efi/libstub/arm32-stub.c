@@ -18,7 +18,7 @@ efi_status_t check_platform_features(void)
 	/* LPAE kernels need compatible hardware */
 	block = cpuid_feature_extract(CPUID_EXT_MMFR0, 0);
 	if (block < 5) {
-		pr_efi_err("This LPAE kernel is not supported by your CPU\n");
+		efi_err("This LPAE kernel is not supported by your CPU\n");
 		return EFI_UNSUPPORTED;
 	}
 	return EFI_SUCCESS;
@@ -120,7 +120,7 @@ static efi_status_t reserve_kernel_base(unsigned long dram_base,
 	 */
 	status = efi_get_memory_map(&map);
 	if (status != EFI_SUCCESS) {
-		pr_efi_err("reserve_kernel_base(): Unable to retrieve memory map.\n");
+		efi_err("reserve_kernel_base(): Unable to retrieve memory map.\n");
 		return status;
 	}
 
@@ -162,7 +162,7 @@ static efi_status_t reserve_kernel_base(unsigned long dram_base,
 					     (end - start) / EFI_PAGE_SIZE,
 					     &start);
 			if (status != EFI_SUCCESS) {
-				pr_efi_err("reserve_kernel_base(): alloc failed.\n");
+				efi_err("reserve_kernel_base(): alloc failed.\n");
 				goto out;
 			}
 			break;
@@ -212,7 +212,7 @@ efi_status_t handle_kernel_image(unsigned long *image_addr,
 	status = reserve_kernel_base(kernel_base - 5 * PAGE_SIZE, reserve_addr,
 				     reserve_size);
 	if (status != EFI_SUCCESS) {
-		pr_efi_err("Unable to allocate memory for uncompressed kernel.\n");
+		efi_err("Unable to allocate memory for uncompressed kernel.\n");
 		return status;
 	}
 
