@@ -12,6 +12,7 @@
 #include <linux/mailbox_controller.h>
 #include <linux/module.h>
 #include <linux/of_device.h>
+#include <linux/pm_runtime.h>
 #include <linux/slab.h>
 
 #define IMX_MU_xSR_GIPn(x)	BIT(28 + (3 - (x)))
@@ -154,12 +155,17 @@ static int imx_mu_scu_tx(struct imx_mu_priv *priv,
 
 	switch (cp->type) {
 	case IMX_MU_TYPE_TX:
-		if (msg->hdr.size > sizeof(*msg)) {
+		/*
+		 * msg->hdr.size specifies the number of u32 words while
+		 * sizeof yields bytes.
+		 */
+
+		if (msg->hdr.size > sizeof(*msg) / 4) {
 			/*
 			 * The real message size can be different to
 			 * struct imx_sc_rpc_msg_max size
 			 */
-			dev_err(priv->dev, "Exceed max msg size (%zu) on TX, got: %i\n", sizeof(*msg), msg->hdr.size);
+			dev_err(priv->dev, "Maximal message size (%zu bytes) exceeded on TX; got: %i bytes\n", sizeof(*msg), msg->hdr.size << 2);
 			return -EINVAL;
 		}
 
@@ -198,9 +204,8 @@ static int imx_mu_scu_rx(struct imx_mu_priv *priv,
 	imx_mu_xcr_rmw(priv, 0, IMX_MU_xCR_RIEn(0));
 	*data++ = imx_mu_read(priv, priv->dcfg->xRR[0]);
 
-	if (msg.hdr.size > sizeof(msg)) {
-		dev_err(priv->dev, "Exceed max msg size (%zu) on RX, got: %i\n",
-			sizeof(msg), msg.hdr.size);
+	if (msg.hdr.size > sizeof(msg) / 4) {
+		dev_err(priv->dev, "Maximal message size (%zu bytes) exceeded on RX; got: %i bytes\n", sizeof(msg), msg.hdr.size << 2);
 		return -EINVAL;
 	}
 
@@ -287,6 +292,7 @@ static int imx_mu_startup(struct mbox_chan *chan)
 	struct imx_mu_con_priv *cp = chan->con_priv;
 	int ret;
 
+	pm_runtime_get_sync(priv->dev);
 	if (cp->type == IMX_MU_TYPE_TXDB) {
 		/* Tx doorbell don't have ACK support */
 		tasklet_init(&cp->txdb_tasklet, imx_mu_txdb_tasklet,
@@ -323,6 +329,7 @@ static void imx_mu_shutdown(struct mbox_chan *chan)
 
 	if (cp->type == IMX_MU_TYPE_TXDB) {
 		tasklet_kill(&cp->txdb_tasklet);
+		pm_runtime_put_sync(priv->dev);
 		return;
 	}
 
@@ -341,6 +348,7 @@ static void imx_mu_shutdown(struct mbox_chan *chan)
 	}
 
 	free_irq(priv->irq, chan);
+	pm_runtime_put_sync(priv->dev);
 }
 
 static const struct mbox_chan_ops imx_mu_ops = {
@@ -374,7 +382,7 @@ static struct mbox_chan *imx_mu_scu_xlate(struct mbox_controller *mbox,
 		break;
 	default:
 		dev_err(mbox->dev, "Invalid chan type: %d\n", type);
-		return NULL;
+		return ERR_PTR(-EINVAL);
 	}
 
 	if (chan >= mbox->num_chans) {
@@ -508,7 +516,29 @@ static int imx_mu_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, priv);
 
-	return devm_mbox_controller_register(dev, &priv->mbox);
+	ret = devm_mbox_controller_register(dev, &priv->mbox);
+	if (ret) {
+		clk_disable_unprepare(priv->clk);
+		return ret;
+	}
+
+	pm_runtime_enable(dev);
+
+	ret = pm_runtime_get_sync(dev);
+	if (ret < 0) {
+		pm_runtime_put_noidle(dev);
+		goto disable_runtime_pm;
+	}
+
+	ret = pm_runtime_put_sync(dev);
+	if (ret < 0)
+		goto disable_runtime_pm;
+
+	return 0;
+
+disable_runtime_pm:
+	pm_runtime_disable(dev);
+	return ret;
 }
 
 static int imx_mu_remove(struct platform_device *pdev)
@@ -516,6 +546,7 @@ static int imx_mu_remove(struct platform_device *pdev)
 	struct imx_mu_priv *priv = platform_get_drvdata(pdev);
 
 	clk_disable_unprepare(priv->clk);
+	pm_runtime_disable(priv->dev);
 
 	return 0;
 }
