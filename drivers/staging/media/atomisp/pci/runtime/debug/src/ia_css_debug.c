@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Support for Intel Camera Imaging ISP subsystem.
  * Copyright (c) 2015, Intel Corporation.
@@ -13,7 +14,6 @@
  */
 
 #include "debug.h"
-#include "memory_access.h"
 
 #ifndef __INLINE_INPUT_SYSTEM__
 #define __INLINE_INPUT_SYSTEM__
@@ -102,9 +102,6 @@
 #include "de/de_2/ia_css_de2.host.h"
 #include "gc/gc_2/ia_css_gc2.host.h"
 #include "ynr/ynr_2/ia_css_ynr2.host.h"
-
-/* Global variable to store the dtrace verbosity level */
-unsigned int ia_css_debug_trace_level = IA_CSS_DEBUG_WARNING;
 
 #define DPG_START "ia_css_debug_pipe_graph_dump_start "
 #define DPG_END   " ia_css_debug_pipe_graph_dump_end\n"
@@ -244,13 +241,13 @@ void ia_css_debug_dump_sp_stack_info(void)
 
 void ia_css_debug_set_dtrace_level(const unsigned int trace_level)
 {
-	ia_css_debug_trace_level = trace_level;
+	dbg_level = trace_level;
 	return;
 }
 
 unsigned int ia_css_debug_get_dtrace_level(void)
 {
-	return ia_css_debug_trace_level;
+	return dbg_level;
 }
 
 static const char *debug_stream_format2str(const enum atomisp_input_format
@@ -2492,8 +2489,8 @@ void ia_css_debug_dump_perf_counters(void)
 
 void sh_css_init_ddr_debug_queue(void)
 {
-	hrt_vaddress ddr_debug_queue_addr =
-			mmgr_malloc(sizeof(debug_data_ddr_t));
+	ia_css_ptr ddr_debug_queue_addr =
+			hmm_alloc(sizeof(debug_data_ddr_t), HMM_BO_PRIVATE, 0, NULL, 0);
 	const struct ia_css_fw_info *fw;
 	unsigned int HIVE_ADDR_debug_buffer_ddr_address;
 
@@ -2665,7 +2662,7 @@ void sh_css_dump_pipe_stripe_info(void)
 
 static void
 ia_css_debug_pipe_graph_dump_frame(
-    struct ia_css_frame *frame,
+    const struct ia_css_frame *frame,
     enum ia_css_pipe_id id,
     char const *blob_name,
     char const *frame_name,

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Support for Medifield PNW Camera Imaging ISP subsystem.
  *
@@ -51,7 +52,7 @@ struct atomisp_format_bridge {
 	unsigned int pixelformat;
 	unsigned int depth;
 	u32 mbus_code;
-	enum atomisp_css_frame_format sh_fmt;
+	enum ia_css_frame_format sh_fmt;
 	unsigned char description[32];	/* the same as struct v4l2_fmtdesc */
 	bool planar;
 };

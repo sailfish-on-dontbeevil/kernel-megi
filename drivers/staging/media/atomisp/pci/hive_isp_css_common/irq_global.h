@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Support for Intel Camera Imaging ISP subsystem.
  * Copyright (c) 2015, Intel Corporation.
@@ -15,7 +16,7 @@
 #ifndef __IRQ_GLOBAL_H_INCLUDED__
 #define __IRQ_GLOBAL_H_INCLUDED__
 
-#include <system_types.h>
+#include <system_local.h>
 
 #define IS_IRQ_VERSION_2
 #define IS_IRQ_MAP_VERSION_2

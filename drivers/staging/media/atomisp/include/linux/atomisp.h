@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Support for Medifield PNW Camera Imaging ISP subsystem.
  *
@@ -917,6 +918,8 @@ struct atomisp_acc_map {
 
 #define ATOMISP_MAP_FLAG_NOFLUSH	0x0001	/* Do not flush cache */
 #define ATOMISP_MAP_FLAG_CACHED		0x0002	/* Enable cache */
+#define ATOMISP_MAP_FLAG_CONTIGUOUS	0x0004
+#define ATOMISP_MAP_FLAG_CLEARED	0x0008
 
 struct atomisp_acc_state {
 	__u32 flags;			/* Flags, see list below */
@@ -1272,7 +1275,7 @@ struct atomisp_sensor_ae_bracketing_lut {
 /* VCM slew control */
 #define V4L2_CID_VCM_SLEW                  (V4L2_CID_CAMERA_LASTP1 + 11)
 /* VCM step time */
-#define V4L2_CID_VCM_TIMEING               (V4L2_CID_CAMERA_LASTP1 + 12)
+#define V4L2_CID_VCM_TIMING                (V4L2_CID_CAMERA_LASTP1 + 12)
 
 /* Query Focus Status */
 #define V4L2_CID_FOCUS_STATUS              (V4L2_CID_CAMERA_LASTP1 + 14)

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Support for Medifield PNW Camera Imaging ISP subsystem.
  *
@@ -42,7 +43,7 @@
 #include "hmm/hmm.h"
 #include "atomisp_trace_event.h"
 
-#include "hrt/hive_isp_css_mm_hrt.h"
+#include "sh_css_firmware.h"
 
 #include "device_access.h"
 
@@ -58,21 +59,21 @@ module_param(skip_fwload, uint, 0644);
 MODULE_PARM_DESC(skip_fwload, "Skip atomisp firmware load");
 
 /* set reserved memory pool size in page */
-static unsigned int repool_pgnr;
+static unsigned int repool_pgnr = 32768;
 module_param(repool_pgnr, uint, 0644);
 MODULE_PARM_DESC(repool_pgnr,
-		 "Set the reserved memory pool size in page (default:0)");
+		 "Set the reserved memory pool size in page (default:32768)");
 
 /* set dynamic memory pool size in page */
 unsigned int dypool_pgnr = UINT_MAX;
 module_param(dypool_pgnr, uint, 0644);
 MODULE_PARM_DESC(dypool_pgnr,
-		 "Set the dynamic memory pool size in page (default:0)");
+		 "Set the dynamic memory pool size in page (default: unlimited)");
 
-bool dypool_enable;
+bool dypool_enable = true;
 module_param(dypool_enable, bool, 0644);
 MODULE_PARM_DESC(dypool_enable,
-		 "dynamic memory pool enable/disable (default:disable)");
+		 "dynamic memory pool enable/disable (default:enabled)");
 
 /* memory optimization: deferred firmware loading */
 bool defer_fw_load;
@@ -83,7 +84,7 @@ MODULE_PARM_DESC(defer_fw_load,
 /* cross componnet debug message flag */
 int dbg_level;
 module_param(dbg_level, int, 0644);
-MODULE_PARM_DESC(dbg_level, "debug message on/off (default:off)");
+MODULE_PARM_DESC(dbg_level, "debug message level (default:0)");
 
 /* log function switch */
 int dbg_func = 2;
@@ -94,6 +95,10 @@ MODULE_PARM_DESC(dbg_func,
 int mipicsi_flag;
 module_param(mipicsi_flag, int, 0644);
 MODULE_PARM_DESC(mipicsi_flag, "mipi csi compression predictor algorithm");
+
+static char firmware_name[256];
+module_param_string(firmware_name, firmware_name, sizeof(firmware_name), 0);
+MODULE_PARM_DESC(firmware_name, "Firmware file name. Allows overriding the default firmware name.");
 
 /*set to 16x16 since this is the amount of lines and pixels the sensor
 exports extra. If these are kept at the 10x8 that they were on, in yuv
@@ -387,6 +392,13 @@ static const struct atomisp_freq_scaling_rule dfs_rules_byt_cr[] = {
 	},
 };
 
+#ifdef FIXME
+/*
+ * Disable this, as it is used only when this is true:
+ *	INTEL_MID_BOARD(3, TABLET, BYT, BLK, PRO, CRV2) ||
+ *	INTEL_MID_BOARD(3, TABLET, BYT, BLK, ENG, CRV2))
+ * However, the original code is commented
+ */
 static const struct atomisp_dfs_config dfs_config_byt_cr = {
 	.lowest_freq = ISP_FREQ_200MHZ,
 	.max_freq_at_vmin = ISP_FREQ_320MHZ,
@@ -394,6 +406,7 @@ static const struct atomisp_dfs_config dfs_config_byt_cr = {
 	.dfs_table = dfs_rules_byt_cr,
 	.dfs_table_size = ARRAY_SIZE(dfs_rules_byt_cr),
 };
+#endif
 
 static const struct atomisp_freq_scaling_rule dfs_rules_cht[] = {
 	{
@@ -659,7 +672,7 @@ static int __maybe_unused atomisp_restore_iunit_reg(struct atomisp_device *isp)
 	 * which has bugs(like sighting:4567697 and 4567699) and
 	 * will be removed in B0
 	 */
-	atomisp_store_uint32(MRFLD_CSI_RECEIVER_SELECTION_REG, 1);
+	atomisp_css2_hw_store_32(MRFLD_CSI_RECEIVER_SELECTION_REG, 1);
 	return 0;
 }
 
@@ -689,7 +702,7 @@ static int atomisp_mrfld_pre_power_down(struct atomisp_device *isp)
 	if (!(irq & (1 << INTR_IIR)))
 		goto done;
 
-	atomisp_store_uint32(MRFLD_INTR_CLEAR_REG, 0xFFFFFFFF);
+	atomisp_css2_hw_store_32(MRFLD_INTR_CLEAR_REG, 0xFFFFFFFF);
 	atomisp_load_uint32(MRFLD_INTR_STATUS_REG, &irq);
 	if (irq != 0) {
 		dev_err(isp->dev,
@@ -704,7 +717,7 @@ static int atomisp_mrfld_pre_power_down(struct atomisp_device *isp)
 
 		pci_read_config_dword(dev, PCI_INTERRUPT_CTRL, &irq);
 		if (!(irq & (1 << INTR_IIR))) {
-			atomisp_store_uint32(MRFLD_INTR_ENABLE_REG, 0x0);
+			atomisp_css2_hw_store_32(MRFLD_INTR_ENABLE_REG, 0x0);
 			goto done;
 		}
 		dev_err(isp->dev,
@@ -736,6 +749,10 @@ done:
 * WA for DDR DVFS enable/disable
 * By default, ISP will force DDR DVFS 1600MHz before disable DVFS
 */
+
+#if 0
+// Used only by atomisp_mrfld_power
+
 static void punit_ddr_dvfs_enable(bool enable)
 {
 	int door_bell = 1 << 8;
@@ -760,9 +777,12 @@ static void punit_ddr_dvfs_enable(bool enable)
 	if (max_wait == -1)
 		pr_info("DDR DVFS, door bell is not cleared within 3ms\n");
 }
+#endif
 
 static int atomisp_mrfld_power(struct atomisp_device *isp, bool enable)
 {
+// FIXME: at least with ISP2401, the code below causes the driver to break
+#if 0
 	unsigned long timeout;
 	u32 val = enable ? MRFLD_ISPSSPM0_IUNIT_POWER_ON :
 			   MRFLD_ISPSSPM0_IUNIT_POWER_OFF;
@@ -819,22 +839,21 @@ static int atomisp_mrfld_power(struct atomisp_device *isp, bool enable)
 
 	dev_err(isp->dev, "IUNIT power-%s timeout.\n", enable ? "on" : "off");
 	return -EBUSY;
+#else
+	return 0;
+#endif
 }
 
 /* Workaround for pmu_nc_set_power_state not ready in MRFLD */
 int atomisp_mrfld_power_down(struct atomisp_device *isp)
 {
-	return 0;
-// FIXME: at least with ISP2401, the code below causes the driver to break
-//	return atomisp_mrfld_power(isp, false);
+	return atomisp_mrfld_power(isp, false);
 }
 
 /* Workaround for pmu_nc_set_power_state not ready in MRFLD */
 int atomisp_mrfld_power_up(struct atomisp_device *isp)
 {
-	return 0;
-// FIXME: at least with ISP2401, the code below causes the driver to break
-//	return atomisp_mrfld_power(isp, true);
+	return atomisp_mrfld_power(isp, true);
 }
 
 int atomisp_runtime_suspend(struct device *dev)
@@ -1086,15 +1105,15 @@ static int atomisp_subdev_probe(struct atomisp_device *isp)
 	/* FIXME: should return -EPROBE_DEFER if not all subdevs were probed */
 	for (count = 0; count < SUBDEV_WAIT_TIMEOUT_MAX_COUNT; count++) {
 		int camera_count = 0;
+
 		for (subdevs = pdata->subdevs; subdevs->type; ++subdevs) {
 			if (subdevs->type == RAW_CAMERA ||
 			    subdevs->type == SOC_CAMERA)
-				camera_count ++;
+				camera_count++;
 		}
 		if (camera_count)
 			break;
 		msleep(SUBDEV_WAIT_TIMEOUT);
-		count++;
 	}
 	/* Wait more time to give more time for subdev init code to finish */
 	msleep(5 * SUBDEV_WAIT_TIMEOUT);
@@ -1145,9 +1164,9 @@ static int atomisp_subdev_probe(struct atomisp_device *isp)
 
 		switch (subdevs->type) {
 		case RAW_CAMERA:
-			raw_index = isp->input_cnt;
 			dev_dbg(isp->dev, "raw_index: %d\n", raw_index);
-			/* pass-though */
+			raw_index = isp->input_cnt;
+			/* fall through */
 		case SOC_CAMERA:
 			dev_dbg(isp->dev, "SOC_INDEX: %d\n", isp->input_cnt);
 			if (isp->input_cnt >= ATOM_ISP_MAX_INPUTS) {
@@ -1449,19 +1468,23 @@ atomisp_load_firmware(struct atomisp_device *isp)
 	if (skip_fwload)
 		return NULL;
 
-	if ((isp->media_dev.hw_revision  >> ATOMISP_HW_REVISION_SHIFT)
-	     == ATOMISP_HW_REVISION_ISP2401)
-		fw_path = "shisp_2401a0_v21.bin";
+	if (firmware_name[0] != '\0') {
+		fw_path = firmware_name;
+	} else {
+		if ((isp->media_dev.hw_revision  >> ATOMISP_HW_REVISION_SHIFT)
+		    == ATOMISP_HW_REVISION_ISP2401)
+			fw_path = "shisp_2401a0_v21.bin";
 
-	if (isp->media_dev.hw_revision ==
-	    ((ATOMISP_HW_REVISION_ISP2401_LEGACY << ATOMISP_HW_REVISION_SHIFT)
-	     | ATOMISP_HW_STEPPING_A0))
-		fw_path = "shisp_2401a0_legacy_v21.bin";
+		if (isp->media_dev.hw_revision ==
+		    ((ATOMISP_HW_REVISION_ISP2401_LEGACY << ATOMISP_HW_REVISION_SHIFT)
+		    | ATOMISP_HW_STEPPING_A0))
+			fw_path = "shisp_2401a0_legacy_v21.bin";
 
-	if (isp->media_dev.hw_revision ==
-	    ((ATOMISP_HW_REVISION_ISP2400 << ATOMISP_HW_REVISION_SHIFT)
-	     | ATOMISP_HW_STEPPING_B0))
-		fw_path = "shisp_2400b0_v21.bin";
+		if (isp->media_dev.hw_revision ==
+		    ((ATOMISP_HW_REVISION_ISP2400 << ATOMISP_HW_REVISION_SHIFT)
+		    | ATOMISP_HW_STEPPING_B0))
+			fw_path = "shisp_2400b0_v21.bin";
+	}
 
 	if (!fw_path) {
 		dev_err(isp->dev, "Unsupported hw_revision 0x%x\n",
@@ -1566,6 +1589,7 @@ static int init_atomisp_wdts(struct atomisp_device *isp)
 
 	for (i = 0; i < isp->num_of_streams; i++) {
 		struct atomisp_sub_device *asd = &isp->asd[i];
+
 		if (!atomisp_hw_is_isp2401)
 			timer_setup(&asd->wdt, atomisp_wdt, 0);
 		else {
@@ -1760,7 +1784,8 @@ static int atomisp_pci_probe(struct pci_dev *dev,
 			goto load_fw_fail;
 		}
 
-		err = atomisp_css_check_firmware_version(isp);
+		err = sh_css_check_firmware_version(isp->dev,
+						    isp->firmware->data);
 		if (err) {
 			dev_dbg(&dev->dev, "Firmware version check failed\n");
 			goto fw_validation_fail;
@@ -1789,7 +1814,7 @@ static int atomisp_pci_probe(struct pci_dev *dev,
 	 * bugs(like sighting:4567697 and 4567699) and will be removed
 	 * in B0
 	 */
-	atomisp_store_uint32(MRFLD_CSI_RECEIVER_SELECTION_REG, 1);
+	atomisp_css2_hw_store_32(MRFLD_CSI_RECEIVER_SELECTION_REG, 1);
 
 	if ((id->device & ATOMISP_PCI_DEVICE_SOC_MASK) ==
 	    ATOMISP_PCI_DEVICE_SOC_MRFLD) {
@@ -1940,7 +1965,7 @@ static void atomisp_pci_remove(struct pci_dev *dev)
 
 	atomisp_acc_cleanup(isp);
 
-	atomisp_css_unload_firmware(isp);
+	ia_css_unload_firmware();
 	hmm_cleanup();
 
 	pm_runtime_forbid(&dev->dev);
