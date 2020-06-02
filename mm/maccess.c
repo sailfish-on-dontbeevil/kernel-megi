@@ -246,6 +246,7 @@ long probe_user_write(void __user *dst, const void *src, size_t size)
 		return -EFAULT;
 	return 0;
 }
+EXPORT_SYMBOL_GPL(probe_user_write);
 
 /**
  * strncpy_from_user_nofault: - Copy a NUL terminated string from unsafe user
