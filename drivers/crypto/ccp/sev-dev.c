@@ -376,6 +376,7 @@ static int sev_ioctl_do_pek_csr(struct sev_issue_cmd *argp, bool writable)
 	struct sev_device *sev = psp_master->sev_data;
 	struct sev_user_data_pek_csr input;
 	struct sev_data_pek_csr *data;
+	void __user *input_address;
 	void *blob = NULL;
 	int ret;
 
@@ -394,7 +395,8 @@ static int sev_ioctl_do_pek_csr(struct sev_issue_cmd *argp, bool writable)
 		goto cmd;
 
 	/* allocate a physically contiguous buffer to store the CSR blob */
-	if (!access_ok(input.address, input.length) ||
+	input_address = (void __user *)input.address;
+	if (!access_ok(input_address, input.length) ||
 	    input.length > SEV_FW_BLOB_MAX_SIZE) {
 		ret = -EFAULT;
 		goto e_free;
@@ -427,7 +429,7 @@ cmd:
 	}
 
 	if (blob) {
-		if (copy_to_user((void __user *)input.address, blob, input.length))
+		if (copy_to_user(input_address, blob, input.length))
 			ret = -EFAULT;
 	}
 
@@ -438,7 +440,7 @@ e_free:
 	return ret;
 }
 
-void *psp_copy_user_blob(u64 __user uaddr, u32 len)
+void *psp_copy_user_blob(u64 uaddr, u32 len)
 {
 	if (!uaddr || !len)
 		return ERR_PTR(-EINVAL);
@@ -447,7 +449,7 @@ void *psp_copy_user_blob(u64 __user uaddr, u32 len)
 	if (len > SEV_FW_BLOB_MAX_SIZE)
 		return ERR_PTR(-EINVAL);
 
-	return memdup_user((void __user *)(uintptr_t)uaddr, len);
+	return memdup_user((void __user *)uaddr, len);
 }
 EXPORT_SYMBOL_GPL(psp_copy_user_blob);
 
@@ -622,6 +624,7 @@ static int sev_ioctl_do_get_id2(struct sev_issue_cmd *argp)
 {
 	struct sev_user_data_get_id2 input;
 	struct sev_data_get_id *data;
+	void __user *input_address;
 	void *id_blob = NULL;
 	int ret;
 
@@ -633,9 +636,10 @@ static int sev_ioctl_do_get_id2(struct sev_issue_cmd *argp)
 		return -EFAULT;
 
 	/* Check if we have write access to the userspace buffer */
+	input_address = (void __user *)input.address;
 	if (input.address &&
 	    input.length &&
-	    !access_ok(input.address, input.length))
+	    !access_ok(input_address, input.length))
 		return -EFAULT;
 
 	data = kzalloc(sizeof(*data), GFP_KERNEL);
@@ -667,8 +671,7 @@ static int sev_ioctl_do_get_id2(struct sev_issue_cmd *argp)
 	}
 
 	if (id_blob) {
-		if (copy_to_user((void __user *)input.address,
-				 id_blob, data->len)) {
+		if (copy_to_user(input_address, id_blob, data->len)) {
 			ret = -EFAULT;
 			goto e_free;
 		}
@@ -727,6 +730,8 @@ static int sev_ioctl_do_pdh_export(struct sev_issue_cmd *argp, bool writable)
 	struct sev_user_data_pdh_cert_export input;
 	void *pdh_blob = NULL, *cert_blob = NULL;
 	struct sev_data_pdh_cert_export *data;
+	void __user *input_cert_chain_address;
+	void __user *input_pdh_cert_address;
 	int ret;
 
 	/* If platform is not in INIT state then transition it to INIT. */
@@ -752,16 +757,19 @@ static int sev_ioctl_do_pdh_export(struct sev_issue_cmd *argp, bool writable)
 	    !input.cert_chain_address)
 		goto cmd;
 
+	input_pdh_cert_address = (void __user *)input.pdh_cert_address;
+	input_cert_chain_address = (void __user *)input.cert_chain_address;
+
 	/* Allocate a physically contiguous buffer to store the PDH blob. */
 	if ((input.pdh_cert_len > SEV_FW_BLOB_MAX_SIZE) ||
-	    !access_ok(input.pdh_cert_address, input.pdh_cert_len)) {
+	    !access_ok(input_pdh_cert_address, input.pdh_cert_len)) {
 		ret = -EFAULT;
 		goto e_free;
 	}
 
 	/* Allocate a physically contiguous buffer to store the cert chain blob. */
 	if ((input.cert_chain_len > SEV_FW_BLOB_MAX_SIZE) ||
-	    !access_ok(input.cert_chain_address, input.cert_chain_len)) {
+	    !access_ok(input_cert_chain_address, input.cert_chain_len)) {
 		ret = -EFAULT;
 		goto e_free;
 	}
@@ -797,7 +805,7 @@ cmd:
 	}
 
 	if (pdh_blob) {
-		if (copy_to_user((void __user *)input.pdh_cert_address,
+		if (copy_to_user(input_pdh_cert_address,
 				 pdh_blob, input.pdh_cert_len)) {
 			ret = -EFAULT;
 			goto e_free_cert;
@@ -805,7 +813,7 @@ cmd:
 	}
 
 	if (cert_blob) {
-		if (copy_to_user((void __user *)input.cert_chain_address,
+		if (copy_to_user(input_cert_chain_address,
 				 cert_blob, input.cert_chain_len))
 			ret = -EFAULT;
 	}
