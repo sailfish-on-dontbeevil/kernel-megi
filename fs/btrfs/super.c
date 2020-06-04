@@ -341,10 +341,11 @@ enum {
 	Opt_treelog, Opt_notreelog,
 	Opt_user_subvol_rm_allowed,
 
-	/* Rescue options */
+	/* Rescue options, Opt_rescue_* is only for rescue= mount options */
 	Opt_rescue,
 	Opt_usebackuproot,
 	Opt_nologreplay,
+	Opt_rescue_skipbg,
 
 	/* Deprecated options */
 	Opt_alloc_start,
@@ -444,6 +445,7 @@ static const match_table_t tokens = {
 static const match_table_t rescue_tokens = {
 	{Opt_usebackuproot, "usebackuproot"},
 	{Opt_nologreplay, "nologreplay"},
+	{Opt_rescue_skipbg, "skipbg"},
 	{Opt_err, NULL},
 };
 
@@ -475,6 +477,10 @@ static int parse_rescue_options(struct btrfs_fs_info *info, const char *options)
 		case Opt_nologreplay:
 			btrfs_set_and_info(info, NOLOGREPLAY,
 					   "disabling log replay at mount time");
+			break;
+		case Opt_rescue_skipbg:
+			btrfs_set_and_info(info, SKIPBG,
+				"skip mount time block group searching");
 			break;
 		case Opt_err:
 			btrfs_info(info, "unrecognized rescue option '%s'", p);
@@ -1410,6 +1416,8 @@ static int btrfs_show_options(struct seq_file *seq, struct dentry *dentry)
 		seq_puts(seq, ",notreelog");
 	if (btrfs_test_opt(info, NOLOGREPLAY))
 		seq_puts(seq, ",rescue=nologreplay");
+	if (btrfs_test_opt(info, SKIPBG))
+		seq_puts(seq, ",rescue=skipbg");
 	if (btrfs_test_opt(info, FLUSHONCOMMIT))
 		seq_puts(seq, ",flushoncommit");
 	if (btrfs_test_opt(info, DISCARD_SYNC))
@@ -1849,6 +1857,14 @@ static int btrfs_remount(struct super_block *sb, int *flags, char *data)
 	if (ret)
 		goto restore;
 
+	if (btrfs_test_opt(fs_info, SKIPBG) !=
+	    (old_opts & BTRFS_MOUNT_SKIPBG)) {
+		btrfs_err(fs_info,
+		"rescue=skipbg mount option can't be changed during remount");
+		ret = -EINVAL;
+		goto restore;
+	}
+
 	btrfs_remount_begin(fs_info, old_opts, *flags);
 	btrfs_resize_thread_pool(fs_info,
 		fs_info->thread_pool_size, old_thread_pool_size);
@@ -1910,6 +1926,13 @@ static int btrfs_remount(struct super_block *sb, int *flags, char *data)
 		if (btrfs_super_log_root(fs_info->super_copy) != 0) {
 			btrfs_warn(fs_info,
 		"mount required to replay tree-log, cannot remount read-write");
+			ret = -EINVAL;
+			goto restore;
+		}
+
+		if (btrfs_test_opt(fs_info, SKIPBG)) {
+			btrfs_err(fs_info,
+		"remounting read-write with rescue=skipbg is not allowed");
 			ret = -EINVAL;
 			goto restore;
 		}
@@ -2217,9 +2240,12 @@ static int btrfs_statfs(struct dentry *dentry, struct kstatfs *buf)
 	 * not fit in the free metadata space.  If we aren't ->full then we
 	 * still can allocate chunks and thus are fine using the currently
 	 * calculated f_bavail.
+	 *
+	 * Or if we're rescuing, set available to 0 anyway.
 	 */
-	if (!mixed && block_rsv->space_info->full &&
-	    total_free_meta - thresh < block_rsv->size)
+	if (btrfs_test_opt(fs_info, SKIPBG) ||
+	    (!mixed && block_rsv->space_info->full &&
+	     total_free_meta - thresh < block_rsv->size))
 		buf->f_bavail = 0;
 
 	buf->f_type = BTRFS_SUPER_MAGIC;

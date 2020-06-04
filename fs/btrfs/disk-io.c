@@ -2267,11 +2267,15 @@ static int btrfs_read_roots(struct btrfs_fs_info *fs_info)
 
 	root = btrfs_read_tree_root(tree_root, &location);
 	if (IS_ERR(root)) {
-		ret = PTR_ERR(root);
-		goto out;
+		if (!btrfs_test_opt(fs_info, SKIPBG)) {
+			ret = PTR_ERR(root);
+			goto out;
+		}
+		fs_info->extent_root = NULL;
+	} else {
+		set_bit(BTRFS_ROOT_TRACK_DIRTY, &root->state);
+		fs_info->extent_root = root;
 	}
-	set_bit(BTRFS_ROOT_TRACK_DIRTY, &root->state);
-	fs_info->extent_root = root;
 
 	location.objectid = BTRFS_DEV_TREE_OBJECTID;
 	root = btrfs_read_tree_root(tree_root, &location);
@@ -3043,6 +3047,23 @@ int __cold open_ctree(struct super_block *sb, struct btrfs_fs_devices *fs_device
 		       features);
 		err = -EINVAL;
 		goto fail_alloc;
+	}
+
+	/* Skip bg needs RO and no tree-log to replay */
+	if (btrfs_test_opt(fs_info, SKIPBG)) {
+		if (!sb_rdonly(sb)) {
+			btrfs_err(fs_info,
+			"rescue=skipbg can only be used on read-only mount");
+			err = -EINVAL;
+			goto fail_alloc;
+		}
+		if (btrfs_super_log_root(disk_super) &&
+		    !btrfs_test_opt(fs_info, NOLOGREPLAY)) {
+			btrfs_err(fs_info,
+"rescue=skipbg must be used with rescue=nologreplay when tree-log needs to replayed");
+			err = -EINVAL;
+			goto fail_alloc;
+		}
 	}
 
 	ret = btrfs_init_workqueues(fs_info, fs_devices);
