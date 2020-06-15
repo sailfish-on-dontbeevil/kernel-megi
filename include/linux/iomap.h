@@ -255,9 +255,18 @@ struct iomap_dio_ops {
 			struct bio *bio, loff_t file_offset);
 };
 
+/*
+ * Flags to pass iomap_dio_rw()
+ */
+
+/*
+ * Wait for completion of DIO
+ */
+#define IOMAP_DIO_RWF_SYNCIO			(1 << 0)
+
 ssize_t iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
 		const struct iomap_ops *ops, const struct iomap_dio_ops *dops,
-		bool wait_for_completion);
+		unsigned int flags);
 int iomap_dio_iopoll(struct kiocb *kiocb, bool spin);
 
 #ifdef CONFIG_SWAP
