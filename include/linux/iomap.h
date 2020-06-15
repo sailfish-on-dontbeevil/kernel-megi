@@ -262,7 +262,21 @@ struct iomap_dio_ops {
 /*
  * Wait for completion of DIO
  */
+
 #define IOMAP_DIO_RWF_SYNCIO			(1 << 0)
+/*
+ * Direct IO will attempt to keep the page cache coherent by
+ * invalidating the inode's page cache over the range of the DIO.
+ * That can fail if something else is actively using the page cache.
+ * If this happens and the DIO continues, the data in the page
+ * cache will become stale.
+ *
+ * Set this flag if you want the DIO to abort without issuing any IO
+ * or error if it fails to invalidate the page cache successfully.
+ * This allows the IO submitter to fallback to buffered IO to resubmit
+ * IO
+ */
+#define IOMAP_DIO_RWF_NO_STALE_PAGECACHE	(1 << 1)
 
 ssize_t iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
 		const struct iomap_ops *ops, const struct iomap_dio_ops *dops,
