@@ -3606,7 +3606,7 @@ static vm_fault_t do_set_pmd(struct vm_fault *vmf, struct page *page)
 
 	set_pmd_at(vma->vm_mm, haddr, vmf->pmd, entry);
 
-	update_mmu_cache_pmd(vma, haddr, vmf->pmd);
+	update_mmu_cache_pmd(vma, vmf->address, vmf->pmd);
 
 	/* fault is handled */
 	ret = 0;
