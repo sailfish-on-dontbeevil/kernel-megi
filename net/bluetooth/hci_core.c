@@ -3795,9 +3795,6 @@ void hci_unregister_dev(struct hci_dev *hdev)
 	kfree_const(hdev->hw_info);
 	kfree_const(hdev->fw_info);
 
-	destroy_workqueue(hdev->workqueue);
-	destroy_workqueue(hdev->req_workqueue);
-
 	hci_dev_lock(hdev);
 	hci_bdaddr_list_clear(&hdev->blacklist);
 	hci_bdaddr_list_clear(&hdev->whitelist);
@@ -3814,6 +3811,9 @@ void hci_unregister_dev(struct hci_dev *hdev)
 	hci_discovery_filter_clear(hdev);
 	hci_blocked_keys_clear(hdev);
 	hci_dev_unlock(hdev);
+
+	destroy_workqueue(hdev->workqueue);
+	destroy_workqueue(hdev->req_workqueue);
 
 	hci_dev_put(hdev);
 
