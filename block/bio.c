@@ -234,8 +234,12 @@ fallback:
 
 void bio_uninit(struct bio *bio)
 {
-	bio_disassociate_blkg(bio);
-
+#ifdef CONFIG_BLK_CGROUP
+	if (bio->bi_blkg) {
+		blkg_put(bio->bi_blkg);
+		bio->bi_blkg = NULL;
+	}
+#endif
 	if (bio_integrity(bio))
 		bio_integrity_free(bio);
 
@@ -444,9 +448,7 @@ struct bio *bio_alloc_bioset(gfp_t gfp_mask, unsigned int nr_iovecs,
 		if (nr_iovecs > UIO_MAXIOV)
 			return NULL;
 
-		p = kmalloc(sizeof(struct bio) +
-			    nr_iovecs * sizeof(struct bio_vec),
-			    gfp_mask);
+		p = kmalloc(struct_size(bio, bi_inline_vecs, nr_iovecs), gfp_mask);
 		front_pad = 0;
 		inline_vecs = nr_iovecs;
 	} else {
@@ -1624,141 +1626,6 @@ int bioset_init_from_src(struct bio_set *bs, struct bio_set *src)
 	return bioset_init(bs, src->bio_pool.min_nr, src->front_pad, flags);
 }
 EXPORT_SYMBOL(bioset_init_from_src);
-
-#ifdef CONFIG_BLK_CGROUP
-
-/**
- * bio_disassociate_blkg - puts back the blkg reference if associated
- * @bio: target bio
- *
- * Helper to disassociate the blkg from @bio if a blkg is associated.
- */
-void bio_disassociate_blkg(struct bio *bio)
-{
-	if (bio->bi_blkg) {
-		blkg_put(bio->bi_blkg);
-		bio->bi_blkg = NULL;
-	}
-}
-EXPORT_SYMBOL_GPL(bio_disassociate_blkg);
-
-/**
- * __bio_associate_blkg - associate a bio with the a blkg
- * @bio: target bio
- * @blkg: the blkg to associate
- *
- * This tries to associate @bio with the specified @blkg.  Association failure
- * is handled by walking up the blkg tree.  Therefore, the blkg associated can
- * be anything between @blkg and the root_blkg.  This situation only happens
- * when a cgroup is dying and then the remaining bios will spill to the closest
- * alive blkg.
- *
- * A reference will be taken on the @blkg and will be released when @bio is
- * freed.
- */
-static void __bio_associate_blkg(struct bio *bio, struct blkcg_gq *blkg)
-{
-	bio_disassociate_blkg(bio);
-
-	bio->bi_blkg = blkg_tryget_closest(blkg);
-}
-
-/**
- * bio_associate_blkg_from_css - associate a bio with a specified css
- * @bio: target bio
- * @css: target css
- *
- * Associate @bio with the blkg found by combining the css's blkg and the
- * request_queue of the @bio.  This falls back to the queue's root_blkg if
- * the association fails with the css.
- */
-void bio_associate_blkg_from_css(struct bio *bio,
-				 struct cgroup_subsys_state *css)
-{
-	struct request_queue *q = bio->bi_disk->queue;
-	struct blkcg_gq *blkg;
-
-	rcu_read_lock();
-
-	if (!css || !css->parent)
-		blkg = q->root_blkg;
-	else
-		blkg = blkg_lookup_create(css_to_blkcg(css), q);
-
-	__bio_associate_blkg(bio, blkg);
-
-	rcu_read_unlock();
-}
-EXPORT_SYMBOL_GPL(bio_associate_blkg_from_css);
-
-#ifdef CONFIG_MEMCG
-/**
- * bio_associate_blkg_from_page - associate a bio with the page's blkg
- * @bio: target bio
- * @page: the page to lookup the blkcg from
- *
- * Associate @bio with the blkg from @page's owning memcg and the respective
- * request_queue.  If cgroup_e_css returns %NULL, fall back to the queue's
- * root_blkg.
- */
-void bio_associate_blkg_from_page(struct bio *bio, struct page *page)
-{
-	struct cgroup_subsys_state *css;
-
-	if (!page->mem_cgroup)
-		return;
-
-	rcu_read_lock();
-
-	css = cgroup_e_css(page->mem_cgroup->css.cgroup, &io_cgrp_subsys);
-	bio_associate_blkg_from_css(bio, css);
-
-	rcu_read_unlock();
-}
-#endif /* CONFIG_MEMCG */
-
-/**
- * bio_associate_blkg - associate a bio with a blkg
- * @bio: target bio
- *
- * Associate @bio with the blkg found from the bio's css and request_queue.
- * If one is not found, bio_lookup_blkg() creates the blkg.  If a blkg is
- * already associated, the css is reused and association redone as the
- * request_queue may have changed.
- */
-void bio_associate_blkg(struct bio *bio)
-{
-	struct cgroup_subsys_state *css;
-
-	rcu_read_lock();
-
-	if (bio->bi_blkg)
-		css = &bio_blkcg(bio)->css;
-	else
-		css = blkcg_css();
-
-	bio_associate_blkg_from_css(bio, css);
-
-	rcu_read_unlock();
-}
-EXPORT_SYMBOL_GPL(bio_associate_blkg);
-
-/**
- * bio_clone_blkg_association - clone blkg association from src to dst bio
- * @dst: destination bio
- * @src: source bio
- */
-void bio_clone_blkg_association(struct bio *dst, struct bio *src)
-{
-	rcu_read_lock();
-
-	if (src->bi_blkg)
-		__bio_associate_blkg(dst, src->bi_blkg);
-
-	rcu_read_unlock();
-}
-EXPORT_SYMBOL_GPL(bio_clone_blkg_association);
-#endif /* CONFIG_BLK_CGROUP */
 
 static void __init biovec_init_slabs(void)
 {
