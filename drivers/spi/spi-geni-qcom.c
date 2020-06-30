@@ -7,6 +7,7 @@
 #include <linux/log2.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
+#include <linux/pm_opp.h>
 #include <linux/pm_runtime.h>
 #include <linux/qcom-geni-se.h>
 #include <linux/spi/spi.h>
@@ -95,7 +96,6 @@ static int get_spi_clk_cfg(unsigned int speed_hz,
 {
 	unsigned long sclk_freq;
 	unsigned int actual_hz;
-	struct geni_se *se = &mas->se;
 	int ret;
 
 	ret = geni_se_clk_freq_match(&mas->se,
@@ -112,9 +112,9 @@ static int get_spi_clk_cfg(unsigned int speed_hz,
 
 	dev_dbg(mas->dev, "req %u=>%u sclk %lu, idx %d, div %d\n", speed_hz,
 				actual_hz, sclk_freq, *clk_idx, *clk_div);
-	ret = clk_set_rate(se->clk, sclk_freq);
+	ret = dev_pm_opp_set_rate(mas->dev, sclk_freq);
 	if (ret)
-		dev_err(mas->dev, "clk_set_rate failed %d\n", ret);
+		dev_err(mas->dev, "dev_pm_opp_set_rate failed %d\n", ret);
 	return ret;
 }
 
@@ -194,14 +194,49 @@ static void spi_setup_word_len(struct spi_geni_master *mas, u16 mode,
 	writel(word_len, se->base + SE_SPI_WORD_LEN);
 }
 
+static int geni_spi_set_clock_and_bw(struct spi_geni_master *mas,
+					unsigned long clk_hz)
+{
+	u32 clk_sel, m_clk_cfg, idx, div;
+	struct geni_se *se = &mas->se;
+	int ret;
+
+	ret = get_spi_clk_cfg(clk_hz, mas, &idx, &div);
+	if (ret) {
+		dev_err(mas->dev, "Err setting clk to %lu: %d\n", clk_hz, ret);
+		return ret;
+	}
+
+	/*
+	 * SPI core clock gets configured with the requested frequency
+	 * or the frequency closer to the requested frequency.
+	 * For that reason requested frequency is stored in the
+	 * cur_speed_hz and referred in the consecutive transfer instead
+	 * of calling clk_get_rate() API.
+	 */
+	mas->cur_speed_hz = clk_hz;
+
+	clk_sel = idx & CLK_SEL_MSK;
+	m_clk_cfg = (div << CLK_DIV_SHFT) | SER_CLK_EN;
+	writel(clk_sel, se->base + SE_GENI_CLK_SEL);
+	writel(m_clk_cfg, se->base + GENI_SER_M_CLK_CFG);
+
+	/* Set BW quota for CPU as driver supports FIFO mode only. */
+	se->icc_paths[CPU_TO_GENI].avg_bw = Bps_to_icc(mas->cur_speed_hz);
+	ret = geni_icc_set_bw(se);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
 static int setup_fifo_params(struct spi_device *spi_slv,
 					struct spi_master *spi)
 {
 	struct spi_geni_master *mas = spi_master_get_devdata(spi);
 	struct geni_se *se = &mas->se;
 	u32 loopback_cfg, cpol, cpha, demux_output_inv;
-	u32 demux_sel, clk_sel, m_clk_cfg, idx, div;
-	int ret;
+	u32 demux_sel;
 
 	loopback_cfg = readl(se->base + SE_SPI_LOOPBACK);
 	cpol = readl(se->base + SE_SPI_CPOL);
@@ -224,27 +259,16 @@ static int setup_fifo_params(struct spi_device *spi_slv,
 		demux_output_inv = BIT(spi_slv->chip_select);
 
 	demux_sel = spi_slv->chip_select;
-	mas->cur_speed_hz = spi_slv->max_speed_hz;
 	mas->cur_bits_per_word = spi_slv->bits_per_word;
 
-	ret = get_spi_clk_cfg(mas->cur_speed_hz, mas, &idx, &div);
-	if (ret) {
-		dev_err(mas->dev, "Err setting clks ret(%d) for %ld\n",
-							ret, mas->cur_speed_hz);
-		return ret;
-	}
-
-	clk_sel = idx & CLK_SEL_MSK;
-	m_clk_cfg = (div << CLK_DIV_SHFT) | SER_CLK_EN;
 	spi_setup_word_len(mas, spi_slv->mode, spi_slv->bits_per_word);
 	writel(loopback_cfg, se->base + SE_SPI_LOOPBACK);
 	writel(demux_sel, se->base + SE_SPI_DEMUX_SEL);
 	writel(cpha, se->base + SE_SPI_CPHA);
 	writel(cpol, se->base + SE_SPI_CPOL);
 	writel(demux_output_inv, se->base + SE_SPI_DEMUX_OUTPUT_INV);
-	writel(clk_sel, se->base + SE_GENI_CLK_SEL);
-	writel(m_clk_cfg, se->base + GENI_SER_M_CLK_CFG);
-	return 0;
+
+	return geni_spi_set_clock_and_bw(mas, spi_slv->max_speed_hz);
 }
 
 static int spi_geni_prepare_message(struct spi_master *spi,
@@ -306,6 +330,7 @@ static void setup_fifo_xfer(struct spi_transfer *xfer,
 	u32 m_cmd = 0;
 	u32 spi_tx_cfg, len;
 	struct geni_se *se = &mas->se;
+	int ret;
 
 	spi_tx_cfg = readl(se->base + SE_SPI_TRANS_CFG);
 	if (xfer->bits_per_word != mas->cur_bits_per_word) {
@@ -315,27 +340,9 @@ static void setup_fifo_xfer(struct spi_transfer *xfer,
 
 	/* Speed and bits per word can be overridden per transfer */
 	if (xfer->speed_hz != mas->cur_speed_hz) {
-		int ret;
-		u32 clk_sel, m_clk_cfg;
-		unsigned int idx, div;
-
-		ret = get_spi_clk_cfg(xfer->speed_hz, mas, &idx, &div);
-		if (ret) {
-			dev_err(mas->dev, "Err setting clks:%d\n", ret);
+		ret = geni_spi_set_clock_and_bw(mas, xfer->speed_hz);
+		if (ret)
 			return;
-		}
-		/*
-		 * SPI core clock gets configured with the requested frequency
-		 * or the frequency closer to the requested frequency.
-		 * For that reason requested frequency is stored in the
-		 * cur_speed_hz and referred in the consecutive transfer instead
-		 * of calling clk_get_rate() API.
-		 */
-		mas->cur_speed_hz = xfer->speed_hz;
-		clk_sel = idx & CLK_SEL_MSK;
-		m_clk_cfg = (div << CLK_DIV_SHFT) | SER_CLK_EN;
-		writel(clk_sel, se->base + SE_GENI_CLK_SEL);
-		writel(m_clk_cfg, se->base + GENI_SER_M_CLK_CFG);
 	}
 
 	mas->tx_rem_bytes = 0;
@@ -561,6 +568,17 @@ static int spi_geni_probe(struct platform_device *pdev)
 	mas->se.wrapper = dev_get_drvdata(dev->parent);
 	mas->se.base = base;
 	mas->se.clk = clk;
+	mas->se.opp_table = dev_pm_opp_set_clkname(&pdev->dev, "se");
+	if (IS_ERR(mas->se.opp_table))
+		return PTR_ERR(mas->se.opp_table);
+	/* OPP table is optional */
+	ret = dev_pm_opp_of_add_table(&pdev->dev);
+	if (!ret) {
+		mas->se.has_opp_table = true;
+	} else if (ret != -ENODEV) {
+		dev_err(&pdev->dev, "invalid OPP table in device tree\n");
+		return ret;
+	}
 
 	spi->bus_num = -1;
 	spi->dev.of_node = dev->of_node;
@@ -577,6 +595,17 @@ static int spi_geni_probe(struct platform_device *pdev)
 	init_completion(&mas->xfer_done);
 	spin_lock_init(&mas->lock);
 	pm_runtime_enable(dev);
+
+	ret = geni_icc_get(&mas->se, NULL);
+	if (ret)
+		goto spi_geni_probe_runtime_disable;
+	/* Set the bus quota to a reasonable value for register access */
+	mas->se.icc_paths[GENI_TO_CORE].avg_bw = Bps_to_icc(CORE_2X_50_MHZ);
+	mas->se.icc_paths[CPU_TO_GENI].avg_bw = GENI_DEFAULT_BW;
+
+	ret = geni_icc_set_bw(&mas->se);
+	if (ret)
+		goto spi_geni_probe_runtime_disable;
 
 	ret = spi_geni_init(mas);
 	if (ret)
@@ -596,6 +625,9 @@ spi_geni_probe_free_irq:
 spi_geni_probe_runtime_disable:
 	pm_runtime_disable(dev);
 	spi_master_put(spi);
+	if (mas->se.has_opp_table)
+		dev_pm_opp_of_remove_table(&pdev->dev);
+	dev_pm_opp_put_clkname(mas->se.opp_table);
 	return ret;
 }
 
@@ -609,6 +641,9 @@ static int spi_geni_remove(struct platform_device *pdev)
 
 	free_irq(mas->irq, spi);
 	pm_runtime_disable(&pdev->dev);
+	if (mas->se.has_opp_table)
+		dev_pm_opp_of_remove_table(&pdev->dev);
+	dev_pm_opp_put_clkname(mas->se.opp_table);
 	return 0;
 }
 
@@ -616,14 +651,27 @@ static int __maybe_unused spi_geni_runtime_suspend(struct device *dev)
 {
 	struct spi_master *spi = dev_get_drvdata(dev);
 	struct spi_geni_master *mas = spi_master_get_devdata(spi);
+	int ret;
 
-	return geni_se_resources_off(&mas->se);
+	/* Drop the performance state vote */
+	dev_pm_opp_set_rate(dev, 0);
+
+	ret = geni_se_resources_off(&mas->se);
+	if (ret)
+		return ret;
+
+	return geni_icc_disable(&mas->se);
 }
 
 static int __maybe_unused spi_geni_runtime_resume(struct device *dev)
 {
 	struct spi_master *spi = dev_get_drvdata(dev);
 	struct spi_geni_master *mas = spi_master_get_devdata(spi);
+	int ret;
+
+	ret = geni_icc_enable(&mas->se);
+	if (ret)
+		return ret;
 
 	return geni_se_resources_on(&mas->se);
 }
