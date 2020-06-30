@@ -244,7 +244,8 @@ struct phy_package_shared {
 };
 
 /* used as bit number in atomic bitops */
-#define PHY_SHARED_F_INIT_DONE 0
+#define PHY_SHARED_F_INIT_DONE  0
+#define PHY_SHARED_F_PROBE_DONE 1
 
 /*
  * The Bus class for PHYs.  Devices which provide access to
@@ -297,6 +298,14 @@ struct mii_bus {
 	int reset_delay_us;
 	/* RESET GPIO descriptor pointer */
 	struct gpio_desc *reset_gpiod;
+
+	/* bus capabilities, used for probing */
+	enum {
+		MDIOBUS_NO_CAP = 0,
+		MDIOBUS_C22,
+		MDIOBUS_C45,
+		MDIOBUS_C22_C45,
+	} probe_capabilities;
 
 	/* protect access to the shared element */
 	struct mutex shared_lock;
@@ -388,14 +397,18 @@ enum phy_state {
 	PHY_CABLETEST,
 };
 
+#define MDIO_MMD_NUM 32
+
 /**
  * struct phy_c45_device_ids - 802.3-c45 Device Identifiers
- * @devices_in_package: Bit vector of devices present.
+ * @devices_in_package: IEEE 802.3 devices in package register value.
+ * @mmds_present: bit vector of MMDs present.
  * @device_ids: The device identifer for each present device.
  */
 struct phy_c45_device_ids {
 	u32 devices_in_package;
-	u32 device_ids[8];
+	u32 mmds_present;
+	u32 device_ids[MDIO_MMD_NUM];
 };
 
 struct macsec_context;
@@ -1431,6 +1444,10 @@ void phy_set_asym_pause(struct phy_device *phydev, bool rx, bool tx);
 bool phy_validate_pause(struct phy_device *phydev,
 			struct ethtool_pauseparam *pp);
 void phy_get_pause(struct phy_device *phydev, bool *tx_pause, bool *rx_pause);
+
+s32 phy_get_internal_delay(struct phy_device *phydev, struct device *dev,
+			   const int *delay_values, int size, bool is_rx);
+
 void phy_resolve_pause(unsigned long *local_adv, unsigned long *partner_adv,
 		       bool *tx_pause, bool *rx_pause);
 
@@ -1555,14 +1572,25 @@ static inline int __phy_package_write(struct phy_device *phydev,
 	return __mdiobus_write(phydev->mdio.bus, shared->addr, regnum, val);
 }
 
-static inline bool phy_package_init_once(struct phy_device *phydev)
+static inline bool __phy_package_set_once(struct phy_device *phydev,
+					  unsigned int b)
 {
 	struct phy_package_shared *shared = phydev->shared;
 
 	if (!shared)
 		return false;
 
-	return !test_and_set_bit(PHY_SHARED_F_INIT_DONE, &shared->flags);
+	return !test_and_set_bit(b, &shared->flags);
+}
+
+static inline bool phy_package_init_once(struct phy_device *phydev)
+{
+	return __phy_package_set_once(phydev, PHY_SHARED_F_INIT_DONE);
+}
+
+static inline bool phy_package_probe_once(struct phy_device *phydev)
+{
+	return __phy_package_set_once(phydev, PHY_SHARED_F_PROBE_DONE);
 }
 
 extern struct bus_type mdio_bus_type;

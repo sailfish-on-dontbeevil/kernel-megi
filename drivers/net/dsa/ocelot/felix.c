@@ -59,6 +59,29 @@ static int felix_fdb_del(struct dsa_switch *ds, int port,
 	return ocelot_fdb_del(ocelot, port, addr, vid);
 }
 
+/* This callback needs to be present */
+static int felix_mdb_prepare(struct dsa_switch *ds, int port,
+			     const struct switchdev_obj_port_mdb *mdb)
+{
+	return 0;
+}
+
+static void felix_mdb_add(struct dsa_switch *ds, int port,
+			  const struct switchdev_obj_port_mdb *mdb)
+{
+	struct ocelot *ocelot = ds->priv;
+
+	ocelot_port_mdb_add(ocelot, port, mdb);
+}
+
+static int felix_mdb_del(struct dsa_switch *ds, int port,
+			 const struct switchdev_obj_port_mdb *mdb)
+{
+	struct ocelot *ocelot = ds->priv;
+
+	return ocelot_port_mdb_del(ocelot, port, mdb);
+}
+
 static void felix_bridge_stp_state_set(struct dsa_switch *ds, int port,
 				       u8 state)
 {
@@ -723,9 +746,7 @@ static int felix_port_policer_add(struct dsa_switch *ds, int port,
 	struct ocelot *ocelot = ds->priv;
 	struct ocelot_policer pol = {
 		.rate = div_u64(policer->rate_bytes_per_sec, 1000) * 8,
-		.burst = div_u64(policer->rate_bytes_per_sec *
-				 PSCHED_NS2TICKS(policer->burst),
-				 PSCHED_TICKS_PER_SEC),
+		.burst = policer->burst,
 	};
 
 	return ocelot_port_policer_add(ocelot, port, &pol);
@@ -771,6 +792,9 @@ static const struct dsa_switch_ops felix_switch_ops = {
 	.port_fdb_dump		= felix_fdb_dump,
 	.port_fdb_add		= felix_fdb_add,
 	.port_fdb_del		= felix_fdb_del,
+	.port_mdb_prepare	= felix_mdb_prepare,
+	.port_mdb_add		= felix_mdb_add,
+	.port_mdb_del		= felix_mdb_del,
 	.port_bridge_join	= felix_bridge_join,
 	.port_bridge_leave	= felix_bridge_leave,
 	.port_stp_state_set	= felix_bridge_stp_state_set,

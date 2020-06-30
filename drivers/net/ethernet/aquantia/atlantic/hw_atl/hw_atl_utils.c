@@ -217,7 +217,7 @@ static int hw_atl_utils_soft_reset_rbl(struct aq_hw_s *self)
 
 	if (rbl_status == 0xF1A7) {
 		aq_pr_err("No FW detected. Dynamic FW load not implemented\n");
-		return -ENOTSUPP;
+		return -EOPNOTSUPP;
 	}
 
 	for (k = 0; k < 1000; k++) {
@@ -704,6 +704,7 @@ int hw_atl_utils_mpi_get_link_status(struct aq_hw_s *self)
 			return -EBUSY;
 		}
 	}
+	link_status->full_duplex = true;
 
 	return 0;
 }
