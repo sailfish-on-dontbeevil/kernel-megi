@@ -619,6 +619,7 @@ smb2_is_valid_lease_break(char *buffer)
 					queue_work(cifsiod_wq,
 						   &tcon->crfid.lease_break);
 					spin_unlock(&cifs_tcp_ses_lock);
+					kfree(lw);
 					return true;
 				}
 			}
