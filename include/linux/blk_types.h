@@ -33,23 +33,13 @@ struct block_device {
 	struct list_head	bd_holder_disks;
 #endif
 	struct block_device *	bd_contains;
-	unsigned		bd_block_size;
 	u8			bd_partno;
 	struct hd_struct *	bd_part;
 	/* number of times partitions within this device have been opened. */
 	unsigned		bd_part_count;
 	int			bd_invalidated;
 	struct gendisk *	bd_disk;
-	struct request_queue *  bd_queue;
 	struct backing_dev_info *bd_bdi;
-	struct list_head	bd_list;
-	/*
-	 * Private data.  You must have bd_claim'ed the block_device
-	 * to use this.  NOTE:  bd_claim allows an owner to claim
-	 * the same device multiple times, the owner must take special
-	 * care to not mess up bd_private for that case.
-	 */
-	unsigned long		bd_private;
 
 	/* The counter of freeze processes */
 	int			bd_fsfreeze_count;
