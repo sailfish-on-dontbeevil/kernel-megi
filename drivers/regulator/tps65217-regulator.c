@@ -124,7 +124,7 @@ static int tps65217_pmic_set_suspend_enable(struct regulator_dev *dev)
 	struct tps65217 *tps = rdev_get_drvdata(dev);
 	unsigned int rid = rdev_get_id(dev);
 
-	if (rid < TPS65217_DCDC_1 || rid > TPS65217_LDO_4)
+	if (rid > TPS65217_LDO_4)
 		return -EINVAL;
 
 	return tps65217_clear_bits(tps, dev->desc->bypass_reg,
@@ -137,7 +137,7 @@ static int tps65217_pmic_set_suspend_disable(struct regulator_dev *dev)
 	struct tps65217 *tps = rdev_get_drvdata(dev);
 	unsigned int rid = rdev_get_id(dev);
 
-	if (rid < TPS65217_DCDC_1 || rid > TPS65217_LDO_4)
+	if (rid > TPS65217_LDO_4)
 		return -EINVAL;
 
 	if (!tps->strobes[rid])
@@ -254,6 +254,9 @@ static int tps65217_regulator_probe(struct platform_device *pdev)
 
 		/* Store default strobe info */
 		ret = tps65217_reg_read(tps, regulators[i].bypass_reg, &val);
+		if (ret)
+			return ret;
+
 		tps->strobes[i] = val & regulators[i].bypass_mask;
 	}
 
