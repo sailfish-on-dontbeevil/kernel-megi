@@ -1527,7 +1527,7 @@ struct page *alloc_migration_target(struct page *page, unsigned long private)
 	if (PageHuge(page)) {
 		return alloc_huge_page_nodemask(
 				page_hstate(compound_head(page)), mtc->nid,
-				mtc->nmask, gfp_mask, false);
+				mtc->nmask, gfp_mask, mtc->skip_cma);
 	}
 
 	if (PageTransHuge(page)) {
@@ -1538,6 +1538,8 @@ struct page *alloc_migration_target(struct page *page, unsigned long private)
 	zidx = zone_idx(page_zone(page));
 	if (is_highmem_idx(zidx) || zidx == ZONE_MOVABLE)
 		gfp_mask |= __GFP_HIGHMEM;
+	if (mtc->skip_cma)
+		gfp_mask &= ~__GFP_MOVABLE;
 
 	new_page = __alloc_pages_nodemask(gfp_mask, order,
 				mtc->nid, mtc->nmask);
