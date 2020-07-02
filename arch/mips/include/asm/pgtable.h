@@ -554,11 +554,20 @@ static inline void update_mmu_cache(struct vm_area_struct *vma,
 #define	__HAVE_ARCH_UPDATE_MMU_TLB
 #define update_mmu_tlb	update_mmu_cache
 
+extern void local_flush_tlb_page(struct vm_area_struct *vma,
+				unsigned long page);
 static inline void update_mmu_cache_pmd(struct vm_area_struct *vma,
 	unsigned long address, pmd_t *pmdp)
 {
 	pte_t pte = *(pte_t *)pmdp;
 
+	/*
+	 * If pmd_none is true, older tlb entry will be normal page.
+	 * here to invalidate older tlb entry indexed by address
+	 * parameter address must be page fault address rather than
+	 * start address of pmd huge page
+	 */
+	local_flush_tlb_page(vma, address);
 	__update_tlb(vma, address, pte);
 }
 

@@ -193,7 +193,7 @@ void putback_movable_pages(struct list_head *l)
 			put_page(page);
 		} else {
 			mod_node_page_state(page_pgdat(page), NR_ISOLATED_ANON +
-					page_is_file_lru(page), -hpage_nr_pages(page));
+					page_is_file_lru(page), -thp_nr_pages(page));
 			putback_lru_page(page);
 		}
 	}
@@ -386,7 +386,7 @@ static int expected_page_refs(struct address_space *mapping, struct page *page)
 	 */
 	expected_count += is_device_private_page(page);
 	if (mapping)
-		expected_count += hpage_nr_pages(page) + page_has_private(page);
+		expected_count += thp_nr_pages(page) + page_has_private(page);
 
 	return expected_count;
 }
@@ -441,7 +441,7 @@ int migrate_page_move_mapping(struct address_space *mapping,
 	 */
 	newpage->index = page->index;
 	newpage->mapping = page->mapping;
-	page_ref_add(newpage, hpage_nr_pages(page)); /* add cache reference */
+	page_ref_add(newpage, thp_nr_pages(page)); /* add cache reference */
 	if (PageSwapBacked(page)) {
 		__SetPageSwapBacked(newpage);
 		if (PageSwapCache(page)) {
@@ -474,7 +474,7 @@ int migrate_page_move_mapping(struct address_space *mapping,
 	 * to one less reference.
 	 * We know this isn't the last reference.
 	 */
-	page_ref_unfreeze(page, expected_count - hpage_nr_pages(page));
+	page_ref_unfreeze(page, expected_count - thp_nr_pages(page));
 
 	xas_unlock(&xas);
 	/* Leave irq disabled to prevent preemption while updating stats */
@@ -591,7 +591,7 @@ static void copy_huge_page(struct page *dst, struct page *src)
 	} else {
 		/* thp page */
 		BUG_ON(!PageTransHuge(src));
-		nr_pages = hpage_nr_pages(src);
+		nr_pages = thp_nr_pages(src);
 	}
 
 	for (i = 0; i < nr_pages; i++) {
@@ -1171,6 +1171,20 @@ out:
 #define ICE_noinline
 #endif
 
+#ifdef CONFIG_ARCH_ENABLE_THP_MIGRATION
+static inline void thp_pmd_migration_success(bool success)
+{
+	if (success)
+		count_vm_event(THP_PMD_MIGRATION_SUCCESS);
+	else
+		count_vm_event(THP_PMD_MIGRATION_FAILURE);
+}
+#else
+static inline void thp_pmd_migration_success(bool success)
+{
+}
+#endif
+
 /*
  * Obtain the lock on page, remove all ptes and migrate the page
  * to the newly allocated page in newpage.
@@ -1224,7 +1238,7 @@ out:
 		 */
 		if (likely(!__PageMovable(page)))
 			mod_node_page_state(page_pgdat(page), NR_ISOLATED_ANON +
-					page_is_file_lru(page), -hpage_nr_pages(page));
+					page_is_file_lru(page), -thp_nr_pages(page));
 	}
 
 	/*
@@ -1233,16 +1247,19 @@ out:
 	 * we want to retry.
 	 */
 	if (rc == MIGRATEPAGE_SUCCESS) {
-		put_page(page);
-		if (reason == MR_MEMORY_FAILURE) {
+		/*
+		 * When the page to be migrated has been freed from under
+		 * us, that is considered a MIGRATEPAGE_SUCCESS, but no
+		 * newpage has been allocated. It should not be counted
+		 * as a successful THP migration.
+		 */
+		if (newpage && PageTransHuge(newpage))
+			thp_pmd_migration_success(true);
+		if (reason != MR_MEMORY_FAILURE)
 			/*
-			 * Set PG_HWPoison on just freed page
-			 * intentionally. Although it's rather weird,
-			 * it's how HWPoison flag works at the moment.
+			 * We release the page in page_handle_poison.
 			 */
-			if (set_hwpoison_free_buddy_page(page))
-				num_poisoned_pages_inc();
-		}
+			put_page(page);
 	} else {
 		if (rc != -EAGAIN) {
 			if (likely(!__PageMovable(page))) {
@@ -1475,6 +1492,7 @@ retry:
 					unlock_page(page);
 					if (!rc) {
 						list_safe_reset_next(page, page2, lru);
+						thp_pmd_migration_success(false);
 						goto retry;
 					}
 				}
@@ -1513,6 +1531,43 @@ out:
 	return rc;
 }
 
+struct page *alloc_migration_target(struct page *page, unsigned long private)
+{
+	struct migration_target_control *mtc;
+	gfp_t gfp_mask;
+	unsigned int order = 0;
+	struct page *new_page = NULL;
+	int zidx;
+
+	mtc = (struct migration_target_control *)private;
+	gfp_mask = mtc->gfp_mask;
+
+	if (PageHuge(page)) {
+		return alloc_huge_page_nodemask(
+				page_hstate(compound_head(page)), mtc->nid,
+				mtc->nmask, gfp_mask, mtc->skip_cma);
+	}
+
+	if (PageTransHuge(page)) {
+		gfp_mask &= ~__GFP_RECLAIM;
+		gfp_mask |= GFP_TRANSHUGE;
+		order = HPAGE_PMD_ORDER;
+	}
+	zidx = zone_idx(page_zone(page));
+	if (is_highmem_idx(zidx) || zidx == ZONE_MOVABLE)
+		gfp_mask |= __GFP_HIGHMEM;
+	if (mtc->skip_cma)
+		gfp_mask &= ~__GFP_MOVABLE;
+
+	new_page = __alloc_pages_nodemask(gfp_mask, order,
+				mtc->nid, mtc->nmask);
+
+	if (new_page && PageTransHuge(new_page))
+		prep_transhuge_page(new_page);
+
+	return new_page;
+}
+
 #ifdef CONFIG_NUMA
 
 static int store_status(int __user *status, int start, int value, int nr)
@@ -1530,9 +1585,13 @@ static int do_move_pages_to_node(struct mm_struct *mm,
 		struct list_head *pagelist, int node)
 {
 	int err;
+	struct migration_target_control mtc = {
+		.nid = node,
+		.gfp_mask = GFP_HIGHUSER_MOVABLE | __GFP_THISNODE,
+	};
 
-	err = migrate_pages(pagelist, alloc_new_node_page, NULL, node,
-			MIGRATE_SYNC, MR_SYSCALL);
+	err = migrate_pages(pagelist, alloc_migration_target, NULL,
+			(unsigned long)&mtc, MIGRATE_SYNC, MR_SYSCALL);
 	if (err)
 		putback_movable_pages(pagelist);
 	return err;
@@ -1598,7 +1657,7 @@ static int add_page_for_migration(struct mm_struct *mm, unsigned long addr,
 		list_add_tail(&head->lru, pagelist);
 		mod_node_page_state(page_pgdat(head),
 			NR_ISOLATED_ANON + page_is_file_lru(head),
-			hpage_nr_pages(head));
+			thp_nr_pages(head));
 	}
 out_putpage:
 	/*
@@ -1962,7 +2021,7 @@ static int numamigrate_isolate_page(pg_data_t *pgdat, struct page *page)
 
 	page_lru = page_is_file_lru(page);
 	mod_node_page_state(page_pgdat(page), NR_ISOLATED_ANON + page_lru,
-				hpage_nr_pages(page));
+				thp_nr_pages(page));
 
 	/*
 	 * Isolating the page has taken another reference, so the
