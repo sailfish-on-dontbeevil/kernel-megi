@@ -232,8 +232,10 @@ struct flow_action_entry {
 			bool			truncate;
 		} sample;
 		struct {				/* FLOW_ACTION_POLICE */
-			s64			burst;
+			u32			index;
+			u32			burst;
 			u64			rate_bytes_ps;
+			u32			mtu;
 		} police;
 		struct {				/* FLOW_ACTION_CT */
 			int action;
@@ -389,17 +391,20 @@ static inline bool flow_rule_match_key(const struct flow_rule *rule,
 struct flow_stats {
 	u64	pkts;
 	u64	bytes;
+	u64	drops;
 	u64	lastused;
 	enum flow_action_hw_stats used_hw_stats;
 	bool used_hw_stats_valid;
 };
 
 static inline void flow_stats_update(struct flow_stats *flow_stats,
-				     u64 bytes, u64 pkts, u64 lastused,
+				     u64 bytes, u64 pkts,
+				     u64 drops, u64 lastused,
 				     enum flow_action_hw_stats used_hw_stats)
 {
 	flow_stats->pkts	+= pkts;
 	flow_stats->bytes	+= bytes;
+	flow_stats->drops	+= drops;
 	flow_stats->lastused	= max_t(u64, flow_stats->lastused, lastused);
 
 	/* The driver should pass value with a maximum of one bit set.
@@ -419,6 +424,8 @@ enum flow_block_binder_type {
 	FLOW_BLOCK_BINDER_TYPE_UNSPEC,
 	FLOW_BLOCK_BINDER_TYPE_CLSACT_INGRESS,
 	FLOW_BLOCK_BINDER_TYPE_CLSACT_EGRESS,
+	FLOW_BLOCK_BINDER_TYPE_RED_EARLY_DROP,
+	FLOW_BLOCK_BINDER_TYPE_RED_MARK,
 };
 
 struct flow_block {

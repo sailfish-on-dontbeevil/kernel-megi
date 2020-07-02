@@ -1,3 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/****************************************************************************
+ * Driver for Solarflare network controllers and boards
+ * Copyright 2005-2018 Solarflare Communications Inc.
+ * Copyright 2019-2020 Xilinx Inc.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License version 2 as published
+ * by the Free Software Foundation, incorporated herein by reference.
+ */
+
 #include "mcdi_filters.h"
 #include "mcdi.h"
 #include "nic.h"
@@ -828,7 +839,7 @@ static int efx_mcdi_filter_insert_def(struct efx_nic *efx,
 		efx_filter_set_uc_def(&spec);
 
 	if (encap_type) {
-		if (efx_has_cap(efx, VXLAN_NVGRE, FLAGS1))
+		if (efx_has_cap(efx, VXLAN_NVGRE))
 			efx_filter_set_encap_type(&spec, encap_type);
 		else
 			/*
@@ -1304,7 +1315,7 @@ int efx_mcdi_filter_table_probe(struct efx_nic *efx, bool multicast_chaining)
 	rc = efx_mcdi_filter_table_probe_matches(efx, table, false);
 	if (rc)
 		goto fail;
-	if (efx_has_cap(efx, VXLAN_NVGRE, FLAGS1))
+	if (efx_has_cap(efx, VXLAN_NVGRE))
 		rc = efx_mcdi_filter_table_probe_matches(efx, table, true);
 	if (rc)
 		goto fail;
@@ -1927,7 +1938,7 @@ static int efx_mcdi_filter_alloc_rss_context(struct efx_nic *efx, bool exclusive
 		return 0;
 	}
 
-	if (efx_has_cap(efx, RX_RSS_LIMITED, FLAGS1))
+	if (efx_has_cap(efx, RX_RSS_LIMITED))
 		return -EOPNOTSUPP;
 
 	MCDI_SET_DWORD(inbuf, RSS_CONTEXT_ALLOC_IN_UPSTREAM_PORT_ID,
@@ -1948,7 +1959,7 @@ static int efx_mcdi_filter_alloc_rss_context(struct efx_nic *efx, bool exclusive
 	if (context_size)
 		*context_size = rss_spread;
 
-	if (efx_has_cap(efx, ADDITIONAL_RSS_MODES, FLAGS1))
+	if (efx_has_cap(efx, ADDITIONAL_RSS_MODES))
 		efx_mcdi_set_rss_context_flags(efx, ctx);
 
 	return 0;
