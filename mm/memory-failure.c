@@ -169,10 +169,6 @@ int hwpoison_filter(struct page *p)
 	return 0;
 }
 
-static bool page_handle_poison(struct page *page, bool hugepage_or_freepage, bool release)
-{
-	return true;
-}
 #endif
 
 EXPORT_SYMBOL_GPL(hwpoison_filter);
