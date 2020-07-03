@@ -877,7 +877,7 @@ static int cs42l42_digital_mute(struct snd_soc_dai *dai, int mute)
 				CS42L42_PLL_START_MASK,
 				1 << CS42L42_PLL_START_SHIFT);
 		/* Read the headphone load */
-		regval = snd_soc_component_read32(component, CS42L42_LOAD_DET_RCSTAT);
+		regval = snd_soc_component_read(component, CS42L42_LOAD_DET_RCSTAT);
 		if (((regval & CS42L42_RLA_STAT_MASK) >>
 			CS42L42_RLA_STAT_SHIFT) == CS42L42_RLA_STAT_15_OHM) {
 			fullScaleVol = CS42L42_HP_FULL_SCALE_VOL_MASK;
@@ -1658,8 +1658,7 @@ static int cs42l42_handle_device_data(struct i2c_client *i2c_client,
 	ret = of_property_read_u32(np, "cirrus,btn-det-init-dbnce", &val);
 
 	if (!ret) {
-		if ((val >= CS42L42_BTN_DET_INIT_DBNCE_MIN) &&
-			(val <= CS42L42_BTN_DET_INIT_DBNCE_MAX))
+		if (val <= CS42L42_BTN_DET_INIT_DBNCE_MAX)
 			cs42l42->btn_det_init_dbnce = val;
 		else {
 			dev_err(&i2c_client->dev,
@@ -1676,8 +1675,7 @@ static int cs42l42_handle_device_data(struct i2c_client *i2c_client,
 	ret = of_property_read_u32(np, "cirrus,btn-det-event-dbnce", &val);
 
 	if (!ret) {
-		if ((val >= CS42L42_BTN_DET_EVENT_DBNCE_MIN) &&
-			(val <= CS42L42_BTN_DET_EVENT_DBNCE_MAX))
+		if (val <= CS42L42_BTN_DET_EVENT_DBNCE_MAX)
 			cs42l42->btn_det_event_dbnce = val;
 		else {
 			dev_err(&i2c_client->dev,
@@ -1695,8 +1693,7 @@ static int cs42l42_handle_device_data(struct i2c_client *i2c_client,
 
 	if (!ret) {
 		for (i = 0; i < CS42L42_NUM_BIASES; i++) {
-			if ((thresholds[i] >= CS42L42_HS_DET_LEVEL_MIN) &&
-				(thresholds[i] <= CS42L42_HS_DET_LEVEL_MAX))
+			if (thresholds[i] <= CS42L42_HS_DET_LEVEL_MAX)
 				cs42l42->bias_thresholds[i] = thresholds[i];
 			else {
 				dev_err(&i2c_client->dev,
