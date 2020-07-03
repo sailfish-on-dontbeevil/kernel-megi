@@ -279,7 +279,18 @@ Sysfs Entries
 
 Information about mounted f2fs file systems can be found in
 /sys/fs/f2fs.  Each mounted filesystem will have a directory in
-/sys/fs/f2fs based on its device name (i.e., /sys/fs/f2fs/sda).
+/sys/fs/f2fs based on its device name (i.e., /sys/fs/f2fs/sda),
+or mount_#x (#x is the number representing the order of mounting).
+But once one mount point was umounted, that sequential number @x
+in "mount_@x" could be reused by later newly mounted point.
+
+Here is an example of this.
+
+mount dev0 mount0 (mount_0 -> dev0)
+mount dev1 mount1 (mount_1 -> dev1)
+umount mount0
+mount dev2 (mount_0 -> dev2)
+
 The files in each per-device directory are shown in table below.
 
 Files in /sys/fs/f2fs/<devname>
