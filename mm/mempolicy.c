@@ -1071,7 +1071,7 @@ struct page *alloc_new_node_page(struct page *page, unsigned long node)
 	if (PageHuge(page)) {
 		return alloc_huge_page_nodemask(
 			page_hstate(compound_head(page)), node,
-			NULL, __GFP_THISNODE);
+			NULL, __GFP_THISNODE, false);
 	} else if (PageTransHuge(page)) {
 		struct page *thp;
 
