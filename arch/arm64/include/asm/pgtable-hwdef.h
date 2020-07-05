@@ -82,20 +82,20 @@
  * Contiguous page definitions.
  */
 #ifdef CONFIG_ARM64_64K_PAGES
-#define CONT_PTE_SHIFT		5
-#define CONT_PMD_SHIFT		5
+#define CONT_PTE_SHIFT		(5 + PAGE_SHIFT)
+#define CONT_PMD_SHIFT		(5 + PMD_SHIFT)
 #elif defined(CONFIG_ARM64_16K_PAGES)
-#define CONT_PTE_SHIFT		7
-#define CONT_PMD_SHIFT		5
+#define CONT_PTE_SHIFT		(7 + PAGE_SHIFT)
+#define CONT_PMD_SHIFT		(5 + PMD_SHIFT)
 #else
-#define CONT_PTE_SHIFT		4
-#define CONT_PMD_SHIFT		4
+#define CONT_PTE_SHIFT		(4 + PAGE_SHIFT)
+#define CONT_PMD_SHIFT		(4 + PMD_SHIFT)
 #endif
 
-#define CONT_PTES		(1 << CONT_PTE_SHIFT)
+#define CONT_PTES		(1 << (CONT_PTE_SHIFT - PAGE_SHIFT))
 #define CONT_PTE_SIZE		(CONT_PTES * PAGE_SIZE)
 #define CONT_PTE_MASK		(~(CONT_PTE_SIZE - 1))
-#define CONT_PMDS		(1 << CONT_PMD_SHIFT)
+#define CONT_PMDS		(1 << (CONT_PMD_SHIFT - PMD_SHIFT))
 #define CONT_PMD_SIZE		(CONT_PMDS * PMD_SIZE)
 #define CONT_PMD_MASK		(~(CONT_PMD_SIZE - 1))
 /* the the numerical offset of the PTE within a range of CONT_PTES */
@@ -216,6 +216,7 @@
 #define TCR_TxSZ(x)		(TCR_T0SZ(x) | TCR_T1SZ(x))
 #define TCR_TxSZ_WIDTH		6
 #define TCR_T0SZ_MASK		(((UL(1) << TCR_TxSZ_WIDTH) - 1) << TCR_T0SZ_OFFSET)
+#define TCR_T1SZ_MASK		(((UL(1) << TCR_TxSZ_WIDTH) - 1) << TCR_T1SZ_OFFSET)
 
 #define TCR_EPD0_SHIFT		7
 #define TCR_EPD0_MASK		(UL(1) << TCR_EPD0_SHIFT)

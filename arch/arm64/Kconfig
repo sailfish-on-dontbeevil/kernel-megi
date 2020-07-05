@@ -1327,6 +1327,8 @@ config SWP_EMULATION
 	  ARMv8 obsoletes the use of A32 SWP/SWPB instructions such that
 	  they are always undefined. Say Y here to enable software
 	  emulation of these instructions for userspace using LDXR/STXR.
+	  This feature can be controlled at runtime with the abi.swp
+	  sysctl which is disabled by default.
 
 	  In some older versions of glibc [<=2.8] SWP is used during futex
 	  trylock() operations with the assumption that the code will not
@@ -1353,7 +1355,8 @@ config CP15_BARRIER_EMULATION
 	  Say Y here to enable software emulation of these
 	  instructions for AArch32 userspace code. When this option is
 	  enabled, CP15 barrier usage is traced which can help
-	  identify software that needs updating.
+	  identify software that needs updating. This feature can be
+	  controlled at runtime with the abi.cp15_barrier sysctl.
 
 	  If unsure, say Y
 
@@ -1364,7 +1367,8 @@ config SETEND_EMULATION
 	  AArch32 EL0, and is deprecated in ARMv8.
 
 	  Say Y here to enable software emulation of the instruction
-	  for AArch32 userspace code.
+	  for AArch32 userspace code. This feature can be controlled
+	  at runtime with the abi.setend sysctl.
 
 	  Note: All the cpus on the system must have mixed endian support at EL0
 	  for this feature to be enabled. If a new CPU - which doesn't support mixed
@@ -1663,6 +1667,34 @@ config ARCH_RANDOM
 	  Random number generation (part of the ARMv8.5 Extensions)
 	  provides a high bandwidth, cryptographically secure
 	  hardware random number generator.
+
+config ARM64_AS_HAS_MTE
+	def_bool $(as-instr,.arch armv8.5-a+memtag)
+
+config ARM64_MTE
+	bool "Memory Tagging Extension support"
+	default y
+	depends on ARM64_AS_HAS_MTE && ARM64_TAGGED_ADDR_ABI
+	select ARCH_USES_HIGH_VMA_FLAGS
+	help
+	  Memory Tagging (part of the ARMv8.5 Extensions) provides
+	  architectural support for run-time, always-on detection of
+	  various classes of memory error to aid with software debugging
+	  to eliminate vulnerabilities arising from memory-unsafe
+	  languages.
+
+	  This option enables the support for the Memory Tagging
+	  Extension at EL0 (i.e. for userspace).
+
+	  Selecting this option allows the feature to be detected at
+	  runtime. Any secondary CPU not implementing this feature will
+	  not be allowed a late bring-up.
+
+	  Userspace binaries that want to use this feature must
+	  explicitly opt in. The mechanism for the userspace is
+	  described in:
+
+	  Documentation/arm64/memory-tagging-extension.rst.
 
 endmenu
 
