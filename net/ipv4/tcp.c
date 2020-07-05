@@ -3246,10 +3246,7 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 #ifdef CONFIG_TCP_MD5SIG
 	case TCP_MD5SIG:
 	case TCP_MD5SIG_EXT:
-		if ((1 << sk->sk_state) & (TCPF_CLOSE | TCPF_LISTEN))
-			err = tp->af_specific->md5_parse(sk, optname, optval, optlen);
-		else
-			err = -EINVAL;
+		err = tp->af_specific->md5_parse(sk, optname, optval, optlen);
 		break;
 #endif
 	case TCP_USER_TIMEOUT:
@@ -4033,11 +4030,14 @@ EXPORT_SYMBOL(tcp_md5_hash_skb_data);
 
 int tcp_md5_hash_key(struct tcp_md5sig_pool *hp, const struct tcp_md5sig_key *key)
 {
+	u8 keylen = READ_ONCE(key->keylen); /* paired with WRITE_ONCE() in tcp_md5_do_add */
 	struct scatterlist sg;
 
-	sg_init_one(&sg, key->key, key->keylen);
-	ahash_request_set_crypt(hp->md5_req, &sg, NULL, key->keylen);
-	return crypto_ahash_update(hp->md5_req);
+	sg_init_one(&sg, key->key, keylen);
+	ahash_request_set_crypt(hp->md5_req, &sg, NULL, keylen);
+
+	/* We use data_race() because tcp_md5_do_add() might change key->key under us */
+	return data_race(crypto_ahash_update(hp->md5_req));
 }
 EXPORT_SYMBOL(tcp_md5_hash_key);
 
