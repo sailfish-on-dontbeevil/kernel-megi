@@ -538,7 +538,6 @@ enum {
 	REQ_F_POLLED_BIT,
 	REQ_F_BUFFER_SELECTED_BIT,
 	REQ_F_NO_FILE_TABLE_BIT,
-	REQ_F_QUEUE_TIMEOUT_BIT,
 	REQ_F_WORK_INITIALIZED_BIT,
 	REQ_F_TASK_PINNED_BIT,
 
@@ -586,8 +585,6 @@ enum {
 	REQ_F_BUFFER_SELECTED	= BIT(REQ_F_BUFFER_SELECTED_BIT),
 	/* doesn't need file table for this request */
 	REQ_F_NO_FILE_TABLE	= BIT(REQ_F_NO_FILE_TABLE_BIT),
-	/* needs to queue linked timeout */
-	REQ_F_QUEUE_TIMEOUT	= BIT(REQ_F_QUEUE_TIMEOUT_BIT),
 	/* io_wq_work is initialized */
 	REQ_F_WORK_INITIALIZED	= BIT(REQ_F_WORK_INITIALIZED_BIT),
 	/* req->task is refcounted */
@@ -1419,7 +1416,7 @@ static void io_submit_flush_completions(struct io_comp_state *cs)
 
 		req = list_first_entry(&cs->list, struct io_kiocb, list);
 		list_del(&req->list);
-		io_cqring_fill_event(req, req->result);
+		__io_cqring_fill_event(req, req->result, req->cflags);
 		if (!(req->flags & REQ_F_LINK_HEAD)) {
 			req->flags |= REQ_F_COMP_LOCKED;
 			io_put_req(req);
@@ -1444,6 +1441,7 @@ static void __io_req_complete(struct io_kiocb *req, long res, unsigned cflags,
 		io_put_req(req);
 	} else {
 		req->result = res;
+		req->cflags = cflags;
 		list_add_tail(&req->list, &cs->list);
 		if (++cs->nr >= 32)
 			io_submit_flush_completions(cs);
@@ -1689,6 +1687,29 @@ static struct io_kiocb *io_req_find_next(struct io_kiocb *req)
 	return __io_req_find_next(req);
 }
 
+static int io_req_task_work_add(struct io_kiocb *req, struct callback_head *cb)
+{
+	struct task_struct *tsk = req->task;
+	struct io_ring_ctx *ctx = req->ctx;
+	int ret, notify = TWA_RESUME;
+
+	/*
+	 * SQPOLL kernel thread doesn't need notification, just a wakeup.
+	 * If we're not using an eventfd, then TWA_RESUME is always fine,
+	 * as we won't have dependencies between request completions for
+	 * other kernel wait conditions.
+	 */
+	if (ctx->flags & IORING_SETUP_SQPOLL)
+		notify = 0;
+	else if (ctx->cq_ev_fd)
+		notify = TWA_SIGNAL;
+
+	ret = task_work_add(tsk, cb, notify);
+	if (!ret)
+		wake_up_process(tsk);
+	return ret;
+}
+
 static void __io_req_task_cancel(struct io_kiocb *req, int error)
 {
 	struct io_ring_ctx *ctx = req->ctx;
@@ -1714,7 +1735,6 @@ static void __io_req_task_submit(struct io_kiocb *req)
 {
 	struct io_ring_ctx *ctx = req->ctx;
 
-	__set_current_state(TASK_RUNNING);
 	if (!__io_sq_thread_acquire_mm(ctx)) {
 		mutex_lock(&ctx->uring_lock);
 		__io_queue_sqe(req, NULL, NULL);
@@ -1733,18 +1753,19 @@ static void io_req_task_submit(struct callback_head *cb)
 
 static void io_req_task_queue(struct io_kiocb *req)
 {
-	struct task_struct *tsk = req->task;
 	int ret;
 
 	init_task_work(&req->task_work, io_req_task_submit);
 
-	ret = task_work_add(tsk, &req->task_work, true);
+	ret = io_req_task_work_add(req, &req->task_work);
 	if (unlikely(ret)) {
+		struct task_struct *tsk;
+
 		init_task_work(&req->task_work, io_req_task_cancel);
 		tsk = io_wq_get_task(req->ctx->io_wq);
-		task_work_add(tsk, &req->task_work, true);
+		task_work_add(tsk, &req->task_work, 0);
+		wake_up_process(tsk);
 	}
-	wake_up_process(tsk);
 }
 
 static void io_queue_next(struct io_kiocb *req)
@@ -1819,7 +1840,7 @@ static void io_put_req(struct io_kiocb *req)
 
 static struct io_wq_work *io_steal_work(struct io_kiocb *req)
 {
-	struct io_kiocb *timeout, *nxt = NULL;
+	struct io_kiocb *nxt;
 
 	/*
 	 * A ref is owned by io-wq in which context we're. So, if that's the
@@ -1830,13 +1851,7 @@ static struct io_wq_work *io_steal_work(struct io_kiocb *req)
 		return NULL;
 
 	nxt = io_req_find_next(req);
-	if (!nxt)
-		return NULL;
-
-	timeout = io_prep_linked_timeout(nxt);
-	if (timeout)
-		nxt->flags |= REQ_F_QUEUE_TIMEOUT;
-	return &nxt->work;
+	return nxt ? &nxt->work : NULL;
 }
 
 /*
@@ -1897,6 +1912,17 @@ static int io_put_kbuf(struct io_kiocb *req)
 	req->rw.addr = 0;
 	kfree(kbuf);
 	return cflags;
+}
+
+static inline bool io_run_task_work(void)
+{
+	if (current->task_works) {
+		__set_current_state(TASK_RUNNING);
+		task_work_run();
+		return true;
+	}
+
+	return false;
 }
 
 static void io_iopoll_queue(struct list_head *again)
@@ -2079,8 +2105,7 @@ static int io_iopoll_check(struct io_ring_ctx *ctx, unsigned *nr_events,
 		 */
 		if (!(++iters & 7)) {
 			mutex_unlock(&ctx->uring_lock);
-			if (current->task_works)
-				task_work_run();
+			io_run_task_work();
 			mutex_lock(&ctx->uring_lock);
 		}
 
@@ -2176,8 +2201,6 @@ static void io_rw_resubmit(struct callback_head *cb)
 	struct io_ring_ctx *ctx = req->ctx;
 	int err;
 
-	__set_current_state(TASK_RUNNING);
-
 	err = io_sq_thread_acquire_mm(ctx, req);
 
 	if (io_resubmit_prep(req, err)) {
@@ -2190,19 +2213,15 @@ static void io_rw_resubmit(struct callback_head *cb)
 static bool io_rw_reissue(struct io_kiocb *req, long res)
 {
 #ifdef CONFIG_BLOCK
-	struct task_struct *tsk;
 	int ret;
 
 	if ((res != -EAGAIN && res != -EOPNOTSUPP) || io_wq_current_is_worker())
 		return false;
 
-	tsk = req->task;
 	init_task_work(&req->task_work, io_rw_resubmit);
-	ret = task_work_add(tsk, &req->task_work, true);
-	if (!ret) {
-		wake_up_process(tsk);
+	ret = io_req_task_work_add(req, &req->task_work);
+	if (!ret)
 		return true;
-	}
 #endif
 	return false;
 }
@@ -2902,7 +2921,6 @@ static int io_async_buf_func(struct wait_queue_entry *wait, unsigned mode,
 	struct io_kiocb *req = wait->private;
 	struct io_async_rw *rw = &req->io->rw;
 	struct wait_page_key *key = arg;
-	struct task_struct *tsk;
 	int ret;
 
 	wpq = container_of(wait, struct wait_page_queue, wait);
@@ -2916,15 +2934,16 @@ static int io_async_buf_func(struct wait_queue_entry *wait, unsigned mode,
 	init_task_work(&rw->task_work, io_async_buf_retry);
 	/* submit ref gets dropped, acquire a new one */
 	refcount_inc(&req->refs);
-	tsk = req->task;
-	ret = task_work_add(tsk, &rw->task_work, true);
+	ret = io_req_task_work_add(req, &rw->task_work);
 	if (unlikely(ret)) {
+		struct task_struct *tsk;
+
 		/* queue just for cancelation */
 		init_task_work(&rw->task_work, io_async_buf_cancel);
 		tsk = io_wq_get_task(req->ctx->io_wq);
-		task_work_add(tsk, &rw->task_work, true);
+		task_work_add(tsk, &rw->task_work, 0);
+		wake_up_process(tsk);
 	}
-	wake_up_process(tsk);
 	return 1;
 }
 
@@ -4420,7 +4439,6 @@ struct io_poll_table {
 static int __io_async_wake(struct io_kiocb *req, struct io_poll_iocb *poll,
 			   __poll_t mask, task_work_func_t func)
 {
-	struct task_struct *tsk;
 	int ret;
 
 	/* for instances that support it check for an event match first: */
@@ -4431,7 +4449,6 @@ static int __io_async_wake(struct io_kiocb *req, struct io_poll_iocb *poll,
 
 	list_del_init(&poll->wait.entry);
 
-	tsk = req->task;
 	req->result = mask;
 	init_task_work(&req->task_work, func);
 	/*
@@ -4440,13 +4457,15 @@ static int __io_async_wake(struct io_kiocb *req, struct io_poll_iocb *poll,
 	 * of executing it. We can't safely execute it anyway, as we may not
 	 * have the needed state needed for it anyway.
 	 */
-	ret = task_work_add(tsk, &req->task_work, true);
+	ret = io_req_task_work_add(req, &req->task_work);
 	if (unlikely(ret)) {
+		struct task_struct *tsk;
+
 		WRITE_ONCE(poll->canceled, true);
 		tsk = io_wq_get_task(req->ctx->io_wq);
-		task_work_add(tsk, &req->task_work, true);
+		task_work_add(tsk, &req->task_work, 0);
+		wake_up_process(tsk);
 	}
-	wake_up_process(tsk);
 	return 1;
 }
 
@@ -5675,24 +5694,15 @@ static int io_issue_sqe(struct io_kiocb *req, const struct io_uring_sqe *sqe,
 	return 0;
 }
 
-static void io_arm_async_linked_timeout(struct io_kiocb *req)
-{
-	struct io_kiocb *link;
-
-	/* link head's timeout is queued in io_queue_async_work() */
-	if (!(req->flags & REQ_F_QUEUE_TIMEOUT))
-		return;
-
-	link = list_first_entry(&req->link_list, struct io_kiocb, link_list);
-	io_queue_linked_timeout(link);
-}
-
 static struct io_wq_work *io_wq_submit_work(struct io_wq_work *work)
 {
 	struct io_kiocb *req = container_of(work, struct io_kiocb, work);
+	struct io_kiocb *timeout;
 	int ret = 0;
 
-	io_arm_async_linked_timeout(req);
+	timeout = io_prep_linked_timeout(req);
+	if (timeout)
+		io_queue_linked_timeout(timeout);
 
 	/* if NO_CANCEL is set, we must still run the work */
 	if ((work->flags & (IO_WQ_WORK_CANCEL|IO_WQ_WORK_NO_CANCEL)) ==
@@ -5866,8 +5876,7 @@ static struct io_kiocb *io_prep_linked_timeout(struct io_kiocb *req)
 
 	if (!(req->flags & REQ_F_LINK_HEAD))
 		return NULL;
-	/* for polled retry, if flag is set, we already went through here */
-	if (req->flags & REQ_F_POLLED)
+	if (req->flags & REQ_F_LINK_TIMEOUT)
 		return NULL;
 
 	nxt = list_first_entry_or_null(&req->link_list, struct io_kiocb,
@@ -5929,22 +5938,21 @@ punt:
 		goto exit;
 	}
 
+	if (unlikely(ret)) {
 err:
+		/* un-prep timeout, so it'll be killed as any other linked */
+		req->flags &= ~REQ_F_LINK_TIMEOUT;
+		req_set_fail_links(req);
+		io_put_req(req);
+		io_req_complete(req, ret);
+		goto exit;
+	}
+
 	/* drop submission reference */
 	nxt = io_put_req_find_next(req);
+	if (linked_timeout)
+		io_queue_linked_timeout(linked_timeout);
 
-	if (linked_timeout) {
-		if (!ret)
-			io_queue_linked_timeout(linked_timeout);
-		else
-			io_put_req(linked_timeout);
-	}
-
-	/* and drop final reference, if we failed */
-	if (ret) {
-		req_set_fail_links(req);
-		io_req_complete(req, ret);
-	}
 	if (nxt) {
 		req = nxt;
 
@@ -6338,8 +6346,7 @@ static int io_sq_thread(void *data)
 			if (!list_empty(&ctx->poll_list) || need_resched() ||
 			    (!time_after(jiffies, timeout) && ret != -EBUSY &&
 			    !percpu_ref_is_dying(&ctx->refs))) {
-				if (current->task_works)
-					task_work_run();
+				io_run_task_work();
 				cond_resched();
 				continue;
 			}
@@ -6371,8 +6378,7 @@ static int io_sq_thread(void *data)
 					finish_wait(&ctx->sqo_wait, &wait);
 					break;
 				}
-				if (current->task_works) {
-					task_work_run();
+				if (io_run_task_work()) {
 					finish_wait(&ctx->sqo_wait, &wait);
 					continue;
 				}
@@ -6397,8 +6403,7 @@ static int io_sq_thread(void *data)
 		timeout = jiffies + ctx->sq_thread_idle;
 	}
 
-	if (current->task_works)
-		task_work_run();
+	io_run_task_work();
 
 	io_sq_thread_drop_mm(ctx);
 	revert_creds(old_cred);
@@ -6463,9 +6468,8 @@ static int io_cqring_wait(struct io_ring_ctx *ctx, int min_events,
 	do {
 		if (io_cqring_events(ctx, false) >= min_events)
 			return 0;
-		if (!current->task_works)
+		if (!io_run_task_work())
 			break;
-		task_work_run();
 	} while (1);
 
 	if (sig) {
@@ -6486,15 +6490,23 @@ static int io_cqring_wait(struct io_ring_ctx *ctx, int min_events,
 	do {
 		prepare_to_wait_exclusive(&ctx->wait, &iowq.wq,
 						TASK_INTERRUPTIBLE);
-		if (current->task_works)
-			task_work_run();
-		if (io_should_wake(&iowq, false))
-			break;
-		schedule();
+		/* make sure we run task_work before checking for signals */
+		if (io_run_task_work())
+			continue;
 		if (signal_pending(current)) {
+			if (current->jobctl & JOBCTL_TASK_WORK) {
+				spin_lock_irq(&current->sighand->siglock);
+				current->jobctl &= ~JOBCTL_TASK_WORK;
+				recalc_sigpending();
+				spin_unlock_irq(&current->sighand->siglock);
+				continue;
+			}
 			ret = -EINTR;
 			break;
 		}
+		if (io_should_wake(&iowq, false))
+			break;
+		schedule();
 	} while (1);
 	finish_wait(&ctx->wait, &iowq.wq);
 
@@ -7922,8 +7934,7 @@ SYSCALL_DEFINE6(io_uring_enter, unsigned int, fd, u32, to_submit,
 	int submitted = 0;
 	struct fd f;
 
-	if (current->task_works)
-		task_work_run();
+	io_run_task_work();
 
 	if (flags & ~(IORING_ENTER_GETEVENTS | IORING_ENTER_SQ_WAKEUP))
 		return -EINVAL;
