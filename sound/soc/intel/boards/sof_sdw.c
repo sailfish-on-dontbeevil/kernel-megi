@@ -15,8 +15,31 @@
 #include "sof_sdw_common.h"
 
 unsigned long sof_sdw_quirk = SOF_RT711_JD_SRC_JD1;
+static int quirk_override = -1;
+module_param_named(quirk, quirk_override, int, 0444);
+MODULE_PARM_DESC(quirk, "Board-specific quirk override");
 
 #define INC_ID(BE, CPU, LINK)	do { (BE)++; (CPU)++; (LINK)++; } while (0)
+
+static void log_quirks(struct device *dev)
+{
+	if (SOF_RT711_JDSRC(sof_sdw_quirk))
+		dev_dbg(dev, "quirk realtek,jack-detect-source %ld\n",
+			SOF_RT711_JDSRC(sof_sdw_quirk));
+	if (sof_sdw_quirk & SOF_SDW_FOUR_SPK)
+		dev_dbg(dev, "quirk SOF_SDW_FOUR_SPK enabled\n");
+	if (sof_sdw_quirk & SOF_SDW_TGL_HDMI)
+		dev_dbg(dev, "quirk SOF_SDW_TGL_HDMI enabled\n");
+	if (sof_sdw_quirk & SOF_SDW_PCH_DMIC)
+		dev_dbg(dev, "quirk SOF_SDW_PCH_DMIC enabled\n");
+	if (SOF_SSP_GET_PORT(sof_sdw_quirk))
+		dev_dbg(dev, "SSP port %ld\n",
+			SOF_SSP_GET_PORT(sof_sdw_quirk));
+	if (sof_sdw_quirk & SOF_RT715_DAI_ID_FIX)
+		dev_dbg(dev, "quirk SOF_RT715_DAI_ID_FIX enabled\n");
+	if (sof_sdw_quirk & SOF_SDW_NO_AGGREGATION)
+		dev_dbg(dev, "quirk SOF_SDW_NO_AGGREGATION enabled\n");
+}
 
 static int sof_sdw_quirk_cb(const struct dmi_system_id *id)
 {
@@ -97,7 +120,8 @@ static const struct dmi_system_id sof_sdw_quirk_table[] = {
 			DMI_MATCH(DMI_SYS_VENDOR, "Google"),
 			DMI_MATCH(DMI_PRODUCT_NAME, "Volteer"),
 		},
-		.driver_data = (void *)(SOF_SDW_TGL_HDMI | SOF_SDW_PCH_DMIC),
+		.driver_data = (void *)(SOF_SDW_TGL_HDMI | SOF_SDW_PCH_DMIC |
+					SOF_SDW_FOUR_SPK),
 	},
 
 	{}
@@ -136,6 +160,15 @@ static struct snd_soc_codec_conf codec_conf[] = {
 		.dlc = COMP_CODEC_CONF("sdw:3:25d:715:0"),
 		.name_prefix = "rt715",
 	},
+	/* two MAX98373s on link1 with different unique id */
+	{
+		.dlc = COMP_CODEC_CONF("sdw:1:19f:8373:0:3"),
+		.name_prefix = "Right",
+	},
+	{
+		.dlc = COMP_CODEC_CONF("sdw:1:19f:8373:0:7"),
+		.name_prefix = "Left",
+	},
 	{
 		.dlc = COMP_CODEC_CONF("sdw:0:25d:5682:0"),
 		.name_prefix = "rt5682",
@@ -157,12 +190,12 @@ static struct snd_soc_dai_link_component platform_component[] = {
 };
 
 /* these wrappers are only needed to avoid typecast compilation errors */
-static int sdw_startup(struct snd_pcm_substream *substream)
+int sdw_startup(struct snd_pcm_substream *substream)
 {
 	return sdw_startup_stream(substream);
 }
 
-static void sdw_shutdown(struct snd_pcm_substream *substream)
+void sdw_shutdown(struct snd_pcm_substream *substream)
 {
 	sdw_shutdown_stream(substream);
 }
@@ -198,6 +231,12 @@ static struct sof_sdw_codec_info codec_info_list[] = {
 		.direction = {false, true},
 		.dai_name = "rt715-aif2",
 		.init = sof_sdw_rt715_init,
+	},
+	{
+		.id = 0x8373,
+		.direction = {true, true},
+		.dai_name = "max98373-aif1",
+		.init = sof_sdw_mx8373_init,
 	},
 	{
 		.id = 0x5682,
@@ -893,6 +932,7 @@ static const char sdw_card_long_name[] = "Intel Soundwire SOF";
 
 static struct snd_soc_card card_sof_sdw = {
 	.name = "soundwire",
+	.owner = THIS_MODULE,
 	.late_probe = sof_sdw_hdmi_card_late_probe,
 	.codec_conf = codec_conf,
 	.num_configs = ARRAY_SIZE(codec_conf),
@@ -913,6 +953,13 @@ static int mc_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	dmi_check_system(sof_sdw_quirk_table);
+
+	if (quirk_override != -1) {
+		dev_info(&pdev->dev, "Overriding quirk 0x%lx => 0x%x\n",
+			 sof_sdw_quirk, quirk_override);
+		sof_sdw_quirk = quirk_override;
+	}
+	log_quirks(&pdev->dev);
 
 	INIT_LIST_HEAD(&ctx->hdmi_pcm_list);
 
