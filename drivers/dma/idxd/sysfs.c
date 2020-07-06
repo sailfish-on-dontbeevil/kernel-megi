@@ -304,6 +304,13 @@ static int idxd_config_bus_remove(struct device *dev)
 
 		idxd_unregister_dma_device(idxd);
 		rc = idxd_device_disable(idxd);
+		for (i = 0; i < idxd->max_wqs; i++) {
+			struct idxd_wq *wq = &idxd->wqs[i];
+
+			mutex_lock(&wq->wq_lock);
+			idxd_wq_disable_cleanup(wq);
+			mutex_unlock(&wq->wq_lock);
+		}
 		module_put(THIS_MODULE);
 		if (rc < 0)
 			dev_warn(dev, "Device disable failed\n");
