@@ -301,10 +301,10 @@ void amdgpu_device_vram_access(struct amdgpu_device *adev, loff_t pos,
 }
 
 /*
- * device register access helper functions.
+ * MMIO register access helper functions.
  */
 /**
- * amdgpu_device_rreg - read a register
+ * amdgpu_mm_rreg - read a memory mapped IO register
  *
  * @adev: amdgpu_device pointer
  * @reg: dword aligned register offset
@@ -312,8 +312,8 @@ void amdgpu_device_vram_access(struct amdgpu_device *adev, loff_t pos,
  *
  * Returns the 32 bit value from the offset specified.
  */
-uint32_t amdgpu_device_rreg(struct amdgpu_device *adev, uint32_t reg,
-			    uint32_t acc_flags)
+uint32_t amdgpu_mm_rreg(struct amdgpu_device *adev, uint32_t reg,
+			uint32_t acc_flags)
 {
 	uint32_t ret;
 
@@ -322,9 +322,15 @@ uint32_t amdgpu_device_rreg(struct amdgpu_device *adev, uint32_t reg,
 
 	if ((reg * 4) < adev->rmmio_size)
 		ret = readl(((void __iomem *)adev->rmmio) + (reg * 4));
-	else
-		ret = adev->pcie_rreg(adev, (reg * 4));
-	trace_amdgpu_device_rreg(adev->pdev->device, reg, ret);
+	else {
+		unsigned long flags;
+
+		spin_lock_irqsave(&adev->mmio_idx_lock, flags);
+		writel((reg * 4), ((void __iomem *)adev->rmmio) + (mmMM_INDEX * 4));
+		ret = readl(((void __iomem *)adev->rmmio) + (mmMM_DATA * 4));
+		spin_unlock_irqrestore(&adev->mmio_idx_lock, flags);
+	}
+	trace_amdgpu_mm_rreg(adev->pdev->device, reg, ret);
 	return ret;
 }
 
@@ -370,19 +376,24 @@ void amdgpu_mm_wreg8(struct amdgpu_device *adev, uint32_t offset, uint8_t value)
 		BUG();
 }
 
-void static inline amdgpu_device_wreg_no_kiq(struct amdgpu_device *adev, uint32_t reg,
-					     uint32_t v, uint32_t acc_flags)
+void static inline amdgpu_mm_wreg_mmio(struct amdgpu_device *adev, uint32_t reg, uint32_t v, uint32_t acc_flags)
 {
-	trace_amdgpu_device_wreg(adev->pdev->device, reg, v);
+	trace_amdgpu_mm_wreg(adev->pdev->device, reg, v);
 
 	if ((reg * 4) < adev->rmmio_size)
 		writel(v, ((void __iomem *)adev->rmmio) + (reg * 4));
-	else
-		adev->pcie_wreg(adev, (reg * 4), v);
+	else {
+		unsigned long flags;
+
+		spin_lock_irqsave(&adev->mmio_idx_lock, flags);
+		writel((reg * 4), ((void __iomem *)adev->rmmio) + (mmMM_INDEX * 4));
+		writel(v, ((void __iomem *)adev->rmmio) + (mmMM_DATA * 4));
+		spin_unlock_irqrestore(&adev->mmio_idx_lock, flags);
+	}
 }
 
 /**
- * amdgpu_device_wreg - write to a register
+ * amdgpu_mm_wreg - write to a memory mapped IO register
  *
  * @adev: amdgpu_device pointer
  * @reg: dword aligned register offset
@@ -391,13 +402,13 @@ void static inline amdgpu_device_wreg_no_kiq(struct amdgpu_device *adev, uint32_
  *
  * Writes the value specified to the offset specified.
  */
-void amdgpu_device_wreg(struct amdgpu_device *adev, uint32_t reg, uint32_t v,
-			uint32_t acc_flags)
+void amdgpu_mm_wreg(struct amdgpu_device *adev, uint32_t reg, uint32_t v,
+		    uint32_t acc_flags)
 {
 	if (!(acc_flags & AMDGPU_REGS_NO_KIQ) && amdgpu_sriov_runtime(adev))
 		return amdgpu_kiq_wreg(adev, reg, v);
 
-	amdgpu_device_wreg_no_kiq(adev, reg, v, acc_flags);
+	amdgpu_mm_wreg_mmio(adev, reg, v, acc_flags);
 }
 
 /*
@@ -416,7 +427,7 @@ void amdgpu_mm_wreg_mmio_rlc(struct amdgpu_device *adev, uint32_t reg, uint32_t 
 			return adev->gfx.rlc.funcs->rlcg_wreg(adev, reg, v);
 	}
 
-	amdgpu_device_wreg_no_kiq(adev, reg, v, acc_flags);
+	amdgpu_mm_wreg_mmio(adev, reg, v, acc_flags);
 }
 
 /**
@@ -1722,6 +1733,12 @@ static int amdgpu_device_ip_early_init(struct amdgpu_device *adev)
 
 	amdgpu_device_enable_virtual_display(adev);
 
+	if (amdgpu_sriov_vf(adev)) {
+		r = amdgpu_virt_request_full_gpu(adev, true);
+		if (r)
+			return r;
+	}
+
 	switch (adev->asic_type) {
 #ifdef CONFIG_DRM_AMDGPU_SI
 	case CHIP_VERDE:
@@ -1801,31 +1818,6 @@ static int amdgpu_device_ip_early_init(struct amdgpu_device *adev)
 
 	amdgpu_amdkfd_device_probe(adev);
 
-	if (amdgpu_sriov_vf(adev)) {
-		/* handle vbios stuff prior full access mode for new handshake */
-		if (adev->virt.req_init_data_ver == 1) {
-			if (!amdgpu_get_bios(adev)) {
-				DRM_ERROR("failed to get vbios\n");
-				return -EINVAL;
-			}
-
-			r = amdgpu_atombios_init(adev);
-			if (r) {
-				dev_err(adev->dev, "amdgpu_atombios_init failed\n");
-				amdgpu_vf_error_put(adev, AMDGIM_ERROR_VF_ATOMBIOS_INIT_FAIL, 0, 0);
-				return r;
-			}
-		}
-	}
-
-	/* we need to send REQ_GPU here for legacy handshaker otherwise the vbios
-	 * will not be prepared by host for this VF */
-	if (amdgpu_sriov_vf(adev) && adev->virt.req_init_data_ver < 1) {
-		r = amdgpu_virt_request_full_gpu(adev, true);
-		if (r)
-			return r;
-	}
-
 	adev->pm.pp_feature = amdgpu_pp_feature_mask;
 	if (amdgpu_sriov_vf(adev) || sched_policy == KFD_SCHED_POLICY_NO_HWS)
 		adev->pm.pp_feature &= ~PP_GFXOFF_MASK;
@@ -1856,10 +1848,6 @@ static int amdgpu_device_ip_early_init(struct amdgpu_device *adev)
 			r = amdgpu_device_parse_gpu_info_fw(adev);
 			if (r)
 				return r;
-
-			/* skip vbios handling for new handshake */
-			if (amdgpu_sriov_vf(adev) && adev->virt.req_init_data_ver == 1)
-				continue;
 
 			/* Read BIOS */
 			if (!amdgpu_get_bios(adev))
@@ -1986,12 +1974,6 @@ static int amdgpu_device_ip_init(struct amdgpu_device *adev)
 	r = amdgpu_ras_init(adev);
 	if (r)
 		return r;
-
-	if (amdgpu_sriov_vf(adev) && adev->virt.req_init_data_ver > 0) {
-		r = amdgpu_virt_request_full_gpu(adev, true);
-		if (r)
-			return -EAGAIN;
-	}
 
 	for (i = 0; i < adev->num_ip_blocks; i++) {
 		if (!adev->ip_blocks[i].status.valid)
@@ -3323,6 +3305,9 @@ fence_driver_init:
 
 	queue_delayed_work(system_wq, &adev->delayed_init_work,
 			   msecs_to_jiffies(AMDGPU_RESUME_MS));
+
+	if (amdgpu_sriov_vf(adev))
+		flush_delayed_work(&adev->delayed_init_work);
 
 	r = sysfs_create_files(&adev->dev->kobj, amdgpu_dev_attributes);
 	if (r) {
