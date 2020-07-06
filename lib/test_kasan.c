@@ -766,15 +766,15 @@ static noinline void __init kmalloc_double_kzfree(void)
 	char *ptr;
 	size_t size = 16;
 
-	pr_info("double-free (kzfree)\n");
+	pr_info("double-free (kfree_sensitive)\n");
 	ptr = kmalloc(size, GFP_KERNEL);
 	if (!ptr) {
 		pr_err("Allocation failed\n");
 		return;
 	}
 
-	kzfree(ptr);
-	kzfree(ptr);
+	kfree_sensitive(ptr);
+	kfree_sensitive(ptr);
 }
 
 #ifdef CONFIG_KASAN_VMALLOC
@@ -800,6 +800,35 @@ static noinline void __init vmalloc_oob(void)
 #else
 static void __init vmalloc_oob(void) {}
 #endif
+
+static struct kasan_rcu_info {
+	int i;
+	struct rcu_head rcu;
+} *global_rcu_ptr;
+
+static noinline void __init kasan_rcu_reclaim(struct rcu_head *rp)
+{
+	struct kasan_rcu_info *fp = container_of(rp,
+						struct kasan_rcu_info, rcu);
+
+	kfree(fp);
+	fp->i = 1;
+}
+
+static noinline void __init kasan_rcu_uaf(void)
+{
+	struct kasan_rcu_info *ptr;
+
+	pr_info("use-after-free in kasan_rcu_reclaim\n");
+	ptr = kmalloc(sizeof(struct kasan_rcu_info), GFP_KERNEL);
+	if (!ptr) {
+		pr_err("Allocation failed\n");
+		return;
+	}
+
+	global_rcu_ptr = rcu_dereference_protected(ptr, NULL);
+	call_rcu(&global_rcu_ptr->rcu, kasan_rcu_reclaim);
+}
 
 static int __init kmalloc_tests_init(void)
 {
@@ -848,6 +877,7 @@ static int __init kmalloc_tests_init(void)
 	kasan_bitops();
 	kmalloc_double_kzfree();
 	vmalloc_oob();
+	kasan_rcu_uaf();
 
 	kasan_restore_multi_shot(multishot);
 
