@@ -175,6 +175,14 @@ exit:
 	mutex_unlock(&tz->lock);
 }
 
+void thermal_cdev_set_cur_state(struct thermal_cooling_device *cdev, int target)
+{
+	if (cdev->ops->set_cur_state(cdev, target))
+		return;
+	thermal_notify_cdev_update(cdev->id, target);
+	thermal_cooling_device_stats_update(cdev, target);
+}
+
 void thermal_cdev_update(struct thermal_cooling_device *cdev)
 {
 	struct thermal_instance *instance;
@@ -197,8 +205,7 @@ void thermal_cdev_update(struct thermal_cooling_device *cdev)
 			target = instance->target;
 	}
 
-	if (!cdev->ops->set_cur_state(cdev, target))
-		thermal_cooling_device_stats_update(cdev, target);
+	thermal_cdev_set_cur_state(cdev, target);
 
 	cdev->updated = true;
 	mutex_unlock(&cdev->lock);
