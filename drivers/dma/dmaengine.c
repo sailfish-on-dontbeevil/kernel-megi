@@ -852,7 +852,7 @@ struct dma_chan *dma_request_chan(struct device *dev, const char *name)
 	mutex_lock(&dma_list_mutex);
 	if (list_empty(&dma_device_list)) {
 		mutex_unlock(&dma_list_mutex);
-		return NULL;
+		return ERR_PTR(-ENODEV);
 	}
 
 	list_for_each_entry_safe(d, _d, &dma_device_list, global_node) {
