@@ -1671,6 +1671,14 @@ static void cpu_enable_mte(struct arm64_cpu_capabilities const *cap)
 	write_sysreg_s(0, SYS_TFSRE0_EL1);
 
 	/*
+	 * CnP must be enabled only after the MAIR_EL1 register has been set
+	 * up. Inconsistent MAIR_EL1 between CPUs sharing the same TLB may
+	 * lead to the wrong memory type being used for a brief window during
+	 * CPU power-up.
+	 */
+	BUILD_BUG_ON(ARM64_HAS_CNP < ARM64_MTE);
+
+	/*
 	 * Update the MT_NORMAL_TAGGED index in MAIR_EL1. Tag checking is
 	 * disabled for the kernel, so there won't be any observable effect
 	 * other than allowing the kernel to read and write tags.
@@ -1679,17 +1687,15 @@ static void cpu_enable_mte(struct arm64_cpu_capabilities const *cap)
 	mair &= ~MAIR_ATTRIDX(MAIR_ATTR_MASK, MT_NORMAL_TAGGED);
 	mair |= MAIR_ATTRIDX(MAIR_ATTR_NORMAL_TAGGED, MT_NORMAL_TAGGED);
 	write_sysreg_s(mair, SYS_MAIR_EL1);
-
 	isb();
+
+	local_flush_tlb_all();
 }
 
 static int __init system_enable_mte(void)
 {
 	if (!system_supports_mte())
 		return 0;
-
-	/* Ensure the TLB does not have stale MAIR attributes */
-	flush_tlb_all();
 
 	/*
 	 * Clear the tags in the zero page. This needs to be done via the
