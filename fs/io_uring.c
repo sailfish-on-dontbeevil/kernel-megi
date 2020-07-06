@@ -2015,6 +2015,10 @@ static int io_do_iopoll(struct io_ring_ctx *ctx, unsigned int *nr_events,
 		if (ret < 0)
 			break;
 
+		/* iopoll may have completed current req */
+		if (READ_ONCE(req->iopoll_completed))
+			list_move_tail(&req->list, &done);
+
 		if (ret && spin)
 			spin = false;
 		ret = 0;
@@ -2040,7 +2044,7 @@ static int io_iopoll_getevents(struct io_ring_ctx *ctx, unsigned int *nr_events,
 		ret = io_do_iopoll(ctx, nr_events, min);
 		if (ret < 0)
 			return ret;
-		if (!min || *nr_events >= min)
+		if (*nr_events >= min)
 			return 0;
 	}
 
@@ -2065,8 +2069,13 @@ static void io_iopoll_reap_events(struct io_ring_ctx *ctx)
 		/*
 		 * Ensure we allow local-to-the-cpu processing to take place,
 		 * in this case we need to ensure that we reap all events.
+		 * Also let task_work, etc. to progress by releasing the mutex
 		 */
-		cond_resched();
+		if (need_resched()) {
+			mutex_unlock(&ctx->uring_lock);
+			cond_resched();
+			mutex_lock(&ctx->uring_lock);
+		}
 	}
 	mutex_unlock(&ctx->uring_lock);
 }
@@ -2083,8 +2092,6 @@ static int io_iopoll_check(struct io_ring_ctx *ctx, unsigned *nr_events,
 	 */
 	mutex_lock(&ctx->uring_lock);
 	do {
-		int tmin = 0;
-
 		/*
 		 * Don't enter poll loop if we already have events pending.
 		 * If we do, we can potentially be spinning for commands that
@@ -2109,10 +2116,7 @@ static int io_iopoll_check(struct io_ring_ctx *ctx, unsigned *nr_events,
 			mutex_lock(&ctx->uring_lock);
 		}
 
-		if (*nr_events < min)
-			tmin = min - *nr_events;
-
-		ret = io_iopoll_getevents(ctx, nr_events, tmin);
+		ret = io_iopoll_getevents(ctx, nr_events, min);
 		if (ret <= 0)
 			break;
 		ret = 0;
