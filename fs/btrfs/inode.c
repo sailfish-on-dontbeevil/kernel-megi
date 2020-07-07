@@ -7361,7 +7361,7 @@ static int btrfs_dio_iomap_begin(struct inode *inode, loff_t start,
 	dio_data->length = length;
 	if (write) {
 		dio_data->reserve = round_up(length, fs_info->sectorsize);
-		ret = btrfs_delalloc_reserve_space(inode,
+		ret = btrfs_delalloc_reserve_space(BTRFS_I(inode),
 				&dio_data->data_reserved,
 				start, dio_data->reserve);
 		if (ret) {
@@ -7460,7 +7460,7 @@ unlock_err:
 			     &cached_state);
 err:
 	if (dio_data) {
-		btrfs_delalloc_release_space(inode, dio_data->data_reserved,
+		btrfs_delalloc_release_space(BTRFS_I(inode), dio_data->data_reserved,
 				start, dio_data->reserve, true);
 		btrfs_delalloc_release_extents(BTRFS_I(inode), dio_data->reserve);
 		extent_changeset_free(dio_data->data_reserved);
@@ -7487,7 +7487,7 @@ static int btrfs_dio_iomap_end(struct inode *inode, loff_t pos, loff_t length,
 		pos += submitted;
 		length -= submitted;
 		if (write)
-			__endio_write_update_ordered(inode, pos, length, false);
+			__endio_write_update_ordered(BTRFS_I(inode), pos, length, false);
 		else
 			unlock_extent(&BTRFS_I(inode)->io_tree, pos,
 				      pos + length - 1);
@@ -7496,7 +7496,7 @@ static int btrfs_dio_iomap_end(struct inode *inode, loff_t pos, loff_t length,
 
 	if (write) {
 		if (dio_data->reserve)
-			btrfs_delalloc_release_space(inode,
+			btrfs_delalloc_release_space(BTRFS_I(inode),
 					dio_data->data_reserved, pos,
 					dio_data->reserve, true);
 		btrfs_delalloc_release_extents(BTRFS_I(inode), dio_data->length);
