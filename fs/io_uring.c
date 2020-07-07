@@ -2055,7 +2055,7 @@ static int io_iopoll_getevents(struct io_ring_ctx *ctx, unsigned int *nr_events,
  * We can't just wait for polled events to come to us, we have to actively
  * find and complete them.
  */
-static void io_iopoll_reap_events(struct io_ring_ctx *ctx)
+static void io_iopoll_try_reap_events(struct io_ring_ctx *ctx)
 {
 	if (!(ctx->flags & IORING_SETUP_IOPOLL))
 		return;
@@ -2064,8 +2064,11 @@ static void io_iopoll_reap_events(struct io_ring_ctx *ctx)
 	while (!list_empty(&ctx->poll_list)) {
 		unsigned int nr_events = 0;
 
-		io_iopoll_getevents(ctx, &nr_events, 1);
+		io_do_iopoll(ctx, &nr_events, 0);
 
+		/* let it sleep and repeat later if can't complete a request */
+		if (nr_events == 0)
+			break;
 		/*
 		 * Ensure we allow local-to-the-cpu processing to take place,
 		 * in this case we need to ensure that we reap all events.
@@ -2080,9 +2083,9 @@ static void io_iopoll_reap_events(struct io_ring_ctx *ctx)
 	mutex_unlock(&ctx->uring_lock);
 }
 
-static int io_iopoll_check(struct io_ring_ctx *ctx, unsigned *nr_events,
-			   long min)
+static int io_iopoll_check(struct io_ring_ctx *ctx, long min)
 {
+	unsigned int nr_events = 0;
 	int iters = 0, ret = 0;
 
 	/*
@@ -2116,11 +2119,11 @@ static int io_iopoll_check(struct io_ring_ctx *ctx, unsigned *nr_events,
 			mutex_lock(&ctx->uring_lock);
 		}
 
-		ret = io_iopoll_getevents(ctx, nr_events, min);
+		ret = io_iopoll_getevents(ctx, &nr_events, min);
 		if (ret <= 0)
 			break;
 		ret = 0;
-	} while (min && !*nr_events && !need_resched());
+	} while (min && !nr_events && !need_resched());
 
 	mutex_unlock(&ctx->uring_lock);
 	return ret;
@@ -6318,8 +6321,8 @@ static int io_sq_thread(void *data)
 			unsigned nr_events = 0;
 
 			mutex_lock(&ctx->uring_lock);
-			if (!list_empty(&ctx->poll_list))
-				io_iopoll_getevents(ctx, &nr_events, 0);
+			if (!list_empty(&ctx->poll_list) && !need_resched())
+				io_do_iopoll(ctx, &nr_events, 0);
 			else
 				timeout = jiffies + ctx->sq_thread_idle;
 			mutex_unlock(&ctx->uring_lock);
@@ -7648,7 +7651,6 @@ static void io_ring_ctx_free(struct io_ring_ctx *ctx)
 		ctx->sqo_mm = NULL;
 	}
 
-	io_iopoll_reap_events(ctx);
 	io_sqe_buffer_unregister(ctx);
 	io_sqe_files_unregister(ctx);
 	io_eventfd_unregister(ctx);
@@ -7715,11 +7717,8 @@ static int io_remove_personalities(int id, void *p, void *data)
 
 static void io_ring_exit_work(struct work_struct *work)
 {
-	struct io_ring_ctx *ctx;
-
-	ctx = container_of(work, struct io_ring_ctx, exit_work);
-	if (ctx->rings)
-		io_cqring_overflow_flush(ctx, true);
+	struct io_ring_ctx *ctx = container_of(work, struct io_ring_ctx,
+					       exit_work);
 
 	/*
 	 * If we're doing polled IO and end up having requests being
@@ -7727,11 +7726,11 @@ static void io_ring_exit_work(struct work_struct *work)
 	 * we're waiting for refs to drop. We need to reap these manually,
 	 * as nobody else will be looking for them.
 	 */
-	while (!wait_for_completion_timeout(&ctx->ref_comp, HZ/20)) {
-		io_iopoll_reap_events(ctx);
+	do {
 		if (ctx->rings)
 			io_cqring_overflow_flush(ctx, true);
-	}
+		io_iopoll_try_reap_events(ctx);
+	} while (!wait_for_completion_timeout(&ctx->ref_comp, HZ/20));
 	io_ring_ctx_free(ctx);
 }
 
@@ -7747,10 +7746,10 @@ static void io_ring_ctx_wait_and_kill(struct io_ring_ctx *ctx)
 	if (ctx->io_wq)
 		io_wq_cancel_all(ctx->io_wq);
 
-	io_iopoll_reap_events(ctx);
 	/* if we failed setting up the ctx, we might not have any rings */
 	if (ctx->rings)
 		io_cqring_overflow_flush(ctx, true);
+	io_iopoll_try_reap_events(ctx);
 	idr_for_each(&ctx->personality_idr, io_remove_personalities, ctx);
 	INIT_WORK(&ctx->exit_work, io_ring_exit_work);
 	queue_work(system_wq, &ctx->exit_work);
@@ -7977,8 +7976,6 @@ SYSCALL_DEFINE6(io_uring_enter, unsigned int, fd, u32, to_submit,
 			goto out;
 	}
 	if (flags & IORING_ENTER_GETEVENTS) {
-		unsigned nr_events = 0;
-
 		min_complete = min(min_complete, ctx->cq_entries);
 
 		/*
@@ -7989,7 +7986,7 @@ SYSCALL_DEFINE6(io_uring_enter, unsigned int, fd, u32, to_submit,
 		 */
 		if (ctx->flags & IORING_SETUP_IOPOLL &&
 		    !(ctx->flags & IORING_SETUP_SQPOLL)) {
-			ret = io_iopoll_check(ctx, &nr_events, min_complete);
+			ret = io_iopoll_check(ctx, min_complete);
 		} else {
 			ret = io_cqring_wait(ctx, min_complete, sig, sigsz);
 		}
