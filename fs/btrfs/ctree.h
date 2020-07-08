@@ -2585,6 +2585,9 @@ enum btrfs_reserve_flush_enum {
 	 */
 	BTRFS_RESERVE_FLUSH_EVICT,
 
+	BTRFS_RESERVE_FLUSH_DATA,
+	BTRFS_RESERVE_FLUSH_FREE_SPACE_INODE,
+
 	/*
 	 * Flush space by above mentioned methods and by:
 	 * - Running delayed iputs
