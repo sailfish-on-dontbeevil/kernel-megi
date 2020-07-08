@@ -254,10 +254,10 @@ struct events_queue {
  * queueing it on the related &struct events_queue.
  */
 struct scmi_event_header {
-	u64	timestamp;
-	u8	evt_id;
-	size_t	payld_sz;
-	u8	payld[];
+	u64 timestamp;
+	u32 payld_sz;
+	u8 evt_id;
+	u8 payld[];
 };
 
 struct scmi_registered_event;
