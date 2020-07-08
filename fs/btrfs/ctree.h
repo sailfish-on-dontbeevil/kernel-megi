@@ -1164,6 +1164,7 @@ struct btrfs_root {
 	spinlock_t qgroup_meta_rsv_lock;
 	u64 qgroup_meta_rsv_pertrans;
 	u64 qgroup_meta_rsv_prealloc;
+	struct mutex qgroup_flushing_mutex;
 
 	/* Number of active swapfiles */
 	atomic_t nr_swapfiles;
