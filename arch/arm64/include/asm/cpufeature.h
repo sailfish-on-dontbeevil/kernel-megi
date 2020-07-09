@@ -681,6 +681,12 @@ static __always_inline bool system_uses_irq_prio_masking(void)
 	       cpus_have_const_cap(ARM64_HAS_IRQ_PRIO_MASKING);
 }
 
+static inline bool system_supports_mte(void)
+{
+	return IS_ENABLED(CONFIG_ARM64_MTE) &&
+		cpus_have_const_cap(ARM64_MTE);
+}
+
 static inline bool system_has_prio_mask_debugging(void)
 {
 	return IS_ENABLED(CONFIG_ARM64_DEBUG_PRIORITY_MASKING) &&
@@ -774,6 +780,7 @@ static inline unsigned int get_vmid_bits(u64 mmfr1)
 }
 
 u32 get_kvm_ipa_limit(void);
+void dump_cpu_features(void);
 
 #endif /* __ASSEMBLY__ */
 
