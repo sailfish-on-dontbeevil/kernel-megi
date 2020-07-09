@@ -405,7 +405,7 @@ iomap_dio_actor(struct inode *inode, loff_t pos, loff_t length,
 ssize_t
 iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
 		const struct iomap_ops *ops, const struct iomap_dio_ops *dops,
-		bool wait_for_completion)
+		unsigned int dio_flags)
 {
 	struct address_space *mapping = iocb->ki_filp->f_mapping;
 	struct inode *inode = file_inode(iocb->ki_filp);
@@ -415,6 +415,7 @@ iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
 	unsigned int flags = IOMAP_DIRECT;
 	struct blk_plug plug;
 	struct iomap_dio *dio;
+	bool wait_for_completion = dio_flags & IOMAP_DIO_RWF_SYNCIO;
 
 	if (!count)
 		return 0;
@@ -483,8 +484,14 @@ iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
 	 */
 	ret = invalidate_inode_pages2_range(mapping,
 			pos >> PAGE_SHIFT, end >> PAGE_SHIFT);
-	if (ret)
+	if (ret) {
+		if (dio_flags & IOMAP_DIO_RWF_NO_STALE_PAGECACHE) {
+			if (ret == -EBUSY)
+				ret = 0;
+			goto out_free_dio;
+		}
 		dio_warn_stale_pagecache(iocb->ki_filp);
+	}
 	ret = 0;
 
 	if (iov_iter_rw(iter) == WRITE && !wait_for_completion &&
