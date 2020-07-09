@@ -1141,10 +1141,6 @@ static void __setup_root(struct btrfs_root *root, struct btrfs_fs_info *fs_info,
 	memset(&root->root_key, 0, sizeof(root->root_key));
 	memset(&root->root_item, 0, sizeof(root->root_item));
 	memset(&root->defrag_progress, 0, sizeof(root->defrag_progress));
-	if (!dummy)
-		root->defrag_trans_start = fs_info->generation;
-	else
-		root->defrag_trans_start = 0;
 	root->root_key.objectid = objectid;
 	root->anon_dev = 0;
 
@@ -1395,7 +1391,12 @@ alloc_fail:
 	goto out;
 }
 
-static int btrfs_init_fs_root(struct btrfs_root *root)
+/*
+ * Initialize subvolume root in-memory structure
+ *
+ * @anon_dev:	anonymous device to attach to the root, if zero, allocate new
+ */
+static int btrfs_init_fs_root(struct btrfs_root *root, dev_t anon_dev)
 {
 	int ret;
 	unsigned int nofs_flag;
@@ -1428,9 +1429,20 @@ static int btrfs_init_fs_root(struct btrfs_root *root)
 	spin_lock_init(&root->ino_cache_lock);
 	init_waitqueue_head(&root->ino_cache_wait);
 
-	ret = get_anon_bdev(&root->anon_dev);
-	if (ret)
-		goto fail;
+	/*
+	 * Don't assign anonymous block device to roots that are not exposed to
+	 * userspace, the id pool is limited to 1M
+	 */
+	if (is_fstree(root->root_key.objectid) &&
+	    btrfs_root_refs(&root->root_item) > 0) {
+		if (!anon_dev) {
+			ret = get_anon_bdev(&root->anon_dev);
+			if (ret)
+				goto fail;
+		} else {
+			root->anon_dev = anon_dev;
+		}
+	}
 
 	mutex_lock(&root->objectid_mutex);
 	ret = btrfs_find_highest_objectid(root,
@@ -1534,8 +1546,27 @@ void btrfs_free_fs_info(struct btrfs_fs_info *fs_info)
 }
 
 
-struct btrfs_root *btrfs_get_fs_root(struct btrfs_fs_info *fs_info,
-				     u64 objectid, bool check_ref)
+/*
+ * Get an in-memory reference of a root structure.
+ *
+ * For essential trees like root/extent tree, we grab it from fs_info directly.
+ * For subvolume trees, we check the cached filesystem roots first. If not
+ * found, then read it from disk and add it to cached fs roots.
+ *
+ * Caller should release the root by calling btrfs_put_root() after the usage.
+ *
+ * NOTE: Reloc and log trees can't be read by this function as they share the
+ *	 same root objectid.
+ *
+ * @objectid:	root id
+ * @anon_dev:	preallocated anonymous block device number for new roots,
+ * 		pass 0 for new allocation.
+ * @check_ref:	whether to check root item references, If true, return -ENOENT
+ *		for orphan roots
+ */
+static struct btrfs_root *btrfs_get_root_ref(struct btrfs_fs_info *fs_info,
+					     u64 objectid, dev_t anon_dev,
+					     bool check_ref)
 {
 	struct btrfs_root *root;
 	struct btrfs_path *path;
@@ -1564,6 +1595,8 @@ struct btrfs_root *btrfs_get_fs_root(struct btrfs_fs_info *fs_info,
 again:
 	root = btrfs_lookup_fs_root(fs_info, objectid);
 	if (root) {
+		/* Shouldn't get preallocated anon_dev for cached roots */
+		ASSERT(!anon_dev);
 		if (check_ref && btrfs_root_refs(&root->root_item) == 0) {
 			btrfs_put_root(root);
 			return ERR_PTR(-ENOENT);
@@ -1583,7 +1616,7 @@ again:
 		goto fail;
 	}
 
-	ret = btrfs_init_fs_root(root);
+	ret = btrfs_init_fs_root(root, anon_dev);
 	if (ret)
 		goto fail;
 
@@ -1614,6 +1647,33 @@ again:
 fail:
 	btrfs_put_root(root);
 	return ERR_PTR(ret);
+}
+
+/*
+ * Get in-memory reference of a root structure
+ *
+ * @objectid:	tree objectid
+ * @check_ref:	if set, verify that the tree exists and the item has at least
+ *		one reference
+ */
+struct btrfs_root *btrfs_get_fs_root(struct btrfs_fs_info *fs_info,
+				     u64 objectid, bool check_ref)
+{
+	return btrfs_get_root_ref(fs_info, objectid, 0, check_ref);
+}
+
+/*
+ * Get in-memory reference of a root structure, created as new, optionally pass
+ * the anonymous block device id
+ *
+ * @objectid:	tree objectid
+ * @anon_dev:	if zero, allocate a new anonymous block device or use the
+ *		parameter value
+ */
+struct btrfs_root *btrfs_get_new_fs_root(struct btrfs_fs_info *fs_info,
+					 u64 objectid, dev_t anon_dev)
+{
+	return btrfs_get_root_ref(fs_info, objectid, anon_dev, true);
 }
 
 static int btrfs_congested_fn(void *congested_data, int bdi_bits)
@@ -2001,8 +2061,7 @@ void btrfs_put_root(struct btrfs_root *root)
 		if (root->anon_dev)
 			free_anon_bdev(root->anon_dev);
 		btrfs_drew_lock_destroy(&root->snapshot_lock);
-		free_extent_buffer(root->node);
-		free_extent_buffer(root->commit_root);
+		free_root_extent_buffers(root);
 		kfree(root->free_ino_ctl);
 		kfree(root->free_ino_pinned);
 #ifdef CONFIG_BTRFS_DEBUG
@@ -2267,11 +2326,15 @@ static int btrfs_read_roots(struct btrfs_fs_info *fs_info)
 
 	root = btrfs_read_tree_root(tree_root, &location);
 	if (IS_ERR(root)) {
-		ret = PTR_ERR(root);
-		goto out;
+		if (!btrfs_test_opt(fs_info, SKIPBG)) {
+			ret = PTR_ERR(root);
+			goto out;
+		}
+		fs_info->extent_root = NULL;
+	} else {
+		set_bit(BTRFS_ROOT_TRACK_DIRTY, &root->state);
+		fs_info->extent_root = root;
 	}
-	set_bit(BTRFS_ROOT_TRACK_DIRTY, &root->state);
-	fs_info->extent_root = root;
 
 	location.objectid = BTRFS_DEV_TREE_OBJECTID;
 	root = btrfs_read_tree_root(tree_root, &location);
@@ -2593,10 +2656,12 @@ static int __cold init_tree_roots(struct btrfs_fs_info *fs_info)
 		    !extent_buffer_uptodate(tree_root->node)) {
 			handle_error = true;
 
-			if (IS_ERR(tree_root->node))
+			if (IS_ERR(tree_root->node)) {
 				ret = PTR_ERR(tree_root->node);
-			else if (!extent_buffer_uptodate(tree_root->node))
+				tree_root->node = NULL;
+			} else if (!extent_buffer_uptodate(tree_root->node)) {
 				ret = -EUCLEAN;
+			}
 
 			btrfs_warn(fs_info, "failed to read tree root");
 			continue;
@@ -3043,6 +3108,23 @@ int __cold open_ctree(struct super_block *sb, struct btrfs_fs_devices *fs_device
 		       features);
 		err = -EINVAL;
 		goto fail_alloc;
+	}
+
+	/* Skip bg needs RO and no tree-log to replay */
+	if (btrfs_test_opt(fs_info, SKIPBG)) {
+		if (!sb_rdonly(sb)) {
+			btrfs_err(fs_info,
+			"rescue=skipbg can only be used on read-only mount");
+			err = -EINVAL;
+			goto fail_alloc;
+		}
+		if (btrfs_super_log_root(disk_super) &&
+		    !btrfs_test_opt(fs_info, NOLOGREPLAY)) {
+			btrfs_err(fs_info,
+"rescue=skipbg must be used with rescue=nologreplay when tree-log needs to replayed");
+			err = -EINVAL;
+			goto fail_alloc;
+		}
 	}
 
 	ret = btrfs_init_workqueues(fs_info, fs_devices);
@@ -4055,6 +4137,11 @@ void __cold close_ctree(struct btrfs_fs_info *fs_info)
 
 	ASSERT(list_empty(&fs_info->delayed_iputs));
 	set_bit(BTRFS_FS_CLOSING_DONE, &fs_info->flags);
+
+	if (btrfs_check_quota_leak(fs_info)) {
+		WARN_ON(IS_ENABLED(CONFIG_BTRFS_DEBUG));
+		btrfs_err(fs_info, "qgroup reserved space leaked");
+	}
 
 	btrfs_free_qgroup_config(fs_info);
 	ASSERT(list_empty(&fs_info->delalloc_roots));

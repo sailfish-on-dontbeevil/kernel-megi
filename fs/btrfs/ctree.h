@@ -779,6 +779,7 @@ struct btrfs_fs_info {
 	u32 thread_pool_size;
 
 	struct kobject *space_info_kobj;
+	struct kobject *qgroups_kobj;
 
 	u64 total_pinned;
 
@@ -1059,8 +1060,10 @@ struct btrfs_root {
 	wait_queue_head_t log_writer_wait;
 	wait_queue_head_t log_commit_wait[2];
 	struct list_head log_ctxs[2];
+	/* Used only for log trees of subvolumes, not for the log root tree */
 	atomic_t log_writers;
 	atomic_t log_commit[2];
+	/* Used only for log trees of subvolumes, not for the log root tree */
 	atomic_t log_batch;
 	int log_transid;
 	/* No matter the commit succeeds or not*/
@@ -1075,7 +1078,6 @@ struct btrfs_root {
 
 	u64 highest_objectid;
 
-	u64 defrag_trans_start;
 	struct btrfs_key defrag_progress;
 	struct btrfs_key defrag_max;
 
@@ -1266,6 +1268,7 @@ static inline u32 BTRFS_MAX_XATTR_SIZE(const struct btrfs_fs_info *info)
 #define BTRFS_MOUNT_NOLOGREPLAY		(1 << 27)
 #define BTRFS_MOUNT_REF_VERIFY		(1 << 28)
 #define BTRFS_MOUNT_DISCARD_ASYNC	(1 << 29)
+#define BTRFS_MOUNT_SKIPBG		(1 << 30)
 
 #define BTRFS_DEFAULT_COMMIT_INTERVAL	(30)
 #define BTRFS_DEFAULT_MAX_INLINE	(2048)
@@ -1277,18 +1280,18 @@ static inline u32 BTRFS_MAX_XATTR_SIZE(const struct btrfs_fs_info *info)
 					 BTRFS_MOUNT_##opt)
 
 #define btrfs_set_and_info(fs_info, opt, fmt, args...)			\
-{									\
+do {									\
 	if (!btrfs_test_opt(fs_info, opt))				\
 		btrfs_info(fs_info, fmt, ##args);			\
 	btrfs_set_opt(fs_info->mount_opt, opt);				\
-}
+} while (0)
 
 #define btrfs_clear_and_info(fs_info, opt, fmt, args...)		\
-{									\
+do {									\
 	if (btrfs_test_opt(fs_info, opt))				\
 		btrfs_info(fs_info, fmt, ##args);			\
 	btrfs_clear_opt(fs_info->mount_opt, opt);			\
-}
+} while (0)
 
 /*
  * Requests for changes that need to be done during transaction commit.
@@ -1895,6 +1898,52 @@ BTRFS_SETGET_STACK_FUNCS(disk_key_objectid, struct btrfs_disk_key,
 BTRFS_SETGET_STACK_FUNCS(disk_key_offset, struct btrfs_disk_key, offset, 64);
 BTRFS_SETGET_STACK_FUNCS(disk_key_type, struct btrfs_disk_key, type, 8);
 
+#ifdef __LITTLE_ENDIAN
+
+/*
+ * Optimized helpers for little-endian architectures where CPU and on-disk
+ * structures have the same endianness and we can skip conversions.
+ */
+
+static inline void btrfs_disk_key_to_cpu(struct btrfs_key *cpu_key,
+					 const struct btrfs_disk_key *disk_key)
+{
+	memcpy(cpu_key, disk_key, sizeof(struct btrfs_key));
+}
+
+static inline void btrfs_cpu_key_to_disk(struct btrfs_disk_key *disk_key,
+					 const struct btrfs_key *cpu_key)
+{
+	memcpy(disk_key, cpu_key, sizeof(struct btrfs_key));
+}
+
+static inline void btrfs_node_key_to_cpu(const struct extent_buffer *eb,
+					 struct btrfs_key *cpu_key, int nr)
+{
+	struct btrfs_disk_key *disk_key = (struct btrfs_disk_key *)cpu_key;
+
+	btrfs_node_key(eb, disk_key, nr);
+}
+
+static inline void btrfs_item_key_to_cpu(const struct extent_buffer *eb,
+					 struct btrfs_key *cpu_key, int nr)
+{
+	struct btrfs_disk_key *disk_key = (struct btrfs_disk_key *)cpu_key;
+
+	btrfs_item_key(eb, disk_key, nr);
+}
+
+static inline void btrfs_dir_item_key_to_cpu(const struct extent_buffer *eb,
+					     const struct btrfs_dir_item *item,
+					     struct btrfs_key *cpu_key)
+{
+	struct btrfs_disk_key *disk_key = (struct btrfs_disk_key *)cpu_key;
+
+	btrfs_dir_item_key(eb, item, disk_key);
+}
+
+#else
+
 static inline void btrfs_disk_key_to_cpu(struct btrfs_key *cpu,
 					 const struct btrfs_disk_key *disk)
 {
@@ -1935,6 +1984,8 @@ static inline void btrfs_dir_item_key_to_cpu(const struct extent_buffer *eb,
 	btrfs_dir_item_key(eb, item, &disk_key);
 	btrfs_disk_key_to_cpu(key, &disk_key);
 }
+
+#endif
 
 /* struct btrfs_header */
 BTRFS_SETGET_HEADER_FUNCS(header_bytenr, struct btrfs_header, bytenr, 64);
@@ -2232,7 +2283,8 @@ static inline unsigned int leaf_data_end(const struct extent_buffer *leaf)
 }
 
 /* struct btrfs_file_extent_item */
-BTRFS_SETGET_FUNCS(file_extent_type, struct btrfs_file_extent_item, type, 8);
+BTRFS_SETGET_STACK_FUNCS(stack_file_extent_type, struct btrfs_file_extent_item,
+			 type, 8);
 BTRFS_SETGET_STACK_FUNCS(stack_file_extent_disk_bytenr,
 			 struct btrfs_file_extent_item, disk_bytenr, 64);
 BTRFS_SETGET_STACK_FUNCS(stack_file_extent_offset,
@@ -2241,6 +2293,8 @@ BTRFS_SETGET_STACK_FUNCS(stack_file_extent_generation,
 			 struct btrfs_file_extent_item, generation, 64);
 BTRFS_SETGET_STACK_FUNCS(stack_file_extent_num_bytes,
 			 struct btrfs_file_extent_item, num_bytes, 64);
+BTRFS_SETGET_STACK_FUNCS(stack_file_extent_ram_bytes,
+			 struct btrfs_file_extent_item, ram_bytes, 64);
 BTRFS_SETGET_STACK_FUNCS(stack_file_extent_disk_num_bytes,
 			 struct btrfs_file_extent_item, disk_num_bytes, 64);
 BTRFS_SETGET_STACK_FUNCS(stack_file_extent_compression,
@@ -2257,6 +2311,7 @@ static inline u32 btrfs_file_extent_calc_inline_size(u32 datasize)
 	return BTRFS_FILE_EXTENT_INLINE_DATA_START + datasize;
 }
 
+BTRFS_SETGET_FUNCS(file_extent_type, struct btrfs_file_extent_item, type, 8);
 BTRFS_SETGET_FUNCS(file_extent_disk_bytenr, struct btrfs_file_extent_item,
 		   disk_bytenr, 64);
 BTRFS_SETGET_FUNCS(file_extent_generation, struct btrfs_file_extent_item,
@@ -2831,8 +2886,8 @@ int btrfs_lookup_file_extent(struct btrfs_trans_handle *trans,
 int btrfs_csum_file_blocks(struct btrfs_trans_handle *trans,
 			   struct btrfs_root *root,
 			   struct btrfs_ordered_sum *sums);
-blk_status_t btrfs_csum_one_bio(struct inode *inode, struct bio *bio,
-		       u64 file_start, int contig);
+blk_status_t btrfs_csum_one_bio(struct btrfs_inode *inode, struct bio *bio,
+				u64 file_start, int contig);
 int btrfs_lookup_csums_range(struct btrfs_root *root, u64 start, u64 end,
 			     struct list_head *list, int search_commit);
 void btrfs_extent_item_to_extent_map(struct btrfs_inode *inode,
@@ -2875,7 +2930,7 @@ int btrfs_truncate_inode_items(struct btrfs_trans_handle *trans,
 
 int btrfs_start_delalloc_snapshot(struct btrfs_root *root);
 int btrfs_start_delalloc_roots(struct btrfs_fs_info *fs_info, int nr);
-int btrfs_set_extent_delalloc(struct inode *inode, u64 start, u64 end,
+int btrfs_set_extent_delalloc(struct btrfs_inode *inode, u64 start, u64 end,
 			      unsigned int extra_bits,
 			      struct extent_state **cached_state);
 int btrfs_create_subvol_root(struct btrfs_trans_handle *trans,
@@ -2928,7 +2983,7 @@ int btrfs_prealloc_file_range_trans(struct inode *inode,
 				    struct btrfs_trans_handle *trans, int mode,
 				    u64 start, u64 num_bytes, u64 min_size,
 				    loff_t actual_len, u64 *alloc_hint);
-int btrfs_run_delalloc_range(struct inode *inode, struct page *locked_page,
+int btrfs_run_delalloc_range(struct btrfs_inode *inode, struct page *locked_page,
 		u64 start, u64 end, int *page_started, unsigned long *nr_written,
 		struct writeback_control *wbc);
 int btrfs_writepage_cow_fixup(struct page *page, u64 start, u64 end);
@@ -2962,7 +3017,7 @@ void btrfs_drop_extent_cache(struct btrfs_inode *inode, u64 start, u64 end,
 			     int skip_pinned);
 extern const struct file_operations btrfs_file_operations;
 int __btrfs_drop_extents(struct btrfs_trans_handle *trans,
-			 struct btrfs_root *root, struct inode *inode,
+			 struct btrfs_root *root, struct btrfs_inode *inode,
 			 struct btrfs_path *path, u64 start, u64 end,
 			 u64 *drop_end, int drop_cache,
 			 int replace_extent,
@@ -2978,10 +3033,13 @@ int btrfs_punch_hole_range(struct inode *inode, struct btrfs_path *path,
 int btrfs_mark_extent_written(struct btrfs_trans_handle *trans,
 			      struct btrfs_inode *inode, u64 start, u64 end);
 int btrfs_release_file(struct inode *inode, struct file *file);
-int btrfs_dirty_pages(struct inode *inode, struct page **pages,
+int btrfs_dirty_pages(struct btrfs_inode *inode, struct page **pages,
 		      size_t num_pages, loff_t pos, size_t write_bytes,
 		      struct extent_state **cached);
 int btrfs_fdatawrite_range(struct inode *inode, loff_t start, loff_t end);
+int btrfs_check_nocow_lock(struct btrfs_inode *inode, loff_t pos,
+			   size_t *write_bytes);
+void btrfs_check_nocow_unlock(struct btrfs_inode *inode);
 
 /* tree-defrag.c */
 int btrfs_defrag_leaves(struct btrfs_trans_handle *trans,
@@ -3378,7 +3436,7 @@ int btrfs_init_reloc_root(struct btrfs_trans_handle *trans,
 int btrfs_update_reloc_root(struct btrfs_trans_handle *trans,
 			    struct btrfs_root *root);
 int btrfs_recover_relocation(struct btrfs_root *root);
-int btrfs_reloc_clone_csums(struct inode *inode, u64 file_pos, u64 len);
+int btrfs_reloc_clone_csums(struct btrfs_inode *inode, u64 file_pos, u64 len);
 int btrfs_reloc_cow_block(struct btrfs_trans_handle *trans,
 			  struct btrfs_root *root, struct extent_buffer *buf,
 			  struct extent_buffer *cow);
