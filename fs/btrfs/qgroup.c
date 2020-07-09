@@ -3503,10 +3503,9 @@ static int try_flush_qgroup(struct btrfs_root *root)
 	 * We don't want to run flush again and again, so if there is a running
 	 * one, we won't try to start a new flush, but exit directly.
 	 */
-	ret = mutex_trylock(&root->qgroup_flushing_mutex);
-	if (!ret) {
-		mutex_lock(&root->qgroup_flushing_mutex);
-		mutex_unlock(&root->qgroup_flushing_mutex);
+	if (test_and_set_bit(BTRFS_ROOT_QGROUP_FLUSHING, &root->state)) {
+		wait_event(root->qgroup_flush_wait,
+			!test_bit(BTRFS_ROOT_QGROUP_FLUSHING, &root->state));
 		return 0;
 	}
 
@@ -3523,7 +3522,7 @@ static int try_flush_qgroup(struct btrfs_root *root)
 
 	ret = btrfs_commit_transaction(trans);
 unlock:
-	mutex_unlock(&root->qgroup_flushing_mutex);
+	clear_bit(BTRFS_ROOT_QGROUP_FLUSHING, &root->state);
 	return ret;
 }
 

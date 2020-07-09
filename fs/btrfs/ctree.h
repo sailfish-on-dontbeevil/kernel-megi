@@ -1007,6 +1007,12 @@ enum {
 	BTRFS_ROOT_DEAD_TREE,
 	/* The root has a log tree. Used only for subvolume roots. */
 	BTRFS_ROOT_HAS_LOG_TREE,
+
+	/*
+	 * Indicate that qgroup flushing is in progress to prevent multiple
+	 * processes attempting that
+	 */
+	BTRFS_ROOT_QGROUP_FLUSHING,
 };
 
 /*
@@ -1159,7 +1165,7 @@ struct btrfs_root {
 	spinlock_t qgroup_meta_rsv_lock;
 	u64 qgroup_meta_rsv_pertrans;
 	u64 qgroup_meta_rsv_prealloc;
-	struct mutex qgroup_flushing_mutex;
+	wait_queue_head_t qgroup_flush_wait;
 
 	/* Number of active swapfiles */
 	atomic_t nr_swapfiles;
