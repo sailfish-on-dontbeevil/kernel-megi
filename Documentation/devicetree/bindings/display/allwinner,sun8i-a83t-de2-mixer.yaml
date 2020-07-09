@@ -39,6 +39,9 @@ properties:
   resets:
     maxItems: 1
 
+  iommus:
+    maxItems: 1
+
   ports:
     type: object
     description: |
