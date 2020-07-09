@@ -1,0 +1,15 @@
+arm/soc
+	patch
+		udc: lpc32xx: mark local function static
+
+arm/dt
+	renesas/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-dt-for-v5.9-tag1
+
+arm/drivers
+
+arm/defconfig
+	renesas/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-defconfig-for-v5.9-tag1
+
+
