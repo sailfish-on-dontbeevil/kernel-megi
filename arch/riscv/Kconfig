@@ -13,6 +13,7 @@ config 32BIT
 config RISCV
 	def_bool y
 	select ARCH_CLOCKSOURCE_INIT
+	select ARCH_SUPPORTS_ATOMIC_RMW
 	select ARCH_HAS_BINFMT_FLAT
 	select ARCH_HAS_DEBUG_VIRTUAL if MMU
 	select ARCH_HAS_DEBUG_WX
@@ -36,6 +37,7 @@ config RISCV
 	select GENERIC_IOREMAP
 	select GENERIC_IRQ_MULTI_HANDLER
 	select GENERIC_IRQ_SHOW
+	select GENERIC_LIB_DEVMEM_IS_ALLOWED
 	select GENERIC_PCI_IOMAP
 	select GENERIC_PTDUMP if MMU
 	select GENERIC_SCHED_CLOCK
@@ -177,6 +179,9 @@ config PGTABLE_LEVELS
 	int
 	default 3 if 64BIT
 	default 2
+
+config LOCKDEP_SUPPORT
+	def_bool y
 
 source "arch/riscv/Kconfig.socs"
 
