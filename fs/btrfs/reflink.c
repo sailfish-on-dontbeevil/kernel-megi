@@ -68,8 +68,8 @@ static int copy_inline_to_page(struct inode *inode,
 	 * reservation here. Also we must not do the reservation while holding
 	 * a transaction open, otherwise we would deadlock.
 	 */
-	ret = btrfs_delalloc_reserve_space(inode, &data_reserved, file_offset,
-					   block_size);
+	ret = btrfs_delalloc_reserve_space(BTRFS_I(inode), &data_reserved,
+					   file_offset, block_size);
 	if (ret)
 		goto out;
 
@@ -84,7 +84,8 @@ static int copy_inline_to_page(struct inode *inode,
 	clear_extent_bit(&BTRFS_I(inode)->io_tree, file_offset, range_end,
 			 EXTENT_DELALLOC | EXTENT_DO_ACCOUNTING | EXTENT_DEFRAG,
 			 0, 0, NULL);
-	ret = btrfs_set_extent_delalloc(inode, file_offset, range_end, 0, NULL);
+	ret = btrfs_set_extent_delalloc(BTRFS_I(inode), file_offset, range_end,
+					0, NULL);
 	if (ret)
 		goto out_unlock;
 
@@ -133,8 +134,8 @@ out_unlock:
 		put_page(page);
 	}
 	if (ret)
-		btrfs_delalloc_release_space(inode, data_reserved, file_offset,
-					     block_size, true);
+		btrfs_delalloc_release_space(BTRFS_I(inode), data_reserved,
+					     file_offset, block_size, true);
 	btrfs_delalloc_release_extents(BTRFS_I(inode), block_size);
 out:
 	extent_changeset_free(data_reserved);

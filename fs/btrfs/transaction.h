@@ -151,18 +151,20 @@ struct btrfs_pending_snapshot {
 	struct btrfs_block_rsv block_rsv;
 	/* extra metadata reservation for relocation */
 	int error;
+	/* Preallocated anonymous block device number */
+	dev_t anon_dev;
 	bool readonly;
 	struct list_head list;
 };
 
 static inline void btrfs_set_inode_last_trans(struct btrfs_trans_handle *trans,
-					      struct inode *inode)
+					      struct btrfs_inode *inode)
 {
-	spin_lock(&BTRFS_I(inode)->lock);
-	BTRFS_I(inode)->last_trans = trans->transaction->transid;
-	BTRFS_I(inode)->last_sub_trans = BTRFS_I(inode)->root->log_transid;
-	BTRFS_I(inode)->last_log_commit = BTRFS_I(inode)->root->last_log_commit;
-	spin_unlock(&BTRFS_I(inode)->lock);
+	spin_lock(&inode->lock);
+	inode->last_trans = trans->transaction->transid;
+	inode->last_sub_trans = inode->root->log_transid;
+	inode->last_log_commit = inode->root->last_log_commit;
+	spin_unlock(&inode->lock);
 }
 
 /*

@@ -3231,7 +3231,7 @@ static int del_balance_item(struct btrfs_fs_info *fs_info)
 	if (!path)
 		return -ENOMEM;
 
-	trans = btrfs_start_transaction(root, 0);
+	trans = btrfs_start_transaction_fallback_global_rsv(root, 0);
 	if (IS_ERR(trans)) {
 		btrfs_free_path(path);
 		return PTR_ERR(trans);
@@ -5522,6 +5522,9 @@ static struct btrfs_bio *alloc_btrfs_bio(int total_stripes, int real_stripes)
 	atomic_set(&bbio->error, 0);
 	refcount_set(&bbio->refs, 1);
 
+	bbio->tgtdev_map = (int *)(bbio->stripes + total_stripes);
+	bbio->raid_map = (u64 *)(bbio->tgtdev_map + real_stripes);
+
 	return bbio;
 }
 
@@ -6144,19 +6147,19 @@ static int __btrfs_map_block(struct btrfs_fs_info *fs_info,
 		ret = -ENOMEM;
 		goto out;
 	}
-	if (dev_replace_is_ongoing && dev_replace->tgtdev != NULL)
-		bbio->tgtdev_map = (int *)(bbio->stripes + num_alloc_stripes);
+
+	for (i = 0; i < num_stripes; i++) {
+		bbio->stripes[i].physical = map->stripes[stripe_index].physical +
+			stripe_offset + stripe_nr * map->stripe_len;
+		bbio->stripes[i].dev = map->stripes[stripe_index].dev;
+		stripe_index++;
+	}
 
 	/* build raid_map */
 	if (map->type & BTRFS_BLOCK_GROUP_RAID56_MASK && need_raid_map &&
 	    (need_full_stripe(op) || mirror_num > 1)) {
 		u64 tmp;
 		unsigned rot;
-
-		bbio->raid_map = (u64 *)((void *)bbio->stripes +
-				 sizeof(struct btrfs_bio_stripe) *
-				 num_alloc_stripes +
-				 sizeof(int) * tgtdev_indexes);
 
 		/* Work out the disk rotation on this stripe-set */
 		div_u64_rem(stripe_nr, num_stripes, &rot);
@@ -6171,24 +6174,12 @@ static int __btrfs_map_block(struct btrfs_fs_info *fs_info,
 		if (map->type & BTRFS_BLOCK_GROUP_RAID6)
 			bbio->raid_map[(i+rot+1) % num_stripes] =
 				RAID6_Q_STRIPE;
-	}
 
-
-	for (i = 0; i < num_stripes; i++) {
-		bbio->stripes[i].physical =
-			map->stripes[stripe_index].physical +
-			stripe_offset +
-			stripe_nr * map->stripe_len;
-		bbio->stripes[i].dev =
-			map->stripes[stripe_index].dev;
-		stripe_index++;
+		sort_parity_stripes(bbio, num_stripes);
 	}
 
 	if (need_full_stripe(op))
 		max_errors = btrfs_chunk_max_errors(map);
-
-	if (bbio->raid_map)
-		sort_parity_stripes(bbio, num_stripes);
 
 	if (dev_replace_is_ongoing && dev_replace->tgtdev != NULL &&
 	    need_full_stripe(op)) {
@@ -6261,23 +6252,18 @@ static void btrfs_end_bio(struct bio *bio)
 		atomic_inc(&bbio->error);
 		if (bio->bi_status == BLK_STS_IOERR ||
 		    bio->bi_status == BLK_STS_TARGET) {
-			unsigned int stripe_index =
-				btrfs_io_bio(bio)->stripe_index;
-			struct btrfs_device *dev;
+			struct btrfs_device *dev = btrfs_io_bio(bio)->device;
 
-			BUG_ON(stripe_index >= bbio->num_stripes);
-			dev = bbio->stripes[stripe_index].dev;
-			if (dev->bdev) {
-				if (bio_op(bio) == REQ_OP_WRITE)
-					btrfs_dev_stat_inc_and_print(dev,
+			ASSERT(dev->bdev);
+			if (bio_op(bio) == REQ_OP_WRITE)
+				btrfs_dev_stat_inc_and_print(dev,
 						BTRFS_DEV_STAT_WRITE_ERRS);
-				else if (!(bio->bi_opf & REQ_RAHEAD))
-					btrfs_dev_stat_inc_and_print(dev,
+			else if (!(bio->bi_opf & REQ_RAHEAD))
+				btrfs_dev_stat_inc_and_print(dev,
 						BTRFS_DEV_STAT_READ_ERRS);
-				if (bio->bi_opf & REQ_PREFLUSH)
-					btrfs_dev_stat_inc_and_print(dev,
+			if (bio->bi_opf & REQ_PREFLUSH)
+				btrfs_dev_stat_inc_and_print(dev,
 						BTRFS_DEV_STAT_FLUSH_ERRS);
-			}
 		}
 	}
 
@@ -6313,13 +6299,12 @@ static void btrfs_end_bio(struct bio *bio)
 }
 
 static void submit_stripe_bio(struct btrfs_bio *bbio, struct bio *bio,
-			      u64 physical, int dev_nr)
+			      u64 physical, struct btrfs_device *dev)
 {
-	struct btrfs_device *dev = bbio->stripes[dev_nr].dev;
 	struct btrfs_fs_info *fs_info = bbio->fs_info;
 
 	bio->bi_private = bbio;
-	btrfs_io_bio(bio)->stripe_index = dev_nr;
+	btrfs_io_bio(bio)->device = dev;
 	bio->bi_end_io = btrfs_end_bio;
 	bio->bi_iter.bi_sector = physical >> 9;
 	btrfs_debug_in_rcu(fs_info,
@@ -6420,8 +6405,7 @@ blk_status_t btrfs_map_bio(struct btrfs_fs_info *fs_info, struct bio *bio,
 		else
 			bio = first_bio;
 
-		submit_stripe_bio(bbio, bio, bbio->stripes[dev_nr].physical,
-				  dev_nr);
+		submit_stripe_bio(bbio, bio, bbio->stripes[dev_nr].physical, dev);
 	}
 	btrfs_bio_counter_dec(fs_info);
 	return BLK_STS_OK;
@@ -7593,6 +7577,13 @@ int btrfs_verify_dev_extents(struct btrfs_fs_info *fs_info)
 	u64 prev_devid = 0;
 	u64 prev_dev_ext_end = 0;
 	int ret = 0;
+
+	/*
+	 * For rescue=skipbg mount option, we're already RO and are salvaging
+	 * data, no need for such strict check.
+	 */
+	if (btrfs_test_opt(fs_info, SKIPBG))
+		return 0;
 
 	key.objectid = 1;
 	key.type = BTRFS_DEV_EXTENT_KEY;
