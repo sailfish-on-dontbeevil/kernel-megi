@@ -2647,9 +2647,9 @@ detach_vmas_to_be_unmapped(struct mm_struct *mm, struct vm_area_struct *vma,
 	vmacache_invalidate(mm);
 
 	/*
-	 * Do not downgrade mmap_sem if we are next to VM_GROWSDOWN or
+	 * Do not downgrade mmap_lock if we are next to VM_GROWSDOWN or
 	 * VM_GROWSUP VMA. Such VMAs can change their size under
-	 * down_read(mmap_sem) and collide with the VMA we are about to unmap.
+	 * down_read(mmap_lock) and collide with the VMA we are about to unmap.
 	 */
 	if (vma && (vma->vm_flags & VM_GROWSDOWN))
 		return false;
