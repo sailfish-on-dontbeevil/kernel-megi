@@ -78,38 +78,6 @@ EXPORT_SYMBOL_GPL(hwpoison_filter_dev_minor);
 EXPORT_SYMBOL_GPL(hwpoison_filter_flags_mask);
 EXPORT_SYMBOL_GPL(hwpoison_filter_flags_value);
 
-static bool page_handle_poison(struct page *page, bool hugepage_or_freepage, bool release)
-{
-	if (release) {
-		put_page(page);
-		drain_all_pages(page_zone(page));
-	}
-
-	if (hugepage_or_freepage) {
-		/*
-		 * Doing this check for free pages is also fine since dissolve_free_huge_page
-		 * returns 0 for non-hugetlb pages as well.
-		 */
-		if (dissolve_free_huge_page(page) || !take_page_off_buddy(page))
-		/*
-		 * The hugetlb page can end up being enqueued back into
-		 * the freelists by means of:
-		 * unmap_and_move_huge_page
-		 *  putback_active_hugepage
-		 *   put_page->free_huge_page
-		 *    enqueue_huge_page
-		 * If this happens, we might lose the race against an allocation.
-		 */
-			return false;
-	}
-
-	SetPageHWPoison(page);
-	page_ref_inc(page);
-	num_poisoned_pages_inc();
-
-	return true;
-}
-
 static int hwpoison_filter_dev(struct page *p)
 {
 	struct address_space *mapping;
@@ -208,6 +176,38 @@ static bool page_handle_poison(struct page *page, bool hugepage_or_freepage, boo
 #endif
 
 EXPORT_SYMBOL_GPL(hwpoison_filter);
+
+static bool page_handle_poison(struct page *page, bool hugepage_or_freepage, bool release)
+{
+	if (release) {
+		put_page(page);
+		drain_all_pages(page_zone(page));
+	}
+
+	if (hugepage_or_freepage) {
+		/*
+		 * Doing this check for free pages is also fine since dissolve_free_huge_page
+		 * returns 0 for non-hugetlb pages as well.
+		 */
+		if (dissolve_free_huge_page(page) || !take_page_off_buddy(page))
+		/*
+		 * The hugetlb page can end up being enqueued back into
+		 * the freelists by means of:
+		 * unmap_and_move_huge_page
+		 *  putback_active_hugepage
+		 *   put_page->free_huge_page
+		 *    enqueue_huge_page
+		 * If this happens, we might lose the race against an allocation.
+		 */
+			return false;
+	}
+
+	SetPageHWPoison(page);
+	page_ref_inc(page);
+	num_poisoned_pages_inc();
+
+	return true;
+}
 
 /*
  * Kill all processes that have a poisoned page mapped and then isolate
