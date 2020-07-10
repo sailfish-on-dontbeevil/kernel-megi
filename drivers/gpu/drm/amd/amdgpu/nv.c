@@ -420,18 +420,17 @@ legacy_init:
 	return 0;
 }
 
+void nv_set_virt_ops(struct amdgpu_device *adev)
+{
+	adev->virt.ops = &xgpu_nv_virt_ops;
+}
+
 int nv_set_ip_blocks(struct amdgpu_device *adev)
 {
 	int r;
 
 	adev->nbio.funcs = &nbio_v2_3_funcs;
 	adev->nbio.hdp_flush_reg = &nbio_v2_3_hdp_flush_reg;
-
-	if (amdgpu_sriov_vf(adev)) {
-		adev->virt.ops = &xgpu_nv_virt_ops;
-		/* try send GPU_INIT_DATA request to host */
-		amdgpu_virt_request_init_data(adev);
-	}
 
 	/* Set IP register base before any HW register access */
 	r = nv_reg_base_init(adev);
@@ -708,8 +707,7 @@ static int nv_common_early_init(void *handle)
 		adev->pg_flags = AMD_PG_SUPPORT_VCN |
 			AMD_PG_SUPPORT_VCN_DPG |
 			AMD_PG_SUPPORT_JPEG |
-			AMD_PG_SUPPORT_ATHUB |
-			AMD_PG_SUPPORT_MMHUB;
+			AMD_PG_SUPPORT_ATHUB;
 		/* guest vm gets 0xffffffff when reading RCC_DEV0_EPF0_STRAP0,
 		 * as a consequence, the rev_id and external_rev_id are wrong.
 		 * workaround it by hardcoding rev_id to 0 (default value).
@@ -732,7 +730,8 @@ static int nv_common_early_init(void *handle)
 		adev->pg_flags = AMD_PG_SUPPORT_VCN |
 			AMD_PG_SUPPORT_VCN_DPG |
 			AMD_PG_SUPPORT_JPEG |
-			AMD_PG_SUPPORT_ATHUB;
+			AMD_PG_SUPPORT_ATHUB |
+			AMD_PG_SUPPORT_MMHUB;
 		adev->external_rev_id = adev->rev_id + 0x28;
 		break;
 	default:
