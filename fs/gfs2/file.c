@@ -767,6 +767,7 @@ static ssize_t gfs2_file_direct_read(struct kiocb *iocb, struct iov_iter *to)
 	size_t count = iov_iter_count(to);
 	struct gfs2_holder gh;
 	ssize_t ret;
+	unsigned int flags = 0;
 
 	if (!count)
 		return 0; /* skip atime */
@@ -776,8 +777,10 @@ static ssize_t gfs2_file_direct_read(struct kiocb *iocb, struct iov_iter *to)
 	if (ret)
 		goto out_uninit;
 
-	ret = iomap_dio_rw(iocb, to, &gfs2_iomap_ops, NULL,
-			   is_sync_kiocb(iocb));
+	if (is_sync_kiocb(iocb))
+		flags |= IOMAP_DIO_RWF_SYNCIO;
+
+	ret = iomap_dio_rw(iocb, to, &gfs2_iomap_ops, NULL, flags);
 
 	gfs2_glock_dq(&gh);
 out_uninit:
@@ -794,6 +797,7 @@ static ssize_t gfs2_file_direct_write(struct kiocb *iocb, struct iov_iter *from)
 	loff_t offset = iocb->ki_pos;
 	struct gfs2_holder gh;
 	ssize_t ret;
+	unsigned int flags = 0;
 
 	/*
 	 * Deferred lock, even if its a write, since we do no allocation on
@@ -812,8 +816,10 @@ static ssize_t gfs2_file_direct_write(struct kiocb *iocb, struct iov_iter *from)
 	if (offset + len > i_size_read(&ip->i_inode))
 		goto out;
 
-	ret = iomap_dio_rw(iocb, from, &gfs2_iomap_ops, NULL,
-			   is_sync_kiocb(iocb));
+	if (is_sync_kiocb(iocb))
+		flags |= IOMAP_DIO_RWF_SYNCIO;
+
+	ret = iomap_dio_rw(iocb, from, &gfs2_iomap_ops, NULL, flags);
 
 out:
 	gfs2_glock_dq(&gh);
