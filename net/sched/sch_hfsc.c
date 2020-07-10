@@ -1533,7 +1533,7 @@ static int hfsc_enqueue(struct sk_buff *skb, struct Qdisc *sch, spinlock_t *root
 {
 	unsigned int len = qdisc_pkt_len(skb);
 	struct hfsc_class *cl;
-	int uninitialized_var(err);
+	int err;
 	bool first;
 
 	cl = hfsc_classify(skb, sch, &err);
