@@ -14,6 +14,9 @@
 #include "xfs_mount.h"
 #include "xfs_trace.h"
 #include "xfs_log.h"
+#include "xfs_log_recover.h"
+#include "xfs_trans.h"
+#include "xfs_buf_item.h"
 #include "xfs_errortag.h"
 #include "xfs_error.h"
 
@@ -655,7 +658,6 @@ found:
 	 */
 	if (bp->b_flags & XBF_STALE) {
 		ASSERT((bp->b_flags & _XBF_DELWRI_Q) == 0);
-		ASSERT(bp->b_iodone == NULL);
 		bp->b_flags &= _XBF_KMEM | _XBF_PAGES;
 		bp->b_ops = NULL;
 	}
@@ -1191,10 +1193,13 @@ xfs_buf_ioend(
 	if (!bp->b_error && bp->b_io_error)
 		xfs_buf_ioerror(bp, bp->b_io_error);
 
-	/* Only validate buffers that were read without errors */
-	if (read && !bp->b_error && bp->b_ops) {
-		ASSERT(!bp->b_iodone);
-		bp->b_ops->verify_read(bp);
+	if (read) {
+		if (!bp->b_error && bp->b_ops)
+			bp->b_ops->verify_read(bp);
+		if (!bp->b_error)
+			bp->b_flags |= XBF_DONE;
+		xfs_buf_ioend_finish(bp);
+		return;
 	}
 
 	if (!bp->b_error) {
@@ -1202,12 +1207,25 @@ xfs_buf_ioend(
 		bp->b_flags |= XBF_DONE;
 	}
 
-	if (bp->b_iodone)
-		(*(bp->b_iodone))(bp);
-	else if (bp->b_flags & XBF_ASYNC)
-		xfs_buf_relse(bp);
-	else
-		complete(&bp->b_iowait);
+	/*
+	 * If this is a log recovery buffer, we aren't doing transactional IO
+	 * yet so we need to let it handle IO completions.
+	 */
+	if (bp->b_flags & _XBF_LOGRECOVERY) {
+		xlog_recover_iodone(bp);
+		return;
+	}
+
+	if (bp->b_flags & _XBF_INODES) {
+		xfs_buf_inode_iodone(bp);
+		return;
+	}
+
+	if (bp->b_flags & _XBF_DQUOTS) {
+		xfs_buf_dquot_iodone(bp);
+		return;
+	}
+	xfs_buf_iodone(bp);
 }
 
 static void
