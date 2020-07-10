@@ -224,20 +224,25 @@ int pcie_aer_is_native(struct pci_dev *dev)
 
 int pci_enable_pcie_error_reporting(struct pci_dev *dev)
 {
+	int rc;
+
 	if (!pcie_aer_is_native(dev))
 		return -EIO;
 
-	return pcie_capability_set_word(dev, PCI_EXP_DEVCTL, PCI_EXP_AER_FLAGS);
+	rc = pcie_capability_set_word(dev, PCI_EXP_DEVCTL, PCI_EXP_AER_FLAGS);
+	return pcibios_err_to_errno(rc);
 }
 EXPORT_SYMBOL_GPL(pci_enable_pcie_error_reporting);
 
 int pci_disable_pcie_error_reporting(struct pci_dev *dev)
 {
+	int rc;
+
 	if (!pcie_aer_is_native(dev))
 		return -EIO;
 
-	return pcie_capability_clear_word(dev, PCI_EXP_DEVCTL,
-					  PCI_EXP_AER_FLAGS);
+	rc = pcie_capability_clear_word(dev, PCI_EXP_DEVCTL, PCI_EXP_AER_FLAGS);
+	return pcibios_err_to_errno(rc);
 }
 EXPORT_SYMBOL_GPL(pci_disable_pcie_error_reporting);
 
@@ -447,7 +452,7 @@ static const char *aer_error_layer[] = {
 	"Transaction Layer"
 };
 
-static const char *aer_correctable_error_string[AER_MAX_TYPEOF_COR_ERRS] = {
+static const char *aer_correctable_error_string[] = {
 	"RxErr",			/* Bit Position 0	*/
 	NULL,
 	NULL,
@@ -464,9 +469,25 @@ static const char *aer_correctable_error_string[AER_MAX_TYPEOF_COR_ERRS] = {
 	"NonFatalErr",			/* Bit Position 13	*/
 	"CorrIntErr",			/* Bit Position 14	*/
 	"HeaderOF",			/* Bit Position 15	*/
+	NULL,				/* Bit Position 16	*/
+	NULL,				/* Bit Position 17	*/
+	NULL,				/* Bit Position 18	*/
+	NULL,				/* Bit Position 19	*/
+	NULL,				/* Bit Position 20	*/
+	NULL,				/* Bit Position 21	*/
+	NULL,				/* Bit Position 22	*/
+	NULL,				/* Bit Position 23	*/
+	NULL,				/* Bit Position 24	*/
+	NULL,				/* Bit Position 25	*/
+	NULL,				/* Bit Position 26	*/
+	NULL,				/* Bit Position 27	*/
+	NULL,				/* Bit Position 28	*/
+	NULL,				/* Bit Position 29	*/
+	NULL,				/* Bit Position 30	*/
+	NULL,				/* Bit Position 31	*/
 };
 
-static const char *aer_uncorrectable_error_string[AER_MAX_TYPEOF_UNCOR_ERRS] = {
+static const char *aer_uncorrectable_error_string[] = {
 	"Undefined",			/* Bit Position 0	*/
 	NULL,
 	NULL,
@@ -494,6 +515,11 @@ static const char *aer_uncorrectable_error_string[AER_MAX_TYPEOF_UNCOR_ERRS] = {
 	"AtomicOpBlocked",		/* Bit Position 24	*/
 	"TLPBlockedErr",		/* Bit Position 25	*/
 	"PoisonTLPBlocked",		/* Bit Position 26	*/
+	NULL,				/* Bit Position 27	*/
+	NULL,				/* Bit Position 28	*/
+	NULL,				/* Bit Position 29	*/
+	NULL,				/* Bit Position 30	*/
+	NULL,				/* Bit Position 31	*/
 };
 
 static const char *aer_agent_string[] = {
@@ -650,24 +676,26 @@ static void __print_tlp_header(struct pci_dev *dev,
 static void __aer_print_error(struct pci_dev *dev,
 			      struct aer_err_info *info)
 {
+	const char **strings;
 	unsigned long status = info->status & ~info->mask;
-	const char *errmsg = NULL;
+	const char *level, *errmsg;
 	int i;
 
-	for_each_set_bit(i, &status, 32) {
-		if (info->severity == AER_CORRECTABLE)
-			errmsg = i < ARRAY_SIZE(aer_correctable_error_string) ?
-				aer_correctable_error_string[i] : NULL;
-		else
-			errmsg = i < ARRAY_SIZE(aer_uncorrectable_error_string) ?
-				aer_uncorrectable_error_string[i] : NULL;
+	if (info->severity == AER_CORRECTABLE) {
+		strings = aer_correctable_error_string;
+		level = KERN_WARNING;
+	} else {
+		strings = aer_uncorrectable_error_string;
+		level = KERN_ERR;
+	}
 
-		if (errmsg)
-			pci_err(dev, "   [%2d] %-22s%s\n", i, errmsg,
+	for_each_set_bit(i, &status, 32) {
+		errmsg = strings[i];
+		if (!errmsg)
+			errmsg = "Unknown Error Bit";
+
+		pci_printk(level, dev, "   [%2d] %-22s%s\n", i, errmsg,
 				info->first_error == i ? " (First)" : "");
-		else
-			pci_err(dev, "   [%2d] Unknown Error Bit%s\n",
-				i, info->first_error == i ? " (First)" : "");
 	}
 	pci_dev_aer_stats_incr(dev, info);
 }
@@ -676,6 +704,7 @@ void aer_print_error(struct pci_dev *dev, struct aer_err_info *info)
 {
 	int layer, agent;
 	int id = ((dev->bus->number << 8) | dev->devfn);
+	const char *level;
 
 	if (!info->status) {
 		pci_err(dev, "PCIe Bus Error: severity=%s, type=Inaccessible, (Unregistered Agent ID)\n",
@@ -686,13 +715,14 @@ void aer_print_error(struct pci_dev *dev, struct aer_err_info *info)
 	layer = AER_GET_LAYER_ERROR(info->severity, info->status);
 	agent = AER_GET_AGENT(info->severity, info->status);
 
-	pci_err(dev, "PCIe Bus Error: severity=%s, type=%s, (%s)\n",
-		aer_error_severity_string[info->severity],
-		aer_error_layer[layer], aer_agent_string[agent]);
+	level = (info->severity == AER_CORRECTABLE) ? KERN_WARNING : KERN_ERR;
 
-	pci_err(dev, "  device [%04x:%04x] error status/mask=%08x/%08x\n",
-		dev->vendor, dev->device,
-		info->status, info->mask);
+	pci_printk(level, dev, "PCIe Bus Error: severity=%s, type=%s, (%s)\n",
+		   aer_error_severity_string[info->severity],
+		   aer_error_layer[layer], aer_agent_string[agent]);
+
+	pci_printk(level, dev, "  device [%04x:%04x] error status/mask=%08x/%08x\n",
+		   dev->vendor, dev->device, info->status, info->mask);
 
 	__aer_print_error(dev, info);
 

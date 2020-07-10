@@ -2,7 +2,7 @@
 /*
  * pcie-dra7xx - PCIe controller driver for TI DRA7xx SoCs
  *
- * Copyright (C) 2013-2014 Texas Instruments Incorporated - http://www.ti.com
+ * Copyright (C) 2013-2014 Texas Instruments Incorporated - https://www.ti.com
  *
  * Authors: Kishon Vijay Abraham I <kishon@ti.com>
  */
@@ -998,9 +998,8 @@ static int __init dra7xx_pcie_probe(struct platform_device *pdev)
 	return 0;
 
 err_gpio:
-	pm_runtime_put(dev);
-
 err_get_sync:
+	pm_runtime_put(dev);
 	pm_runtime_disable(dev);
 	dra7xx_pcie_disable_phy(dra7xx);
 
