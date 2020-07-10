@@ -16,9 +16,8 @@
 #include <linux/kernel.h>
 #include <linux/list.h>
 #include <linux/bug.h>
+#include <linux/refcount.h>
 #include <linux/slab.h>
-#include <linux/string.h>
-#include <linux/uaccess.h>
 #include <linux/completion.h>
 
 /*
@@ -595,6 +594,8 @@ int crypto_has_alg(const char *name, u32 type, u32 mask);
 struct crypto_tfm {
 
 	u32 crt_flags;
+
+	int node;
 	
 	void (*exit)(struct crypto_tfm *tfm);
 	
