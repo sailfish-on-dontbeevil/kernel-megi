@@ -2546,6 +2546,20 @@ static void __init gather_bootmem_prealloc(void)
 	}
 }
 
+bool __init hugetlb_cma_enabled(void)
+{
+#ifdef CONFIG_CMA
+	int node;
+
+	for_each_online_node(node) {
+		if (hugetlb_cma[node])
+			return true;
+	}
+#endif
+
+	return false;
+}
+
 static void __init hugetlb_hstate_alloc_pages(struct hstate *h)
 {
 	unsigned long i;
@@ -2571,7 +2585,7 @@ static void __init hugetlb_hstate_alloc_pages(struct hstate *h)
 
 	for (i = 0; i < h->max_huge_pages; ++i) {
 		if (hstate_is_gigantic(h)) {
-			if (IS_ENABLED(CONFIG_CMA) && hugetlb_cma[0]) {
+			if (hugetlb_cma_enabled()) {
 				pr_warn_once("HugeTLB: hugetlb_cma is enabled, skip boot time allocation\n");
 				break;
 			}
