@@ -250,7 +250,7 @@ cbq_classify(struct sk_buff *skb, struct Qdisc *sch, int *qerr)
 		case TC_ACT_STOLEN:
 		case TC_ACT_TRAP:
 			*qerr = NET_XMIT_SUCCESS | __NET_XMIT_STOLEN;
-			/* fall through */
+			fallthrough;
 		case TC_ACT_SHOT:
 			return NULL;
 		case TC_ACT_RECLASSIFY:
@@ -356,7 +356,7 @@ cbq_mark_toplevel(struct cbq_sched_data *q, struct cbq_class *cl)
 }
 
 static int
-cbq_enqueue(struct sk_buff *skb, struct Qdisc *sch,
+cbq_enqueue(struct sk_buff *skb, struct Qdisc *sch, spinlock_t *root_lock,
 	    struct sk_buff **to_free)
 {
 	struct cbq_sched_data *q = qdisc_priv(sch);
@@ -373,7 +373,7 @@ cbq_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 		return ret;
 	}
 
-	ret = qdisc_enqueue(skb, cl->q, to_free);
+	ret = qdisc_enqueue(skb, cl->q, root_lock, to_free);
 	if (ret == NET_XMIT_SUCCESS) {
 		sch->q.qlen++;
 		cbq_mark_toplevel(q, cl);

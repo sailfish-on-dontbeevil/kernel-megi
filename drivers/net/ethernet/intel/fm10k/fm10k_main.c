@@ -11,9 +11,7 @@
 
 #include "fm10k.h"
 
-#define DRV_VERSION	"0.27.1-k"
 #define DRV_SUMMARY	"Intel(R) Ethernet Switch Host Interface Driver"
-const char fm10k_driver_version[] = DRV_VERSION;
 char fm10k_driver_name[] = "fm10k";
 static const char fm10k_driver_string[] = DRV_SUMMARY;
 static const char fm10k_copyright[] =
@@ -22,7 +20,6 @@ static const char fm10k_copyright[] =
 MODULE_AUTHOR("Intel Corporation, <linux.nics@intel.com>");
 MODULE_DESCRIPTION(DRV_SUMMARY);
 MODULE_LICENSE("GPL v2");
-MODULE_VERSION(DRV_VERSION);
 
 /* single workqueue for entire fm10k driver */
 struct workqueue_struct *fm10k_workqueue;
@@ -35,7 +32,7 @@ struct workqueue_struct *fm10k_workqueue;
  **/
 static int __init fm10k_init_module(void)
 {
-	pr_info("%s - version %s\n", fm10k_driver_string, fm10k_driver_version);
+	pr_info("%s\n", fm10k_driver_string);
 	pr_info("%s\n", fm10k_copyright);
 
 	/* create driver workqueue */
@@ -859,7 +856,7 @@ static void fm10k_tx_csum(struct fm10k_ring *tx_ring,
 	case IPPROTO_GRE:
 		if (skb->encapsulation)
 			break;
-		/* fall through */
+		fallthrough;
 	default:
 		if (unlikely(net_ratelimit())) {
 			dev_warn(tx_ring->dev,
@@ -1557,7 +1554,7 @@ static bool fm10k_set_rss_queues(struct fm10k_intfc *interface)
  * important, starting with the "most" number of features turned on at once,
  * and ending with the smallest set of features.  This way large combinations
  * can be allocated if they're turned on, and smaller combinations are the
- * fallthrough conditions.
+ * fall through conditions.
  *
  **/
 static void fm10k_set_num_queues(struct fm10k_intfc *interface)

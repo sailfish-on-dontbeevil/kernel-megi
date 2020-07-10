@@ -43,7 +43,7 @@ multiq_classify(struct sk_buff *skb, struct Qdisc *sch, int *qerr)
 	case TC_ACT_QUEUED:
 	case TC_ACT_TRAP:
 		*qerr = NET_XMIT_SUCCESS | __NET_XMIT_STOLEN;
-		/* fall through */
+		fallthrough;
 	case TC_ACT_SHOT:
 		return NULL;
 	}
@@ -57,7 +57,7 @@ multiq_classify(struct sk_buff *skb, struct Qdisc *sch, int *qerr)
 }
 
 static int
-multiq_enqueue(struct sk_buff *skb, struct Qdisc *sch,
+multiq_enqueue(struct sk_buff *skb, struct Qdisc *sch, spinlock_t *root_lock,
 	       struct sk_buff **to_free)
 {
 	struct Qdisc *qdisc;
@@ -74,7 +74,7 @@ multiq_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 	}
 #endif
 
-	ret = qdisc_enqueue(skb, qdisc, to_free);
+	ret = qdisc_enqueue(skb, qdisc, root_lock, to_free);
 	if (ret == NET_XMIT_SUCCESS) {
 		sch->q.qlen++;
 		return NET_XMIT_SUCCESS;

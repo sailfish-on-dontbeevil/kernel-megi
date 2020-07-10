@@ -699,7 +699,7 @@ static struct qfq_class *qfq_classify(struct sk_buff *skb, struct Qdisc *sch,
 		case TC_ACT_STOLEN:
 		case TC_ACT_TRAP:
 			*qerr = NET_XMIT_SUCCESS | __NET_XMIT_STOLEN;
-			/* fall through */
+			fallthrough;
 		case TC_ACT_SHOT:
 			return NULL;
 		}
@@ -1194,7 +1194,7 @@ static struct qfq_aggregate *qfq_choose_next_agg(struct qfq_sched *q)
 	return agg;
 }
 
-static int qfq_enqueue(struct sk_buff *skb, struct Qdisc *sch,
+static int qfq_enqueue(struct sk_buff *skb, struct Qdisc *sch, spinlock_t *root_lock,
 		       struct sk_buff **to_free)
 {
 	unsigned int len = qdisc_pkt_len(skb), gso_segs;
@@ -1225,7 +1225,7 @@ static int qfq_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 
 	gso_segs = skb_is_gso(skb) ? skb_shinfo(skb)->gso_segs : 1;
 	first = !cl->qdisc->q.qlen;
-	err = qdisc_enqueue(skb, cl->qdisc, to_free);
+	err = qdisc_enqueue(skb, cl->qdisc, root_lock, to_free);
 	if (unlikely(err != NET_XMIT_SUCCESS)) {
 		pr_debug("qfq_enqueue: enqueue failed %d\n", err);
 		if (net_xmit_drop_count(err)) {
