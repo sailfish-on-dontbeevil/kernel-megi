@@ -258,6 +258,8 @@ compress_extension=%s  Support adding specified extension, so that f2fs can enab
                        on compression extension list and enable compression on
                        these file by default rather than to enable it via ioctl.
                        For other files, we can still enable compression via ioctl.
+                       Note that, there is one reserved special extension '*', it
+                       can be set to enable compression for all files.
 inlinecrypt
                        When possible, encrypt/decrypt the contents of encrypted
                        files using the blk-crypto framework rather than
@@ -284,7 +286,18 @@ Sysfs Entries
 
 Information about mounted f2fs file systems can be found in
 /sys/fs/f2fs.  Each mounted filesystem will have a directory in
-/sys/fs/f2fs based on its device name (i.e., /sys/fs/f2fs/sda).
+/sys/fs/f2fs based on its device name (i.e., /sys/fs/f2fs/sda),
+or mount_#x (#x is the number representing the order of mounting).
+But once one mount point was umounted, that sequential number @x
+in "mount_@x" could be reused by later newly mounted point.
+
+Here is an example of this.
+
+mount dev0 mount0 (mount_0 -> dev0)
+mount dev1 mount1 (mount_1 -> dev1)
+umount mount0
+mount dev2 (mount_0 -> dev2)
+
 The files in each per-device directory are shown in table below.
 
 Files in /sys/fs/f2fs/<devname>
@@ -744,8 +757,8 @@ Compression implementation
 
 - In order to eliminate write amplification during overwrite, F2FS only
   support compression on write-once file, data can be compressed only when
-  all logical blocks in file are valid and cluster compress ratio is lower
-  than specified threshold.
+  all logical blocks in cluster contain valid data and compress ratio of
+  cluster data is lower than specified threshold.
 
 - To enable compression on regular inode, there are three ways:
 
