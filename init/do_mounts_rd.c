@@ -17,7 +17,7 @@
 
 static int __init prompt_ramdisk(char *str)
 {
-	pr_warn("ignoring the depreated prompt_ramdisk= option\n");
+	pr_warn("ignoring the deprecated prompt_ramdisk= option\n");
 	return 1;
 }
 __setup("prompt_ramdisk=", prompt_ramdisk);
