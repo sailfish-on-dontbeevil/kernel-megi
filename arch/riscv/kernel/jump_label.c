@@ -4,8 +4,10 @@
  *
  * Based on arch/arm64/kernel/jump_label.c
  */
-#include <linux/kernel.h>
 #include <linux/jump_label.h>
+#include <linux/kernel.h>
+#include <linux/memory.h>
+#include <linux/mutex.h>
 #include <asm/bug.h>
 #include <asm/patch.h>
 
@@ -33,7 +35,9 @@ void arch_jump_label_transform(struct jump_entry *entry,
 		insn = RISCV_INSN_NOP;
 	}
 
+	mutex_lock(&text_mutex);
 	patch_text_nosync(addr, &insn, sizeof(insn));
+	mutex_unlock(&text_mutex);
 }
 
 void arch_jump_label_transform_static(struct jump_entry *entry,
