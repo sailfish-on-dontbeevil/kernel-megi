@@ -1817,8 +1817,8 @@ void chv_phy_powergate_lanes(struct intel_encoder *encoder,
 {
 	struct drm_i915_private *dev_priv = to_i915(encoder->base.dev);
 	struct i915_power_domains *power_domains = &dev_priv->power_domains;
-	enum dpio_phy phy = vlv_dport_to_phy(enc_to_dig_port(encoder));
-	enum dpio_channel ch = vlv_dport_to_channel(enc_to_dig_port(encoder));
+	enum dpio_phy phy = vlv_dig_port_to_phy(enc_to_dig_port(encoder));
+	enum dpio_channel ch = vlv_dig_port_to_channel(enc_to_dig_port(encoder));
 
 	mutex_lock(&power_domains->lock);
 
@@ -5301,6 +5301,12 @@ static void icl_display_core_init(struct drm_i915_private *dev_priv,
 	u32 val;
 
 	gen9_set_dc_state(dev_priv, DC_STATE_DISABLE);
+
+	/* Wa_14011294188:ehl,jsl,tgl,rkl */
+	if (INTEL_PCH_TYPE(dev_priv) >= PCH_JSP &&
+	    INTEL_PCH_TYPE(dev_priv) < PCH_DG1)
+		intel_de_rmw(dev_priv, SOUTH_DSPCLK_GATE_D, 0,
+			     PCH_DPMGUNIT_CLOCK_GATE_DISABLE);
 
 	/* 1. Enable PCH reset handshake. */
 	intel_pch_reset_handshake(dev_priv, !HAS_PCH_NOP(dev_priv));
