@@ -1,0 +1,447 @@
+# SPDX-License-Identifier: (GPL-2.0 OR BSD-2-Clause)
+
+%YAML 1.2
+---
+$id: "http://devicetree.org/schemas/pci/qcom,pcie.yaml#"
+$schema: "http://devicetree.org/meta-schemas/core.yaml#"
+
+title: Qualcomm PCI express root complex
+
+maintainers:
+  - Sivaprakash Murugesan <sivaprak@codeaurora.org>
+
+description:
+  QCOM PCIe controller uses Designware IP with Qualcomm specific hardware
+  wrappers.
+
+properties:
+  compatible:
+    enum:
+      - qcom,pcie-apq8064
+      - qcom,pcie-apq8084
+      - qcom,pcie-ipq4019
+      - qcom,pcie-ipq8064
+      - qcom,pcie-ipq8074
+      - qcom,pcie-msm8996
+      - qcom,pcie-qcs404
+      - qcom,pcie-sdm845
+
+  reg:
+    description: Register ranges as listed in the reg-names property
+    maxItems: 4
+
+  reg-names:
+    items:
+      - const: dbi
+      - const: elbi
+      - const: parf
+      - const: config
+
+  ranges:
+    maxItems: 2
+
+  interrupts:
+    items:
+      - description: MSI interrupts
+
+  interrupt-names:
+    const: msi
+
+  "#interrupt-cells":
+    const: 1
+
+  interrupt-map-mask:
+    items:
+      - description: standard PCI properties to define mapping of PCIe
+                     interface to interrupt numbers.
+
+  interrupt-map:
+    maxItems: 4
+
+  clocks:
+    minItems: 1
+    maxItems: 7
+
+  clock-names:
+    minItems: 1
+    maxItems: 7
+
+  resets:
+    minItems: 1
+    maxItems: 12
+
+  reset-names:
+    minItems: 1
+    maxItems: 12
+
+  power-domains:
+    maxItems: 1
+
+  vdda-supply:
+    description: phandle to power supply
+
+  vdda_phy-supply:
+    description: phandle to the power supply to PHY
+
+  vdda_refclk-supply:
+    description: phandle to power supply for ref clock generator
+
+  vddpe-3v3-supply:
+    description: PCIe endpoint power supply
+
+  phys:
+    maxItems: 1
+    items:
+      - description: phandle to the PHY block
+
+  phy-names:
+    const: pciephy
+
+  perst-gpios:
+    description: Endpoint reset signal line
+    maxItems: 1
+
+  num-lanes:
+    const: 1
+
+required:
+  - compatible
+  - reg
+  - reg-names
+  - interrupts
+  - interrupt-names
+  - "#interrupt-cells"
+  - interrupt-map-mask
+  - interrupt-map
+  - clocks
+  - clock-names
+  - resets
+  - reset-names
+  - phys
+  - phy-names
+
+allOf:
+ - $ref: /schemas/pci/pci-bus.yaml#
+ - if:
+     properties:
+       compatible:
+         contains:
+           enum:
+             - qcom,pcie-apq8064
+   then:
+     properties:
+       clocks:
+         items:
+           - description: clock for pcie hw block
+           - description: clock for pcie phy block
+       clock-names:
+         items:
+           - const: core
+           - const: phy
+       resets:
+         items:
+           - description: AXI reset
+           - description: AHB reset
+           - description: POR reset
+           - description: PCI reset
+           - description: PHY reset
+       reset-names:
+         items:
+           - const: axi
+           - const: ahb
+           - const: por
+           - const: pci
+           - const: phy
+ - if:
+     properties:
+       compatible:
+         contains:
+           enum:
+             - qcom,pcie-apq8084
+   then:
+     properties:
+       clocks:
+         items:
+           - description: AUX clock
+           - description: Master AXI clock
+           - description: Slave AXI clock
+       clock-names:
+         items:
+           - const: aux
+           - const: bus_master
+           - const: bus_slave
+       resets:
+         items:
+           - description: core reset
+       reset-names:
+         items:
+           - const: core
+ - if:
+     properties:
+       compatible:
+         contains:
+           enum:
+             - qcom,pcie-ipq4019
+   then:
+     properties:
+       clocks:
+         items:
+           - description: AUX clock
+           - description: Master AXI clock
+           - description: Slave AXI clock
+       clock-names:
+         items:
+           - const: aux
+           - const: master_bus
+           - const: master_slave
+       resets:
+         items:
+           - description: AXI master reset
+           - description: AXI slave reset
+           - description: PCIE pipe reset
+           - description: AXI vmid reset
+           - description: AXI XPU reset
+           - description: parf reset
+           - description: PHY reset
+           - description: AXI master sticky reset
+           - description: PCIE pipe sticky reset
+           - description: pwr reset
+           - description: AHB reset
+           - description: PHY AHB reset
+       reset-names:
+         items:
+           - const: axi_m
+           - const: axi_s
+           - const: pipe
+           - const: axi_m_vmid
+           - const: axi_s_xpu
+           - const: parf
+           - const: phy
+           - const: axi_m_sticky
+           - const: pipe_sticky
+           - const: pwr
+           - const: ahb
+           - const: phy_ahb
+ - if:
+     properties:
+       compatible:
+         contains:
+           enum:
+             - qcom,pcie-ipq8064
+   then:
+     properties:
+       clocks:
+         items:
+           - description: core clock
+           - description: interface clock
+           - description: phy clock
+           - description: Auxilary clock
+           - description: reference clock
+       clock-names:
+         items:
+           - const: core
+           - const: iface
+           - const: phy
+           - const: aux
+           - const: ref
+       resets:
+         items:
+           - description: AXI reset
+           - description: AHB reset
+           - description: POR reset
+           - description: PCI reset
+           - description: PHY reset
+           - description: External reset
+       reset-names:
+         items:
+           - const: axi
+           - const: ahb
+           - const: por
+           - const: pci
+           - const: phy
+           - const: ext
+ - if:
+     properties:
+       compatible:
+         contains:
+           enum:
+             - qcom,pcie-ipq8074
+   then:
+     properties:
+       clocks:
+         items:
+           - description: sys noc interface clock
+           - description: AXI master clock
+           - description: AXI slave clock
+           - description: AHB clock
+           - description: Auxilary clock
+       clock-names:
+         items:
+           - const: iface
+           - const: axi_m
+           - const: axi_s
+           - const: ahb
+           - const: aux
+       resets:
+         items:
+           - description: PIPE reset
+           - description: PCIe sleep reset
+           - description: PCIe sticky reset
+           - description: AXI master reset
+           - description: AXI slave reset
+           - description: AHB reset
+           - description: AXI master sticky reset
+       reset-names:
+         items:
+           - const: pipe
+           - const: sleep
+           - const: sticky
+           - const: axi_m
+           - const: axi_s
+           - const: ahb
+           - const: axi_m_sticky
+ - if:
+     properties:
+       compatible:
+         contains:
+           enum:
+             - qcom,pcie-msm8996
+   then:
+     properties:
+       clocks:
+         items:
+           - description: PCIe pipe clock
+           - description: Auxilary clock
+           - description: AHB config clock
+           - description: AXI master clock
+           - description: AXI slave clock
+       clock-names:
+         items:
+           - const: pipe
+           - const: aux
+           - const: cfg
+           - const: bus_master
+           - const: bus_slave
+ - if:
+     properties:
+       compatible:
+         contains:
+           enum:
+             - qcom,pcie-qcs404
+   then:
+     properties:
+       clocks:
+         items:
+           - description: interface clock
+           - description: Auxilary clock
+           - description: AXI master clock
+           - description: AXI slave clock
+       clock-names:
+         items:
+           - const: iface
+           - const: aux
+           - const: master_bus
+           - const: slave_bus
+       resets:
+         items:
+           - description: AXI master reset
+           - description: AXI slave reset
+           - description: AXI master sticky reset
+           - description: PCIe pipe sticky reset
+           - description: power reset
+           - description: AHB reset
+       reset-names:
+         items:
+           - const: axi_m
+           - const: axi_s
+           - const: axi_m_sticky
+           - const: pipe_sticky
+           - const: pwr
+           - const: ahb
+ - if:
+     properties:
+       compatible:
+         contains:
+           enum:
+             - qcom,pcie-sdm845
+   then:
+     properties:
+       clocks:
+         items:
+           - description: PCIE pipe clock
+           - description: Auxilary clock
+           - description: AHB config clock
+           - description: AXI Master clock
+           - description: AXI Slave clock
+           - description: AXI Slave Q2A clock
+           - description: NOC TBU clock
+       clock-names:
+         items:
+           - const: pipe
+           - const: aux
+           - const: cfg
+           - const: bus_master
+           - const: bus_slave
+           - const: slave_q2a
+           - const: tbu
+       resets:
+         items:
+           - description: PCI reset
+       reset-names:
+         items:
+           - const: pci
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/clock/qcom,gcc-qcs404.h>
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+    pcie: pci@10000000 {
+        compatible = "qcom,pcie-qcs404";
+        reg =  <0x10000000 0xf1d>,
+               <0x10000f20 0xa8>,
+               <0x07780000 0x2000>,
+               <0x10001000 0x2000>;
+        reg-names = "dbi", "elbi", "parf", "config";
+        device_type = "pci";
+        linux,pci-domain = <0>;
+        bus-range = <0x00 0xff>;
+        num-lanes = <1>;
+        #address-cells = <3>;
+        #size-cells = <2>;
+
+        ranges = <0x01000000 0 0          0x10003000 0 0x00010000>, /* I/O */
+                 <0x02000000 0 0x10013000 0x10013000 0 0x007ed000>; /* memory */
+
+        interrupts = <GIC_SPI 266 IRQ_TYPE_LEVEL_HIGH>;
+        interrupt-names = "msi";
+        #interrupt-cells = <1>;
+        interrupt-map-mask = <0 0 0 0x7>;
+        interrupt-map = <0 0 0 1 &intc GIC_SPI 68 IRQ_TYPE_LEVEL_HIGH>, /* int_a */
+                        <0 0 0 2 &intc GIC_SPI 224 IRQ_TYPE_LEVEL_HIGH>, /* int_b */
+                        <0 0 0 3 &intc GIC_SPI 267 IRQ_TYPE_LEVEL_HIGH>, /* int_c */
+                        <0 0 0 4 &intc GIC_SPI 268 IRQ_TYPE_LEVEL_HIGH>; /* int_d */
+        clocks = <&gcc GCC_PCIE_0_CFG_AHB_CLK>,
+                 <&gcc GCC_PCIE_0_AUX_CLK>,
+                 <&gcc GCC_PCIE_0_MSTR_AXI_CLK>,
+                 <&gcc GCC_PCIE_0_SLV_AXI_CLK>;
+        clock-names = "iface", "aux", "master_bus", "slave_bus";
+
+        resets = <&gcc 18>,
+                 <&gcc 17>,
+                 <&gcc 15>,
+                 <&gcc 19>,
+                 <&gcc GCC_PCIE_0_BCR>,
+                 <&gcc 16>;
+        reset-names = "axi_m",
+                      "axi_s",
+                      "axi_m_sticky",
+                      "pipe_sticky",
+                      "pwr",
+                      "ahb";
+
+        phys = <&pcie_phy>;
+        phy-names = "pciephy";
+
+    };
