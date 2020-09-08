@@ -436,6 +436,9 @@ static struct snd_soc_dai_driver sun8i_codec_dais[] = {
 			.rates		= SUN8I_CODEC_PCM_RATES,
 			.formats	= SNDRV_PCM_FMTBIT_S16_LE,
 		},
+		.symmetric_rates	= true,
+		.symmetric_channels	= true,
+		.symmetric_samplebits	= true,
 	},
 };
 
