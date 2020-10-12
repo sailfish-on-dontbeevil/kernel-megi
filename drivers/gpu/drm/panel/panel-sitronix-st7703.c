@@ -598,9 +598,9 @@ static int st7703_probe(struct mipi_dsi_device *dsi)
 
 	ret = mipi_dsi_attach(dsi);
 	if (ret < 0) {
-		DRM_DEV_ERROR(dev,
-			      "mipi_dsi_attach failed (%d). Is host ready?\n",
-			      ret);
+		if (ret != -EPROBE_DEFER)
+			DRM_DEV_ERROR(dev,
+				      "mipi_dsi_attach failed (%d).\n", ret);
 		drm_panel_remove(&ctx->panel);
 		return ret;
 	}
