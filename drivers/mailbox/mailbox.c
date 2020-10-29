@@ -82,10 +82,12 @@ static void msg_submit(struct mbox_chan *chan)
 exit:
 	spin_unlock_irqrestore(&chan->lock, flags);
 
+	/* kick start the timer immediately to avoid delays */
 	if (!err && (chan->txdone_method & TXDONE_BY_POLL)) {
 		if (!timekeeping_suspended) {
-			/* kick start the timer immediately to avoid delays */
-			hrtimer_start(&chan->mbox->poll_hrt, 0, HRTIMER_MODE_REL);
+			/* but only if not already active */
+			if (!hrtimer_active(&chan->mbox->poll_hrt))
+				hrtimer_start(&chan->mbox->poll_hrt, 0, HRTIMER_MODE_REL);
 		}
 	}
 }
@@ -125,11 +127,10 @@ static enum hrtimer_restart txdone_hrtimer(struct hrtimer *hrtimer)
 		struct mbox_chan *chan = &mbox->chans[i];
 
 		if (chan->active_req && chan->cl) {
+			resched = true;
 			txdone = chan->mbox->ops->last_tx_done(chan);
 			if (txdone)
 				tx_tick(chan, 0);
-			else
-				resched = true;
 		}
 	}
 
