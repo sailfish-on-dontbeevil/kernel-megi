@@ -16,6 +16,8 @@
 	compatible = "pocketbook,touch-lux-3", "allwinner,sun5i-a13";
 
 	aliases {
+		mmc0 = &mmc0;
+		mmc2 = &mmc2;
 		serial0 = &uart1;
 		i2c0 = &i2c0;
 		i2c1 = &i2c1;

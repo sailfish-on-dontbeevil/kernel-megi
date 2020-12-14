@@ -52,6 +52,7 @@
 	compatible = "xunlong,orangepi-pc", "allwinner,sun8i-h3";
 
 	aliases {
+		mmc0 = &mmc0;
 		ethernet0 = &emac;
 		serial0 = &uart0;
 	};
