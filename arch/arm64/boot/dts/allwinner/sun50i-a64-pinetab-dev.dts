@@ -1,0 +1,29 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (C) 2019 Icenowy Zheng <icenowy@aosc.xyz>
+ *
+ */
+
+/dts-v1/;
+
+#include "sun50i-a64-pinetab.dts"
+
+/ {
+	model = "PineTab";
+	compatible = "pine64,pinetab", "allwinner,sun50i-a64";
+};
+
+&dsi {
+	vcc-dsi-supply = <&reg_dldo1>;
+	status = "okay";
+
+	panel@0 {
+		compatible = "feixin,k101-im2ba02";
+		reg = <0>;
+		avdd-supply = <&reg_dc1sw>;
+		dvdd-supply = <&reg_dc1sw>;
+		cvdd-supply = <&reg_ldo_io1>;
+		reset-gpios = <&pio 3 24 GPIO_ACTIVE_HIGH>; /* PD24 */
+		backlight = <&backlight>;
+	};
+};
