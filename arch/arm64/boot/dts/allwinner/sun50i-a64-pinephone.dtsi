@@ -828,7 +828,6 @@
 		reset-gpios = <&r_pio 0 4 GPIO_ACTIVE_LOW>; /* PL4 */
 		device-wake-gpios = <&pio 7 6 GPIO_ACTIVE_LOW>; /* PH6 */
 		host-wake-gpios = <&r_pio 0 5 GPIO_ACTIVE_HIGH>; /* PL5 */
-		firmware-postfix = "pinephone";
 	};
 };
 
