@@ -498,6 +498,9 @@ static const struct usb_device_id usb_quirk_list[] = {
 	/* novation SoundControl XL */
 	{ USB_DEVICE(0x1235, 0x0061), .driver_info = USB_QUIRK_RESET_RESUME },
 
+	/* Quectel EG25G Modem */
+	{ USB_DEVICE(0x2c7c, 0x0125), .driver_info = USB_QUIRK_RESET },
+
 	{ }  /* terminating entry must be last */
 };
 
