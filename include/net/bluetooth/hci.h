@@ -239,6 +239,14 @@ enum {
 	 */
 	HCI_QUIRK_BROKEN_ERR_DATA_REPORTING,
 
+	/*
+	 * When this quirk is set, then the hci_suspend_notifier is not
+	 * registered. This is intended for devices which drop completely
+	 * from the bus on system-suspend and which will show up as a new
+	 * HCI after resume.
+	 */
+	HCI_QUIRK_NO_SUSPEND_NOTIFIER,
+
 	/* When this quirk is set, max_page for local extended features
 	 * is set to 1, even if controller reports higher number. Some
 	 * controllers (e.g. RTL8723CS) report more pages, but they
