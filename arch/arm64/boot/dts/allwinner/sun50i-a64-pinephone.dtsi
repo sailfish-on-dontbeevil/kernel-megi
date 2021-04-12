@@ -191,6 +191,17 @@
 		sound-name-prefix = "Modem";
 	};
 
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		ring_indicator: ring-indicator {
+			label = "Ring Indicator";
+			linux,can-disable;
+			linux,code = <KEY_WAKEUP>;
+			wakeup-source;
+		};
+	};
+
 	i2c_csi: i2c-csi {
 		compatible = "i2c-gpio";
 		sda-gpios = <&pio 4 13 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>; /* PE13 */
@@ -255,6 +266,7 @@
 	reg_vbat_bb: vbat-bb {
 		compatible = "regulator-fixed";
 		regulator-name = "vbat-bb";
+		regulator-always-on;
 		regulator-min-microvolt = <3500000>;
 		regulator-max-microvolt = <3500000>;
 		gpio = <&r_pio 0 7 GPIO_ACTIVE_HIGH>; /* PL7 */
@@ -334,11 +346,13 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&aif2_pins>, <&aif3_pins>;
 	status = "okay";
+	allwinner,inverted-jack-detection;
 };
 
 &codec_analog {
 	cpvdd-supply = <&reg_eldo1>;
 	status = "okay";
+	allwinner,internal-bias-resistor;
 };
 
 &cpu0 {
@@ -622,11 +636,7 @@
 	vcc-pb-supply = <&reg_dcdc1>;
 	vcc-pc-supply = <&reg_dcdc1>;
 	vcc-pd-supply = <&reg_dcdc1>;
-	/* pinctrl would enable this even if no camera is powered,
-	 * which is wrong/not necessary
-	 *
-	 * vcc-pe-supply = <&reg_aldo1>; (also used by pogo pins i2c)
-	 */
+	vcc-pe-supply = <&reg_aldo1>; /* (also used by pogo pins i2c) */
 	vcc-pf-supply = <&reg_dcdc1>;
 	vcc-pg-supply = <&reg_dldo4>;
 	vcc-ph-supply = <&reg_dcdc1>;
@@ -797,11 +807,11 @@
 	simple-audio-card,aux-devs = <&codec_analog>, <&speaker_amp>;
 	simple-audio-card,widgets = "Microphone", "Headset Microphone",
 				    "Microphone", "Internal Microphone",
-				    "Headphone", "Headphone Jack",
+				    "Headphone", "Headphone",
 				    "Speaker", "Internal Earpiece",
 				    "Speaker", "Internal Speaker";
 	simple-audio-card,routing =
-			"Headphone Jack", "HP",
+			"Headphone", "HP",
 			"Internal Earpiece", "EARPIECE",
 			"Internal Speaker", "Speaker Amp OUTL",
 			"Internal Speaker", "Speaker Amp OUTR",
@@ -867,7 +877,6 @@
 		device-wake-gpios = <&pio 7 6 GPIO_ACTIVE_LOW>; /* PH6 */
 		enable-gpios = <&r_pio 0 4 GPIO_ACTIVE_HIGH>; /* PL4 */
 		host-wake-gpios = <&r_pio 0 5 GPIO_ACTIVE_HIGH>; /* PL5 */
-		firmware-postfix = "pinephone";
 	};
 };
 
