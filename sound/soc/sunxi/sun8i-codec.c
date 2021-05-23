@@ -1672,17 +1672,22 @@ static irqreturn_t sun8i_codec_jack_irq(int irq, void *dev_id)
 				type |= SND_JACK_BTN_2;
 
 			if (scodec->jack_last_sample >= 0 && scodec->jack_last_sample == value) {
+				static bool nagged = false;
+
 				btn_chg = (scodec->jack_last_btn ^ type) & 0x7000;
 				scodec->jack_last_btn = type;
 
 				//XXX: temporary for debugging
-				if (btn_chg) {
-					if (btn_chg & SND_JACK_BTN_0)
-						pr_err("jack: key_%spress BTN_0 (%#x)\n", type & SND_JACK_BTN_0 ? "" : "de", value);
-					if (btn_chg & SND_JACK_BTN_1)
-						pr_err("jack: key_%spress BTN_1 (%#x)\n", type & SND_JACK_BTN_1 ? "" : "de", value);
-					if (btn_chg & SND_JACK_BTN_2)
-						pr_err("jack: key_%spress BTN_2 (%#x)\n", type & SND_JACK_BTN_2 ? "" : "de", value);
+				if (btn_chg & SND_JACK_BTN_0)
+					pr_err("jack: key_%spress BTN_0 (%#x)\n", type & SND_JACK_BTN_0 ? "" : "de", value);
+				if (btn_chg & SND_JACK_BTN_1)
+					pr_err("jack: key_%spress BTN_1 (%#x)\n", type & SND_JACK_BTN_1 ? "" : "de", value);
+				if (btn_chg & SND_JACK_BTN_2)
+					pr_err("jack: key_%spress BTN_2 (%#x)\n", type & SND_JACK_BTN_2 ? "" : "de", value);
+
+				if (btn_chg & (SND_JACK_BTN_1 | SND_JACK_BTN_2) && !nagged) {
+					pr_err("jack: Looks like you have a 3-button headset. I'm collecting statistics for button voltages on 3-button headsets. If you'd like to help pinephone kernel development, please send your dmesg output to x@xnux.eu after pressing all the buttons one after another once in a sequence. Thanks!\n");
+					nagged = true;
 				}
 
 				snd_soc_jack_report(&scodec->jack, type, scodec->jack_type);
