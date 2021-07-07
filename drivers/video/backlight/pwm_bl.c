@@ -662,7 +662,7 @@ static int pwm_backlight_probe(struct platform_device *pdev)
 		if (lth_brightness > 100)
 			lth_brightness = 100;
 
-		pb->lth_brightness = lth_brightness * state.period / 100;
+		pb->lth_brightness = div_u64(lth_brightness * state.period, 100);
 	}
 
 	ret = devm_device_add_group(&pdev->dev, &pwm_bl_group);
