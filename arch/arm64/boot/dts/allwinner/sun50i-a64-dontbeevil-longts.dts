@@ -1,0 +1,14 @@
+/dts-v1/;
+
+#include "sun50i-a64-dontbeevil.dts"
+
+/ {
+	model = "PinePhone Don't be evil development kit with long touch cable";
+	compatible = "pine64,sopine-baseboard", "pine64,sopine",
+		     "allwinner,sun50i-a64";
+
+};
+
+&touchscreen {
+	touchscreen-inverted-x;
+};

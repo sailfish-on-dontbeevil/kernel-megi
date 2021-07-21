@@ -225,7 +225,15 @@
 &i2c1 {
 	status = "okay";
 
-	/* TODO: add Bochs BMA223 accelerometer here */
+	bma223@18 {
+		compatible = "bosch,bma223", "bosch,bma222e";
+		reg = <0x18>;
+		interrupt-parent = <&pio>;
+		interrupts = <7 5 IRQ_TYPE_LEVEL_HIGH>; /* PH5 */
+		mount-matrix = "0", "-1", "0",
+			       "-1", "0", "0",
+			       "0", "0", "-1";
+	};
 };
 
 &lradc {
@@ -288,6 +296,10 @@
 };
 
 &ohci0 {
+	status = "okay";
+};
+
+&ohci1 {
 	status = "okay";
 };
 
@@ -448,19 +460,20 @@
 
 &sound {
 	status = "okay";
+	simple-audio-card,name = "PineTab";
 	simple-audio-card,aux-devs = <&codec_analog>, <&speaker_amp>;
 	simple-audio-card,widgets = "Microphone", "Internal Microphone Left",
 				    "Microphone", "Internal Microphone Right",
 				    "Headphone", "Headphone Jack",
 				    "Speaker", "Internal Speaker";
 	simple-audio-card,routing =
-			"Left DAC", "DACL",
-			"Right DAC", "DACR",
-			"Speaker Amp INL", "LINEOUT",
-			"Speaker Amp INR", "LINEOUT",
+			"Headphone Jack", "HP",
 			"Internal Speaker", "Speaker Amp OUTL",
 			"Internal Speaker", "Speaker Amp OUTR",
-			"Headphone Jack", "HP",
+			"Speaker Amp INL", "LINEOUT",
+			"Speaker Amp INR", "LINEOUT",
+			"Left DAC", "DACL",
+			"Right DAC", "DACR",
 			"ADCL", "Left ADC",
 			"ADCR", "Right ADC",
 			"Internal Microphone Left", "MBIAS",
@@ -473,6 +486,19 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&uart0_pb_pins>;
 	status = "okay";
+};
+
+&uart1 {
+        pinctrl-names = "default";
+        pinctrl-0 = <&uart1_pins>, <&uart1_rts_cts_pins>;
+        status = "okay";
+
+        bluetooth {
+                compatible = "realtek,rtl8723cs-bt";
+                reset-gpios = <&r_pio 0 4 GPIO_ACTIVE_LOW>; /* PL4 */
+                device-wake-gpios = <&r_pio 0 6 GPIO_ACTIVE_LOW>; /* PL6 */
+                host-wake-gpios = <&r_pio 0 5 GPIO_ACTIVE_HIGH>; /* PL5 */
+        };
 };
 
 &usb_otg {
