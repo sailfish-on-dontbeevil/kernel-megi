@@ -2206,6 +2206,30 @@ static const struct panel_desc giantplus_gpm940b0 = {
 	.bus_flags = DRM_BUS_FLAG_DE_HIGH | DRM_BUS_FLAG_PIXDATA_SAMPLE_POSEDGE,
 };
 
+static const struct drm_display_mode hannstar_hsd070idw1_a_mode = {
+	.clock = 33000,
+	.hdisplay = 800,
+	.hsync_start = 800 + 40,
+	.hsync_end = 800 + 40 + 1,
+	.htotal = 800 + 40 + 1 + 87,
+	.vdisplay = 480,
+	.vsync_start = 480 + 13,
+	.vsync_end = 480 + 13 + 1,
+	.vtotal = 480 + 13 + 1 + 31,
+};
+
+static const struct panel_desc hannstar_hsd070idw1_a = {
+	.modes = &hannstar_hsd070idw1_a_mode,
+	.num_modes = 1,
+	.bpc = 6,
+	.size = {
+		.width = 154,
+		.height = 87,
+	},
+	.bus_format = MEDIA_BUS_FMT_RGB666_1X18,
+	.connector_type = DRM_MODE_CONNECTOR_DPI,
+}; 
+
 static const struct display_timing hannstar_hsd070pww1_timing = {
 	.pixelclock = { 64300000, 71100000, 82000000 },
 	.hactive = { 1280, 1280, 1280 },
@@ -2259,6 +2283,30 @@ static const struct panel_desc hannstar_hsd100pxn1 = {
 	},
 	.bus_format = MEDIA_BUS_FMT_RGB666_1X7X3_SPWG,
 	.connector_type = DRM_MODE_CONNECTOR_LVDS,
+};
+
+static const struct drm_display_mode hannstar_tqtm070cb501_mode = {
+	.clock = 33000,
+	.hdisplay = 800,
+	.hsync_start = 800 + 240,
+	.hsync_end = 800 + 240 + 30,
+	.htotal = 800 + 240 + 30 + 14, // -14
+	.vdisplay = 480,
+	.vsync_start = 480 + 35,
+	.vsync_end = 480 + 35 + 13,
+	.vtotal = 480 + 35 + 13 + 3, // -3
+};
+
+static const struct panel_desc hannstar_tqtm070cb501 = {
+	.modes = &hannstar_tqtm070cb501_mode,
+	.num_modes = 1,
+	.bpc = 6,
+	.size = {
+		.width = 164,
+		.height = 104,
+	},
+	.bus_format = MEDIA_BUS_FMT_RGB666_1X18,
+	.connector_type = DRM_MODE_CONNECTOR_DPI,
 };
 
 static const struct drm_display_mode hitachi_tx23d38vm0caa_mode = {
@@ -4369,6 +4417,9 @@ static const struct of_device_id platform_of_match[] = {
 		.compatible = "giantplus,gpm940b0",
 		.data = &giantplus_gpm940b0,
 	}, {
+		.compatible = "hannstar,hsd070idw1-a",
+		.data = &hannstar_hsd070idw1_a,
+	}, {
 		.compatible = "hannstar,hsd070pww1",
 		.data = &hannstar_hsd070pww1,
 	}, {
@@ -4377,6 +4428,9 @@ static const struct of_device_id platform_of_match[] = {
 	}, {
 		.compatible = "hit,tx23d38vm0caa",
 		.data = &hitachi_tx23d38vm0caa
+	}, {
+		.compatible = "hannstar,tqtm070cb501",
+		.data = &hannstar_tqtm070cb501,
 	}, {
 		.compatible = "innolux,at043tn24",
 		.data = &innolux_at043tn24,

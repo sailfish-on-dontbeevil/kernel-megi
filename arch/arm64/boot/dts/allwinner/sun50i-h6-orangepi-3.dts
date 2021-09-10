@@ -145,7 +145,7 @@
 &emac {
 	pinctrl-names = "default";
 	pinctrl-0 = <&ext_rgmii_pins>;
-	phy-mode = "rgmii-id";
+	phy-mode = "rgmii-txid";
 	phy-handle = <&ext_rgmii_phy>;
 	/*
 	 * The board uses 2.5V RGMII signalling. Power sequence to enable
@@ -155,8 +155,8 @@
 	 */
 	phy-supply = <&reg_aldo2>;
 	phy-io-supply = <&reg_gmac_2v5>;
-	allwinner,rx-delay-ps = <200>;
-	allwinner,tx-delay-ps = <200>;
+	allwinner,rx-delay-ps = <1500>;
+	allwinner,tx-delay-ps = <700>;
 	status = "okay";
 };
 

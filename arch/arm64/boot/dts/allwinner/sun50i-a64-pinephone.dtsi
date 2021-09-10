@@ -192,6 +192,17 @@
 		sound-name-prefix = "Modem";
 	};
 
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		ring_indicator: ring-indicator {
+			label = "Ring Indicator";
+			linux,can-disable;
+			linux,code = <KEY_WAKEUP>;
+			wakeup-source;
+		};
+	};
+
 	i2c_csi: i2c-csi {
 		compatible = "i2c-gpio";
 		sda-gpios = <&pio 4 13 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>; /* PE13 */
@@ -264,6 +275,7 @@
 	reg_vbat_bb: vbat-bb {
 		compatible = "regulator-fixed";
 		regulator-name = "vbat-bb";
+		regulator-always-on;
 		regulator-min-microvolt = <3500000>;
 		regulator-max-microvolt = <3500000>;
 		gpio = <&r_pio 0 7 GPIO_ACTIVE_HIGH>; /* PL7 */
@@ -872,7 +884,6 @@
 		device-wake-gpios = <&pio 7 6 GPIO_ACTIVE_LOW>; /* PH6 */
 		enable-gpios = <&r_pio 0 4 GPIO_ACTIVE_HIGH>; /* PL4 */
 		host-wake-gpios = <&r_pio 0 5 GPIO_ACTIVE_HIGH>; /* PL5 */
-		firmware-postfix = "pinephone";
 	};
 };
 

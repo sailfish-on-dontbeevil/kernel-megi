@@ -1118,6 +1118,7 @@ dtb-$(CONFIG_MACH_SUN4I) += \
 	sun4i-a10-inet9f-rev03.dtb \
 	sun4i-a10-itead-iteaduino-plus.dtb \
 	sun4i-a10-jesurun-q5.dtb \
+	sun4i-a10-lark-freeme-70-2s.dtb \
 	sun4i-a10-marsboard.dtb \
 	sun4i-a10-mini-xplus.dtb \
 	sun4i-a10-mk802.dtb \
@@ -1157,6 +1158,7 @@ dtb-$(CONFIG_MACH_SUN6I) += \
 	sun6i-a31-mele-a1000g-quad.dtb \
 	sun6i-a31s-colorfly-e708-q1.dtb \
 	sun6i-a31s-cs908.dtb \
+	sun6i-a31s-goclever-gcta741l.dtb \
 	sun6i-a31s-inet-q972.dtb \
 	sun6i-a31s-primo81.dtb \
 	sun6i-a31s-sina31s.dtb \
