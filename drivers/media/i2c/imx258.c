@@ -1293,7 +1293,6 @@ static void imx258_free_controls(struct imx258 *imx258)
 static int imx258_probe(struct i2c_client *client)
 {
 	struct imx258 *imx258;
-	unsigned long clk_rate;
 	int ret, i;
 	u32 val = 0;
 
@@ -1302,23 +1301,22 @@ static int imx258_probe(struct i2c_client *client)
 		return -ENOMEM;
 
 	imx258->clk = devm_clk_get_optional(&client->dev, NULL);
+	if (IS_ERR(imx258->clk))
+		return dev_err_probe(&client->dev, PTR_ERR(imx258->clk),
+				     "error getting clock\n");
 	if (!imx258->clk) {
 		dev_dbg(&client->dev,
 			"no clock provided, using clock-frequency property\n");
 
 		device_property_read_u32(&client->dev, "clock-frequency", &val);
-		if (val != IMX258_INPUT_CLOCK_FREQ)
-			return -EINVAL;
-	} else if (IS_ERR(imx258->clk)) {
-		return dev_err_probe(&client->dev, PTR_ERR(imx258->clk),
-				     "error getting clock\n");
+	} else {
+		val = clk_get_rate(imx258->clk);
 	}
 
-	clk_rate = clk_get_rate(imx258->clk);
-	if (clk_rate < IMX258_INPUT_CLOCK_FREQ_MIN
-		|| clk_rate > IMX258_INPUT_CLOCK_FREQ_MAX) {
-		dev_err(&client->dev, "input clock frequency %lu not supported\n",
-			clk_rate);
+	if (val < IMX258_INPUT_CLOCK_FREQ_MIN
+		|| val > IMX258_INPUT_CLOCK_FREQ_MAX) {
+		dev_err(&client->dev, "input clock frequency %d not supported\n",
+			val);
 		return -EINVAL;
 	}
 
