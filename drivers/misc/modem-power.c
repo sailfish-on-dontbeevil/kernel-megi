@@ -132,6 +132,7 @@ struct mpwr_dev {
 
 	/* power */
 	struct regulator *regulator;
+	struct regulator *regulator_vbus;
 
 	/* outputs */
 	struct gpio_desc *enable_gpio;
@@ -413,6 +414,14 @@ static int mpwr_eg25_power_up(struct mpwr_dev* mpwr)
 		return ret;
 	}
 
+	ret = regulator_enable(mpwr->regulator_vbus);
+	if (ret < 0) {
+		dev_err(mpwr->dev,
+			"can't enable vbus power supply err=%d", ret);
+		regulator_disable(mpwr->regulator);
+		return ret;
+	}
+
 	/* Drive default gpio signals during powerup */
 	/* host_ready_gpio should be 1 during normal powerup */
 	gpiod_direction_output(mpwr->host_ready_gpio, mode != MPWR_MODE_ALT2);
@@ -653,6 +662,7 @@ err_shutdown_noclose:
 	gpiod_direction_input(mpwr->host_ready_gpio);
 	gpiod_direction_input(mpwr->dtr_gpio);
 
+	regulator_disable(mpwr->regulator_vbus);
 	regulator_disable(mpwr->regulator);
 	return -ENODEV;
 }
@@ -738,6 +748,7 @@ powerdown:
 	gpiod_direction_input(mpwr->host_ready_gpio);
 	gpiod_direction_input(mpwr->dtr_gpio);
 
+	regulator_disable(mpwr->regulator_vbus);
 	regulator_disable(mpwr->regulator);
 
 	return 0;
@@ -1433,6 +1444,11 @@ static int mpwr_probe_generic(struct device *dev, struct mpwr_dev **mpwr_out)
 		dev_err(dev, "can't get power supply err=%d", -ENODEV);
 		return -ENODEV;
 	}
+
+	mpwr->regulator_vbus = devm_regulator_get(dev, "vbus");
+	if (IS_ERR(mpwr->regulator_vbus))
+		return dev_err_probe(dev, PTR_ERR(mpwr->regulator_vbus),
+				     "can't get vbus power supply\n");
 
 	for (i = 0; mpwr->variant->gpios[i].name; i++) {
 		const struct mpwr_gpio *io = &mpwr->variant->gpios[i];
