@@ -378,7 +378,7 @@ static int st7703_enable(struct drm_panel *panel)
 		return ret;
 	}
 
-	/* Dsiplay on can be issued 120 msec after sleep out */
+	/* Display on can be issued 120 msec after sleep out */
 	msleep(120);
 
 	ret = mipi_dsi_dcs_set_display_on(dsi);
@@ -403,6 +403,9 @@ static int st7703_disable(struct drm_panel *panel)
 	ret = mipi_dsi_dcs_enter_sleep_mode(dsi);
 	if (ret < 0)
 		dev_err(ctx->dev, "Failed to enter sleep mode: %d\n", ret);
+
+	/* Display needs to be drained of charge, in order to work correctly on next power on. */
+	msleep(120);
 
 	return 0;
 }
