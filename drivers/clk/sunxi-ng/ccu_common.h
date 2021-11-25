@@ -63,6 +63,11 @@ struct ccu_pll_nb {
 
 int ccu_pll_notifier_register(struct ccu_pll_nb *pll_nb);
 
+int devm_sunxi_ccu_probe(struct device *dev, void __iomem *reg,
+			 const struct sunxi_ccu_desc *desc);
+void of_sunxi_ccu_probe(struct device_node *node, void __iomem *reg,
+			const struct sunxi_ccu_desc *desc);
+
 struct ccu_rate_reset_nb {
 	struct notifier_block	clk_nb;
 	struct ccu_common	*common;
@@ -74,8 +79,5 @@ struct ccu_rate_reset_nb {
 #define to_ccu_rate_reset_nb(_nb) container_of(_nb, struct ccu_rate_reset_nb, clk_nb)
 
 int ccu_rate_reset_notifier_register(struct ccu_rate_reset_nb *rate_reset_nb);
-
-int sunxi_ccu_probe(struct device_node *node, void __iomem *reg,
-		    const struct sunxi_ccu_desc *desc);
 
 #endif /* _COMMON_H_ */
