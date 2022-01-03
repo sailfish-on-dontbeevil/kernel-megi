@@ -799,31 +799,6 @@
 		};
 	};
 
-	/* Front-facing camera */
-	ucam: camera@3c {
-		compatible = "ovti,ov5640";
-		reg = <0x3c>;
-		pinctrl-names = "default";
-		pinctrl-0 = <&ucam_pdn>;
-
-		clocks = <&cru SCLK_CIF_OUT>;
-		clock-names = "xclk";
-
-		DOVDD-supply = <&vcc1v8_dvp>;
-		/*XXX: also depends on vcca1v8_codec for I2C bus power */
-
-		powerdown-gpios = <&gpio2 RK_PD4 GPIO_ACTIVE_HIGH>;
-		rotation = <180>;
-
-		port {
-			ucam_out: endpoint {
-				remote-endpoint = <&mipi_in_ucam>;
-				data-lanes = <1 2>;
-				clock-lanes = <0>;
-			};
-		};
-	};
-
 	// XXX: modem codec supplies:
 	// - vcc1v8_codec
 	// - vcca3v0_codec
@@ -1012,29 +987,7 @@
 	status = "okay";
 };
 
-&isp1 {
-	status = "okay";
-
-	ports {
-		port@0 {
-			mipi_in_ucam: endpoint@0 {
-				reg = <0>;
-				remote-endpoint = <&ucam_out>;
-				data-lanes = <1 2>;
-			};
-		};
-	};
-};
-
 &isp0_mmu {
-	status = "okay";
-};
-
-&isp1_mmu {
-	status = "okay";
-};
-
-&mipi_dsi1 {
 	status = "okay";
 };
 
@@ -1109,10 +1062,6 @@
 
 		wcam_pdn: wcam-pdn {
 			rockchip,pins = <2 RK_PD4 RK_FUNC_GPIO &pcfg_pull_none>;
-		};
-
-		ucam_pdn: ucam-pdn {
-			rockchip,pins = <2 RK_PB4 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 	};
 
