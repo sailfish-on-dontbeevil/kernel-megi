@@ -1070,7 +1070,7 @@
 		power-supply = <&vcc_4g>;
 		vbus-supply = <&vcc_4g_5v>;
 
-		enable-gpios = <&gpio0 RK_PB0 GPIO_ACTIVE_LOW>; // W_DISABLE#
+		enable-gpios = <&gpio0 RK_PB0 GPIO_ACTIVE_HIGH>; // W_DISABLE#
 		reset-gpios = <&gpio3 RK_PB0 GPIO_ACTIVE_HIGH>;
 		status-gpios = <&gpio3 RK_PA6 GPIO_ACTIVE_HIGH>;
 		pwrkey-gpios = <&gpio0 RK_PB5 GPIO_ACTIVE_HIGH>;
@@ -1082,7 +1082,7 @@
 		cts-gpios = <&gpio3 RK_PC0 GPIO_ACTIVE_HIGH>;
 		rts-gpios = <&gpio3 RK_PC1 GPIO_ACTIVE_HIGH>;
 
-		quectel,qdai = "1,1,0,1,0,0,1,1";
+		quectel,qdai = "3,0,0,4,0,0,1,1";
 	};
 };
 
