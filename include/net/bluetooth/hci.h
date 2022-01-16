@@ -247,6 +247,15 @@ enum {
 	 */
 	HCI_QUIRK_NO_SUSPEND_NOTIFIER,
 
+	/*
+	 * When this quirk is set, LE tx power is not queried on startup
+	 * and the min/max tx power values default to HCI_TX_POWER_INVALID.
+	 *
+	 * This quirk can be set before hci_register_dev is called or
+	 * during the hdev->setup vendor callback.
+	 */
+	HCI_QUIRK_BROKEN_READ_TRANSMIT_POWER,
+
 	/* When this quirk is set, max_page for local extended features
 	 * is set to 1, even if controller reports higher number. Some
 	 * controllers (e.g. RTL8723CS) report more pages, but they
