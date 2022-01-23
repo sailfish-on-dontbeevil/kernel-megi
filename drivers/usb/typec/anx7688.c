@@ -227,6 +227,7 @@ struct anx7688 {
 
 	/* for HDMI HPD */
 	struct extcon_dev *extcon;
+	int last_extcon_state;
 };
 
 static const unsigned int anx7688_extcon_cable[] = {
@@ -569,6 +570,17 @@ err_poweroff:
 #endif
 }
 
+static void anx7688_set_hdmi_hpd(struct anx7688 *anx7688, int state)
+{
+	if (!anx7688->extcon)
+		return;
+
+	if (anx7688->last_extcon_state != state) {
+		extcon_set_state_sync(anx7688->extcon, EXTCON_DISP_HDMI, state);
+		anx7688->last_extcon_state = state;
+	}
+}
+
 static void anx7688_disconnect(struct anx7688 *anx7688)
 {
 	union power_supply_propval val = {0,};
@@ -579,8 +591,7 @@ static void anx7688_disconnect(struct anx7688 *anx7688)
 
 	anx7688->current_update_deadline = 0;
 
-	if (anx7688->extcon)
-		extcon_set_state_sync(anx7688->extcon, EXTCON_DISP_HDMI, 0);
+	anx7688_set_hdmi_hpd(anx7688, 0);
 
 	if (anx7688->vconn_on) {
 		regulator_disable(anx7688->supplies[ANX7688_VCONN_INDEX].consumer);
@@ -1056,9 +1067,7 @@ static int anx7688_update_status(struct anx7688 *anx7688)
 	if (dp_substate < 0)
 		return dp_substate;
 
-	if (anx7688->extcon)
-		extcon_set_state_sync(anx7688->extcon,
-				      EXTCON_DISP_HDMI, dp_state >= 3);
+	anx7688_set_hdmi_hpd(anx7688, dp_state >= 3);
 
 	dp_state = (dp_state << 8) | dp_substate;
 
@@ -1938,6 +1947,7 @@ static int anx7688_i2c_probe(struct i2c_client *client,
         anx7688->dev = &client->dev;
         mutex_init(&anx7688->lock);
         INIT_DELAYED_WORK(&anx7688->work, anx7688_work);
+	anx7688->last_extcon_state = -1;
 
 	ret = of_property_read_variable_u32_array(dev->of_node, "source-caps",
 						  anx7688->src_caps,
