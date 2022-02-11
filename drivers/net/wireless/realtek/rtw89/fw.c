@@ -123,8 +123,8 @@ int rtw89_mfw_recognize(struct rtw89_dev *rtwdev, enum rtw89_fw_type type,
 			struct rtw89_fw_suit *fw_suit)
 {
 	struct rtw89_fw_info *fw_info = &rtwdev->fw;
-	const u8 *mfw = fw_info->firmware->data;
-	u32 mfw_len = fw_info->firmware->size;
+	const u8 *mfw = fw_info->firmware;
+	u32 mfw_len = fw_info->firmware_size;
 	const struct rtw89_mfw_hdr *mfw_hdr = (const struct rtw89_mfw_hdr *)mfw;
 	const struct rtw89_mfw_info *mfw_info;
 	int i;
@@ -489,7 +489,10 @@ static void rtw89_load_firmware_cb(const struct firmware *firmware, void *contex
 		return;
 	}
 
-	fw->firmware = firmware;
+	fw->firmware = vmalloc(firmware->size);
+	if (fw->firmware)
+		memcpy((void *)fw->firmware, firmware->data, firmware->size);
+	release_firmware(firmware);
 	complete_all(&fw->completion);
 }
 
@@ -518,13 +521,14 @@ void rtw89_unload_firmware(struct rtw89_dev *rtwdev)
 
 	rtw89_wait_firmware_completion(rtwdev);
 
-	if (fw->firmware)
-		release_firmware(fw->firmware);
+	if (fw->firmware) {
+		vfree(fw->firmware);
+		fw->firmware = NULL;
+	}
 }
 
 #define H2C_CAM_LEN 60
-int rtw89_fw_h2c_cam(struct rtw89_dev *rtwdev, struct rtw89_vif *rtwvif,
-		     struct rtw89_sta *rtwsta, const u8 *scan_mac_addr)
+int rtw89_fw_h2c_cam(struct rtw89_dev *rtwdev, struct rtw89_vif *rtwvif)
 {
 	struct sk_buff *skb;
 
@@ -534,7 +538,7 @@ int rtw89_fw_h2c_cam(struct rtw89_dev *rtwdev, struct rtw89_vif *rtwvif,
 		return -ENOMEM;
 	}
 	skb_put(skb, H2C_CAM_LEN);
-	rtw89_cam_fill_addr_cam_info(rtwdev, rtwvif, rtwsta, scan_mac_addr, skb->data);
+	rtw89_cam_fill_addr_cam_info(rtwdev, rtwvif, skb->data);
 	rtw89_cam_fill_bssid_cam_info(rtwdev, rtwvif, skb->data);
 
 	rtw89_h2c_pkt_set_hdr(rtwdev, skb, FWCMD_TYPE_H2C,
@@ -781,7 +785,7 @@ static void __get_sta_he_pkt_padding(struct rtw89_dev *rtwdev,
 	if (!ppe_th) {
 		u8 pad;
 
-		pad = FIELD_GET(IEEE80211_HE_PHY_CAP9_NOMINAL_PKT_PADDING_MASK,
+		pad = FIELD_GET(IEEE80211_HE_PHY_CAP9_NOMIMAL_PKT_PADDING_MASK,
 				sta->he_cap.he_cap_elem.phy_cap_info[9]);
 
 		for (i = 0; i < RTW89_PPE_BW_NUM; i++)
