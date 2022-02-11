@@ -4,7 +4,6 @@
 #include <linux/ip.h>
 #include <linux/udp.h>
 
-#include "cam.h"
 #include "coex.h"
 #include "core.h"
 #include "efuse.h"
@@ -301,11 +300,9 @@ rtw89_core_tx_update_sec_key(struct rtw89_dev *rtwdev,
 			     struct rtw89_core_tx_request *tx_req)
 {
 	struct ieee80211_vif *vif = tx_req->vif;
-	struct ieee80211_sta *sta = tx_req->sta;
 	struct ieee80211_tx_info *info;
 	struct ieee80211_key_conf *key;
 	struct rtw89_vif *rtwvif;
-	struct rtw89_sta *rtwsta = sta_to_rtwsta_safe(sta);
 	struct rtw89_addr_cam_entry *addr_cam;
 	struct rtw89_sec_cam_entry *sec_cam;
 	struct rtw89_tx_desc_info *desc_info = &tx_req->desc_info;
@@ -318,7 +315,7 @@ rtw89_core_tx_update_sec_key(struct rtw89_dev *rtwdev,
 	}
 
 	rtwvif = (struct rtw89_vif *)vif->drv_priv;
-	addr_cam = rtw89_get_addr_cam_of(rtwvif, rtwsta);
+	addr_cam = &rtwvif->addr_cam;
 
 	info = IEEE80211_SKB_CB(skb);
 	key = info->control.hw_key;
