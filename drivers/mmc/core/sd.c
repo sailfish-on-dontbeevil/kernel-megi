@@ -1665,9 +1665,8 @@ static int sd_poweroff_notify(struct mmc_card *card)
 	}
 
 	/* Find out when the command is completed. */
-	err = mmc_poll_for_busy(card, SD_POWEROFF_NOTIFY_TIMEOUT_MS, false,
+	err = mmc_poll_for_busy(card, SD_WRITE_EXTR_SINGLE_TIMEOUT_MS, false,
 				MMC_BUSY_EXTR_SINGLE);
-
 	if (err)
 		goto out;
 
