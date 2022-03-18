@@ -2490,6 +2490,7 @@ struct rtw89_hal {
 	u8 tx_nss;
 	u8 rx_nss;
 	bool support_cckpd;
+	bool support_igi;
 };
 
 #define RTW89_MAX_MAC_ID_NUM 128
