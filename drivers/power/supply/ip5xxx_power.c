@@ -612,12 +612,13 @@ static void ip5xxx_power_wd_work(struct work_struct *work)
 	}
 
 	/*
-	 * Disable shutdown under light load (it turns off the keyboard).
+	 * Enable shutdown under light load.
 	 * Disable power on when under load (wait until I2C is pulled up).
 	 */
 	ret = regmap_update_bits(ip5xxx->regmap, IP5XXX_SYS_CTL1,
 				 IP5XXX_SYS_CTL1_LIGHT_SHDN_EN |
-				 IP5XXX_SYS_CTL1_LOAD_PWRUP_EN, 0);
+				 IP5XXX_SYS_CTL1_LOAD_PWRUP_EN,
+				 IP5XXX_SYS_CTL1_LIGHT_SHDN_EN);
 	if (ret)
 		goto err;
 
@@ -634,20 +635,19 @@ static void ip5xxx_power_wd_work(struct work_struct *work)
 	 * Disable power on when VIN is removed (wait until the phone is on).
 	 */
 	ret = regmap_update_bits(ip5xxx->regmap, IP5XXX_SYS_CTL4,
-				 IP5XXX_SYS_CTL4_VIN_PULLOUT_BOOST_EN, 0);
+				 IP5XXX_SYS_CTL4_VIN_PULLOUT_BOOST_EN |
+				 IP5XXX_SYS_CTL4_SHDN_TIME_SEL, 0);
 	if (ret)
 		goto err;
 
 	/*
 	 * Enable the NTC.
-	 * Configure the button for two press => LED, long press => shutdown.
+	 * Configure the button for two press => shutdown, long press => WLED.
 	 */
 	ret = regmap_update_bits(ip5xxx->regmap, IP5XXX_SYS_CTL5,
 				 IP5XXX_SYS_CTL5_NTC_EN |
 				 IP5XXX_SYS_CTL5_WLED_MODE_SEL |
-				 IP5XXX_SYS_CTL5_BTN_SHDN_SEL,
-				 IP5XXX_SYS_CTL5_WLED_MODE_SEL |
-				 IP5XXX_SYS_CTL5_BTN_SHDN_SEL);
+				 IP5XXX_SYS_CTL5_BTN_SHDN_SEL, 0);
 	if (ret)
 		goto err;
 
