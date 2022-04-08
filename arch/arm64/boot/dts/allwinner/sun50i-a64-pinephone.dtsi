@@ -178,7 +178,7 @@
 			<0xdf 98>;
         };
 
-        kb151_bat: kb151-battery {
+        ppkb_battery: keyboard-battery {
                 compatible = "simple-battery";
                 voltage-min-design-microvolt = <3000000>;
                 voltage-max-design-microvolt = <4200000>;
@@ -695,13 +695,23 @@
 	status = "okay";
 
 	ppkb: keyboard@15 {
-		compatible = "pine64,kb151";
+		compatible = "pine64,pinephone-keyboard";
 		reg = <0x15>;
 		interrupt-parent = <&r_pio>;
 		interrupts = <0 12 IRQ_TYPE_EDGE_FALLING>; /* PL12 */
 		vbat-supply = <&reg_usb_5v>;
 		wakeup-source;
-		monitored-battery = <&kb151_bat>;
+
+		i2c-bus {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			charger@75 {
+				compatible = "injoinic,ip5209";
+				reg = <0x75>;
+				monitored-battery = <&ppkb_battery>;
+			};
+		};
 	};
 };
 
