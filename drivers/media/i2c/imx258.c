@@ -485,6 +485,7 @@ static const char * const imx258_supply_name[] = {
 	"vana",  /* Analog (2.8V) supply */
 	"vdig",  /* Digital Core (1.2V) supply */
 	"vif",  /* IF (1.8V) supply */
+	"i2c",  /* I2C BUS I/O (1.8V) supply */
 };
 
 #define IMX258_NUM_SUPPLIES ARRAY_SIZE(imx258_supply_name)
