@@ -167,30 +167,13 @@ static void __dwc3_set_mode(struct work_struct *work)
 		break;
 	}
 
-	/* For DRD host or device mode only */
-	if (desired_dr_role != DWC3_GCTL_PRTCAP_OTG) {
-		/*
-		 * RK3399 TypeC PHY needs to be powered off and powered on again
-		 * for it to apply the correct Type-C plug orientation setting
-		 * and reconfigure itself.
-		 *
-		 * For that purpose we observe complete USB disconnect via
-		 * extcon in drd.c and pass it to __dwc3_set_mode as
-		 * desired_dr_role == 0.
-		 *
-		 * We thus handle transitions between three states of
-		 * desired_dr_role here:
-		 *
-		 * - DWC3_GCTL_PRTCAP_HOST
-		 * - DWC3_GCTL_PRTCAP_DEVICE
-		 * - DWC3_GCTL_PRTCAP_DEVICE_DISCONNECTED - almost equivalent to
-		 *   DWC3_GCTL_PRTCAP_DEVICE, present only to distinguish
-		 *   disconnected state, and so that set_mode is called when
-		 *   user plugs in the device to the host.
-		 */
-		if (dwc->usb3_phy_powered && dwc->usb3_phy_reset_quirk)
-			phy_power_off(dwc->usb3_generic_phy);
-
+	/*
+	 * When current_dr_role is not set, there's no role switching.
+	 * Only perform GCTL.CoreSoftReset when there's DRD role switching.
+	 */
+	if (dwc->current_dr_role && ((DWC3_IP_IS(DWC3) ||
+			DWC3_VER_IS_PRIOR(DWC31, 190A)) &&
+			desired_dr_role != DWC3_GCTL_PRTCAP_OTG)) {
 		reg = dwc3_readl(dwc->regs, DWC3_GCTL);
 		reg |= DWC3_GCTL_CORESOFTRESET;
 		dwc3_writel(dwc->regs, DWC3_GCTL, reg);
