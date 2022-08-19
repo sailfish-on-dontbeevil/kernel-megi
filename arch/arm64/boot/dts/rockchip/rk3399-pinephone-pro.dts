@@ -946,6 +946,7 @@
 		clock-names = "mclk";
 		realtek,dmic1-data-pin = <1>;
 		realtek,in3-differential;
+		realtek,lout-differential;
 		#sound-dai-cells = <0>;
 	};
 };
