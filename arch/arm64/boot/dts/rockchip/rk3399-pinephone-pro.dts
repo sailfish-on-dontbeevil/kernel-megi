@@ -944,6 +944,8 @@
 		reg = <0x1c>;
 		clocks = <&cru SCLK_I2S_8CH_OUT>;
 		clock-names = "mclk";
+		assigned-clocks = <&cru SCLK_I2S0_8CH>;
+		assigned-clock-rates = <11289599>;
 		realtek,dmic1-data-pin = <1>;
 		realtek,in3-differential;
 		realtek,lout-differential;
