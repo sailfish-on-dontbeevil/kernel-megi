@@ -378,9 +378,10 @@ static bool rockchip_drm_is_mipi1_and_used_by_isp(struct device *dev)
 		}
 
 		phy_np = of_parse_phandle(np, "phys", 0);
-
-		if (!phy_np)
+		if (!phy_np) {
+			of_node_put(np);
 			continue;
+		}
 
 		of_node_put(phy_np);
 		of_node_put(np);
