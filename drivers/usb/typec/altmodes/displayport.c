@@ -99,6 +99,9 @@ static int dp_altmode_configure(struct dp_altmode *dp, u8 con)
 	case DP_STATUS_CON_UFP_D:
 	case DP_STATUS_CON_BOTH: /* NOTE: First acting as DP source */
 		conf |= DP_CONF_UFP_U_AS_UFP_D;
+		pin_assign = DP_CAP_PIN_ASSIGN_UFP_D(dp->alt->vdo) &
+				 DP_CAP_PIN_ASSIGN_DFP_D(dp->port->vdo);
+
 		/*
 		 * The Display Port Alt mode standard is not publicly available,
 		 * so this is based on guesswork and real VDOs received from
@@ -107,11 +110,12 @@ static int dp_altmode_configure(struct dp_altmode *dp, u8 con)
 		 *
 		 * Plug (captive cable) based dock: port=c46 alt=c05
 		 * Recpetacle based dock: port=c46 alt=c0045
-		 */
+		 *
 		pin_assign = DP_CAP_DFP_D_PIN_ASSIGN(dp->port->vdo);
 		pin_assign &= dp->alt->vdo & DP_CAP_RECEPTACLE ?
 			DP_CAP_UFP_D_PIN_ASSIGN(dp->alt->vdo) :
 			DP_CAP_DFP_D_PIN_ASSIGN(dp->alt->vdo);
+		 */
 		break;
 	default:
 		break;
