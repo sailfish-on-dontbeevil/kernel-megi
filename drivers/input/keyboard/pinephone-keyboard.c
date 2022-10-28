@@ -14,6 +14,10 @@ static bool disable_input;
 module_param(disable_input, bool, S_IRUGO);
 MODULE_PARM_DESC(disable_input, "Disable the keyboard part of the driver");
 
+static bool disable_fn;
+module_param(disable_fn, bool, S_IRUGO);
+MODULE_PARM_DESC(disable_fn, "Disable the FN layer special handling");
+
 #define DRV_NAME			"pinephone-keyboard"
 
 #define PPKB_CRC8_POLYNOMIAL		0x07
@@ -276,7 +280,8 @@ static void ppkb_update(struct i2c_client *client)
 
 			dev_dbg(dev, "row %u col %u %sed\n",
 				row, col, value ? "press" : "releas");
-			if (keymap[code] == KEY_FN) {
+
+			if (!disable_fn && keymap[code] == KEY_FN) {
 				dev_dbg(dev, "FN is now %sed\n",
 					value ? "press" : "releas");
 				keymap = value ? ppkb->fn_keymap
