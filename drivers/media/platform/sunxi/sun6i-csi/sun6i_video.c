@@ -95,7 +95,8 @@ static void sun6i_video_buffer_configure(struct sun6i_csi_device *csi_dev,
 	sun6i_csi_update_buf_addr(csi_dev, csi_buffer->dma_addr);
 }
 
-static void sun6i_video_configure(struct sun6i_csi_device *csi_dev)
+static void sun6i_video_configure(struct sun6i_csi_device *csi_dev,
+				  struct v4l2_fwnode_endpoint *vep)
 {
 	struct sun6i_video *video = &csi_dev->video;
 	struct sun6i_csi_config config = { 0 };
@@ -106,7 +107,7 @@ static void sun6i_video_configure(struct sun6i_csi_device *csi_dev)
 	config.width = video->format.fmt.pix.width;
 	config.height = video->format.fmt.pix.height;
 
-	sun6i_csi_update_config(csi_dev, &config);
+	sun6i_csi_update_config(csi_dev, &config, vep);
 }
 
 /* Queue */
@@ -175,6 +176,7 @@ static int sun6i_video_start_streaming(struct vb2_queue *queue,
 	struct sun6i_csi_device *csi_dev = vb2_get_drv_priv(queue);
 	struct sun6i_video *video = &csi_dev->video;
 	struct video_device *video_dev = &video->video_dev;
+	struct sun6i_csi_async_subdev *casd;
 	struct sun6i_csi_buffer *buf;
 	struct sun6i_csi_buffer *next_buf;
 	struct v4l2_subdev *subdev;
@@ -198,7 +200,9 @@ static int sun6i_video_start_streaming(struct vb2_queue *queue,
 		goto error_media_pipeline;
 	}
 
-	sun6i_video_configure(csi_dev);
+	casd = container_of(subdev->asd, struct sun6i_csi_async_subdev, asd);
+
+	sun6i_video_configure(csi_dev, &casd->vep);
 
 	spin_lock_irqsave(&video->dma_queue_lock, flags);
 
@@ -601,11 +605,16 @@ static const struct v4l2_file_operations sun6i_video_fops = {
 /* Media Entity */
 
 static int sun6i_video_link_validate_get_format(struct media_pad *pad,
-						struct v4l2_subdev_format *fmt)
+						struct v4l2_subdev_format *fmt,
+						struct v4l2_fwnode_endpoint **vep)
 {
 	if (is_media_entity_v4l2_subdev(pad->entity)) {
 		struct v4l2_subdev *sd =
 				media_entity_to_v4l2_subdev(pad->entity);
+		struct sun6i_csi_async_subdev *casd =
+			container_of(sd->asd, struct sun6i_csi_async_subdev, asd);
+
+		*vep = &casd->vep;
 
 		fmt->which = V4L2_SUBDEV_FORMAT_ACTIVE;
 		fmt->pad = pad->index;
@@ -622,6 +631,7 @@ static int sun6i_video_link_validate(struct media_link *link)
 	struct sun6i_csi_device *csi_dev = video_get_drvdata(vdev);
 	struct sun6i_video *video = &csi_dev->video;
 	struct v4l2_subdev_format source_fmt;
+	struct v4l2_fwnode_endpoint *vep;
 	int ret;
 
 	video->mbus_code = 0;
@@ -632,13 +642,13 @@ static int sun6i_video_link_validate(struct media_link *link)
 		return -ENOLINK;
 	}
 
-	ret = sun6i_video_link_validate_get_format(link->source, &source_fmt);
+	ret = sun6i_video_link_validate_get_format(link->source, &source_fmt, &vep);
 	if (ret < 0)
 		return ret;
 
 	if (!sun6i_csi_is_format_supported(csi_dev,
 					   video->format.fmt.pix.pixelformat,
-					   source_fmt.format.code)) {
+					   source_fmt.format.code, vep)) {
 		dev_err(csi_dev->dev,
 			"Unsupported pixformat: 0x%x with mbus code: 0x%x!\n",
 			video->format.fmt.pix.pixelformat,
@@ -660,8 +670,20 @@ static int sun6i_video_link_validate(struct media_link *link)
 	return 0;
 }
 
+static int sun6i_video_link_setup(struct media_entity *entity,
+				  const struct media_pad *local,
+				  const struct media_pad *remote, u32 flags)
+{
+	/* Allow to enable one link only. */
+	if ((flags & MEDIA_LNK_FL_ENABLED) && media_pad_remote_pad_first(local))
+		return -EBUSY;
+
+	return 0;
+}
+
 static const struct media_entity_operations sun6i_video_media_ops = {
-	.link_validate = sun6i_video_link_validate
+	.link_validate = sun6i_video_link_validate,
+	.link_setup = sun6i_video_link_setup,
 };
 
 /* Video */
