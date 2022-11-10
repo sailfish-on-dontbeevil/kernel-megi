@@ -2933,9 +2933,6 @@ static int ov8858_probe(struct i2c_client *client,
 	else
 		facing[0] = 'f';
 
-	snprintf(sd->name, sizeof(sd->name), "m%02d_%s_%s %s",
-		 ov8858->module_index, facing,
-		 OV8858_NAME, dev_name(sd->dev));
 	ret = v4l2_async_register_subdev_sensor(sd);
 	if (ret) {
 		dev_err(dev, "v4l2 async register subdev failed\n");
