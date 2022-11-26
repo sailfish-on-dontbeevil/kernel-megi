@@ -350,6 +350,8 @@ static int ppkb_probe(struct i2c_client *client)
 		return error;
 	}
 
+	mdelay(100);
+
 	ret = i2c_smbus_read_i2c_block_data(client, 0, sizeof(info), info);
 	if (ret != sizeof(info)) {
 		error = ret < 0 ? ret : -EIO;
