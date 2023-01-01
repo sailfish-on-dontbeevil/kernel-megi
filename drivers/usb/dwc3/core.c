@@ -121,17 +121,13 @@ static void __dwc3_set_mode(struct work_struct *work)
 	struct dwc3 *dwc = work_to_dwc(work);
 	unsigned long flags;
 	int ret;
-	u32 reg, desired_dr_role;
+	u32 reg;
+	u32 desired_dr_role;
 
-	/*
-	 * Copy desired_dr_role because it can be changed again by
-	 * dwc3_set_mode while this function is running.
-	 */
+	mutex_lock(&dwc->mutex);
 	spin_lock_irqsave(&dwc->lock, flags);
 	desired_dr_role = dwc->desired_dr_role;
 	spin_unlock_irqrestore(&dwc->lock, flags);
-
-	mutex_lock(&dwc->mutex);
 
 	pm_runtime_get_sync(dwc->dev);
 
@@ -1135,8 +1131,13 @@ static int dwc3_core_init(struct dwc3 *dwc)
 
 	if (!dwc->ulpi_ready) {
 		ret = dwc3_core_ulpi_init(dwc);
-		if (ret)
+		if (ret) {
+			if (ret == -ETIMEDOUT) {
+				dwc3_core_soft_reset(dwc);
+				ret = -EPROBE_DEFER;
+			}
 			goto err0;
+		}
 		dwc->ulpi_ready = true;
 	}
 
