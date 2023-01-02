@@ -4196,24 +4196,15 @@ static int ov5640_probe(struct i2c_client *client)
 	if (ret)
 		goto entity_cleanup;
 
-	ret = ov5640_sensor_resume(dev);
-	if (ret) {
-		dev_err(dev, "failed to power on\n");
-		goto entity_cleanup;
-	}
-
-	pm_runtime_get_noresume(dev);
-	pm_runtime_enable(dev);
-
 	ret = v4l2_async_register_subdev_sensor(&sensor->sd);
 	if (ret) {
 		dev_err_probe(dev, ret, "Failed to register sensor\n");
 		goto err_pm_runtime;
 	}
 
+	pm_runtime_enable(dev);
 	pm_runtime_set_autosuspend_delay(dev, 1000);
 	pm_runtime_use_autosuspend(dev);
-	pm_runtime_put_autosuspend(dev);
 
 	return 0;
 
