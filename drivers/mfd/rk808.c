@@ -224,6 +224,7 @@ static const struct mfd_cell rk817s[] = {
 };
 
 static const struct mfd_cell rk818s[] = {
+	{ .name = "rk808-clkout", .id = PLATFORM_DEVID_NONE, },
 	{ .name = "rk808-regulator", .id = PLATFORM_DEVID_NONE, },
 	{ .name = "rk808-clkout", },
 	{ .name = "rk818-battery", .of_compatible = "rockchip,rk818-battery", },
