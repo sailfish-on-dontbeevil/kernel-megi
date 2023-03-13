@@ -373,14 +373,12 @@ static int axp20x_battery_get_prop(struct power_supply *psy,
 		break;
 
 	case POWER_SUPPLY_PROP_ENERGY_FULL_DESIGN:
-		if (!axp20x_batt->info)
-			return -EINVAL;
-		val->intval = axp20x_batt->info->energy_full_design_uwh;
+		val->intval = 0;
+		if (axp20x_batt->info)
+			val->intval = axp20x_batt->info->energy_full_design_uwh;
 		return 0;
 
 	case POWER_SUPPLY_PROP_ENERGY_EMPTY_DESIGN:
-		if (!axp20x_batt->info)
-			return -EINVAL;
 		val->intval = 0;
 		return 0;
 
