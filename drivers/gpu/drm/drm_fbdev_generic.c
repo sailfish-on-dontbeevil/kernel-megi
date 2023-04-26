@@ -170,6 +170,7 @@ static int drm_fbdev_fb_probe(struct drm_fb_helper *fb_helper,
 	struct fb_info *info;
 	u32 format;
 	struct iosys_map map;
+	u32 fb_start;
 	int ret;
 
 	drm_dbg_kms(dev, "surface width(%d), height(%d) and bpp(%d)\n",
@@ -234,6 +235,19 @@ static int drm_fbdev_fb_probe(struct drm_fb_helper *fb_helper,
 			info->fix.smem_start =
 				page_to_phys(virt_to_page(info->screen_buffer));
 #endif
+
+		ret = of_property_read_u32_index(of_chosen, "p-boot,framebuffer-start", 0, &fb_start);
+		if (ret == 0 && !map.is_iomem) {
+			// copy framebuffer contents from p-boot if reasonable
+			if (info->screen_size != 720 * 1440 * 4) {
+				drm_err(dev, "surface width(%d), height(%d) and bpp(%d) does not match p-boot requirements\n",
+					    sizes->surface_width, sizes->surface_height,
+					    sizes->surface_bpp);
+				return 0;
+			}
+
+			memcpy(map.vaddr, __va(fb_start), info->screen_size);
+		}
 	}
 
 	return 0;
