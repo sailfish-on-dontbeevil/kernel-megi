@@ -1502,6 +1502,7 @@ static int goodix_resume(struct device *dev)
 
 		error = regulator_enable(ts->vddio);
 		if (error) {
+			regulator_disable(ts->avdd28);
 			dev_err(dev, "Regulator vddio enable failed.\n");
 			return error;
 		}
