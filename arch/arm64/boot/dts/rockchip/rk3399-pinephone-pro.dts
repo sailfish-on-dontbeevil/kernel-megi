@@ -890,7 +890,7 @@
 		reset-gpios = <&gpio1 RK_PA0 GPIO_ACTIVE_LOW>;
 		powerdown-gpios = <&gpio2 RK_PD4 GPIO_ACTIVE_HIGH>;
 
-		rotation = <270>;
+		rotation = <180>;
 
 		lens-focus = <&wcam_lens>;
 		flash-leds = <&sgm3140_flash>;
@@ -930,7 +930,7 @@
 		rockchip,camera-module-name = "CameraKing";
 		rockchip,camera-module-lens-name = "Largan-9569A2";
 
-		rotation = <90>;
+		rotation = <180>;
 
 		port {
 			ucam_out: endpoint {
