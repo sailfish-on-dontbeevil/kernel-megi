@@ -1120,6 +1120,7 @@ struct dwc3_scratchpad_array {
  *                        changes. Useful on RK3399 that needs this
  *                        to apply Type-C orientation changes in
  *                        Type-C phy driver.
+ * @suspended: set to track suspend event due to U3/L2.
  * @imod_interval: set the interrupt moderation interval in 250ns
  *			increments or 0 to disable.
  * @max_cfg_eps: current max number of IN eps used across all USB configs.
@@ -1338,6 +1339,7 @@ struct dwc3 {
 
 	unsigned		dis_split_quirk:1;
 	unsigned		async_callbacks:1;
+	unsigned		suspended:1;
 
 	unsigned		usb3_phy_reset_quirk:1;
 
