@@ -364,6 +364,8 @@ static int hx8394_enable(struct drm_panel *panel)
 	struct mipi_dsi_device *dsi = to_mipi_dsi_device(ctx->dev);
 	int ret;
 
+	dev_info(ctx->dev, "enable\n");
+
 	ret = ctx->desc->init_sequence(ctx);
 	if (ret) {
 		dev_err(ctx->dev, "Panel init sequence failed: %d\n", ret);
@@ -401,6 +403,8 @@ static int hx8394_disable(struct drm_panel *panel)
 	struct mipi_dsi_device *dsi = to_mipi_dsi_device(ctx->dev);
 	int ret;
 
+	dev_info(ctx->dev, "disable\n");
+
 	ret = mipi_dsi_dcs_enter_sleep_mode(dsi);
 	if (ret) {
 		dev_err(ctx->dev, "Failed to enter sleep mode: %d\n", ret);
@@ -416,6 +420,8 @@ static int hx8394_unprepare(struct drm_panel *panel)
 {
 	struct hx8394 *ctx = panel_to_hx8394(panel);
 
+	dev_info(ctx->dev, "unprepare\n");
+
 	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
 
 	regulator_disable(ctx->iovcc);
@@ -428,6 +434,8 @@ static int hx8394_prepare(struct drm_panel *panel)
 {
 	struct hx8394 *ctx = panel_to_hx8394(panel);
 	int ret;
+
+	dev_info(ctx->dev, "prepare\n");
 
 	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
 
