@@ -39,6 +39,16 @@
 #define AXP20X_ADC_EN1_VBUS_CURR	BIT(2)
 #define AXP20X_ADC_EN1_VBUS_VOLT	BIT(3)
 
+#define AXP813_CHRG_CTRL3_VBUS_CUR_LIMIT_MASK GENMASK(7, 4)
+#define AXP813_CHRG_CTRL3_VBUS_CUR_LIMIT_OFFSET 4
+
+#define AXP813_BC_RESULT_MASK		GENMASK(7, 5)
+#define AXP813_BC_RESULT_SDP		(1 << 5)
+#define AXP813_BC_RESULT_CDP		(2 << 5)
+#define AXP813_BC_RESULT_DCP		(3 << 5)
+
+#define AXP813_BC_EN		BIT(0)
+
 /*
  * Note do not raise the debounce time, we must report Vusb high within
  * 100ms otherwise we get Vbus errors in musb.
@@ -56,6 +66,7 @@ struct axp_data {
 	struct reg_field		usb_bc_en_bit;
 	struct reg_field		vbus_disable_bit;
 	bool				vbus_needs_polling: 1;
+	int				axp20x_id;
 };
 
 struct axp20x_usb_power {
@@ -123,6 +134,125 @@ out:
 		mod_delayed_work(system_power_efficient_wq, &power->vbus_detect, DEBOUNCE_TIME);
 }
 
+static const unsigned axp813_input_current_limits_table[] = {
+	100000,
+	500000,
+	900000,
+	1500000,
+	2000000,
+	2500000,
+	3000000,
+	3500000,
+	4000000,
+};
+
+static int
+axp813_usb_power_set_input_current_limit(struct axp20x_usb_power *power,
+					 int intval)
+{
+	unsigned int reg;
+
+	if (intval < 100000)
+		return -EINVAL;
+
+	for (reg = ARRAY_SIZE(axp813_input_current_limits_table) - 1; reg > 0; reg--)
+		if (intval >= axp813_input_current_limits_table[reg])
+			break;
+
+	return regmap_update_bits(power->regmap,
+				  AXP813_CHRG_CTRL3,
+				  AXP813_CHRG_CTRL3_VBUS_CUR_LIMIT_MASK,
+				  reg << AXP813_CHRG_CTRL3_VBUS_CUR_LIMIT_OFFSET);
+}
+
+static int
+axp813_usb_power_get_input_current_limit(struct axp20x_usb_power *power,
+					 int *intval)
+{
+	unsigned int v;
+	int ret = regmap_read(power->regmap, AXP813_CHRG_CTRL3, &v);
+
+	if (ret)
+		return ret;
+
+	v &= AXP813_CHRG_CTRL3_VBUS_CUR_LIMIT_MASK;
+	v >>= AXP813_CHRG_CTRL3_VBUS_CUR_LIMIT_OFFSET;
+
+	if (v < ARRAY_SIZE(axp813_input_current_limits_table))
+		*intval = axp813_input_current_limits_table[v];
+	else
+		*intval = axp813_input_current_limits_table[ARRAY_SIZE(axp813_input_current_limits_table) - 1];
+
+	return 0;
+}
+
+static int
+axp813_get_usb_bc_enabled(struct axp20x_usb_power *power, int *intval)
+{
+	unsigned int reg;
+	int ret;
+
+	ret = regmap_read(power->regmap, AXP288_BC_GLOBAL, &reg);
+	if (ret)
+		return ret;
+
+	*intval = !!(reg & AXP813_BC_EN);
+	return 0;
+}
+
+static int
+axp813_set_usb_bc_enabled(struct axp20x_usb_power *power, int val)
+{
+	return regmap_update_bits(power->regmap, AXP288_BC_GLOBAL,
+				  AXP813_BC_EN,
+				  val ? AXP813_BC_EN : 0);
+}
+
+static enum power_supply_usb_type axp813_usb_types[] = {
+	POWER_SUPPLY_USB_TYPE_PD,
+	POWER_SUPPLY_USB_TYPE_SDP,
+	POWER_SUPPLY_USB_TYPE_DCP,
+	POWER_SUPPLY_USB_TYPE_CDP,
+	POWER_SUPPLY_USB_TYPE_UNKNOWN,
+};
+
+static int axp813_get_usb_type(struct axp20x_usb_power *power,
+			       union power_supply_propval *val)
+{
+	unsigned int reg;
+	int ret;
+
+	ret = regmap_read(power->regmap, AXP288_BC_GLOBAL, &reg);
+	if (ret)
+		return ret;
+
+	if (!(reg & AXP813_BC_EN)) {
+		val->intval = POWER_SUPPLY_USB_TYPE_PD;
+		return 0;
+	}
+
+	ret = regmap_read(power->regmap, AXP288_BC_DET_STAT, &reg);
+	if (ret)
+		return ret;
+
+	switch (reg & AXP813_BC_RESULT_MASK) {
+	case AXP813_BC_RESULT_SDP:
+		val->intval = POWER_SUPPLY_USB_TYPE_SDP;
+		break;
+	case AXP813_BC_RESULT_CDP:
+		val->intval = POWER_SUPPLY_USB_TYPE_CDP;
+		break;
+	case AXP813_BC_RESULT_DCP:
+		val->intval = POWER_SUPPLY_USB_TYPE_DCP;
+		break;
+	default:
+		val->intval = POWER_SUPPLY_USB_TYPE_UNKNOWN;
+		break;
+	}
+
+	return 0;
+}
+
 static int axp20x_usb_power_get_property(struct power_supply *psy,
 	enum power_supply_property psp, union power_supply_propval *val)
 {
@@ -160,6 +290,7 @@ static int axp20x_usb_power_get_property(struct power_supply *psy,
 
 		val->intval = ret * 1700; /* 1 step = 1.7 mV */
 		return 0;
+	case POWER_SUPPLY_PROP_USB_DCP_INPUT_CURRENT_LIMIT:
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
 		ret = regmap_field_read(power->curr_lim_fld, &v);
 		if (ret)
@@ -223,6 +354,24 @@ static int axp20x_usb_power_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_ONLINE:
 		val->intval = !!(input & AXP20X_PWR_STATUS_VBUS_USED);
 		break;
+
+	case POWER_SUPPLY_PROP_USB_TYPE:
+		if (power->axp_data->axp20x_id == AXP813_ID)
+			return axp813_get_usb_type(power, val);
+
+		return -EINVAL;
+
+	case POWER_SUPPLY_PROP_USB_BC_ENABLED:
+		if (power->axp_data->axp20x_id == AXP813_ID)
+			return axp813_get_usb_bc_enabled(power, &val->intval);
+
+		return -EINVAL;
+
+	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
+		if (power->axp_data->axp20x_id == AXP813_ID)
+			return axp813_usb_power_get_input_current_limit(power,
+								&val->intval);
+		fallthrough;
 	default:
 		return -EINVAL;
 	}
@@ -287,8 +436,21 @@ static int axp20x_usb_power_set_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_VOLTAGE_MIN:
 		return axp20x_usb_power_set_voltage_min(power, val->intval);
 
+	case POWER_SUPPLY_PROP_USB_DCP_INPUT_CURRENT_LIMIT:
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
 		return axp20x_usb_power_set_current_max(power, val->intval);
+
+	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
+		if (power->axp_data->axp20x_id == AXP813_ID)
+			return axp813_usb_power_set_input_current_limit(power,
+								val->intval);
+		return -EINVAL;
+
+	case POWER_SUPPLY_PROP_USB_BC_ENABLED:
+		if (power->axp_data->axp20x_id == AXP813_ID)
+			return axp813_set_usb_bc_enabled(power, val->intval);
+
+		return -EINVAL;
 
 	default:
 		return -EINVAL;
@@ -313,7 +475,10 @@ static int axp20x_usb_power_prop_writeable(struct power_supply *psy,
 		return power->vbus_disable_bit != NULL;
 
 	return psp == POWER_SUPPLY_PROP_VOLTAGE_MIN ||
-	       psp == POWER_SUPPLY_PROP_CURRENT_MAX;
+	       psp == POWER_SUPPLY_PROP_CURRENT_MAX ||
+	       psp == POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT ||
+	       psp == POWER_SUPPLY_PROP_USB_BC_ENABLED ||
+	       psp == POWER_SUPPLY_PROP_USB_DCP_INPUT_CURRENT_LIMIT;
 }
 
 static enum power_supply_property axp20x_usb_power_properties[] = {
@@ -332,6 +497,18 @@ static enum power_supply_property axp22x_usb_power_properties[] = {
 	POWER_SUPPLY_PROP_ONLINE,
 	POWER_SUPPLY_PROP_VOLTAGE_MIN,
 	POWER_SUPPLY_PROP_CURRENT_MAX,
+	POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,
+};
+
+static enum power_supply_property axp813_usb_power_properties[] = {
+	POWER_SUPPLY_PROP_HEALTH,
+	POWER_SUPPLY_PROP_PRESENT,
+	POWER_SUPPLY_PROP_ONLINE,
+	POWER_SUPPLY_PROP_VOLTAGE_MIN,
+	POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,
+	POWER_SUPPLY_PROP_USB_BC_ENABLED,
+	POWER_SUPPLY_PROP_USB_DCP_INPUT_CURRENT_LIMIT,
+	POWER_SUPPLY_PROP_USB_TYPE,
 };
 
 static const struct power_supply_desc axp20x_usb_power_desc = {
@@ -354,6 +531,18 @@ static const struct power_supply_desc axp22x_usb_power_desc = {
 	.set_property = axp20x_usb_power_set_property,
 };
 
+static const struct power_supply_desc axp813_usb_power_desc = {
+	.name = "axp20x-usb",
+	.type = POWER_SUPPLY_TYPE_USB,
+	.properties = axp813_usb_power_properties,
+	.num_properties = ARRAY_SIZE(axp813_usb_power_properties),
+	.property_is_writeable = axp20x_usb_power_prop_writeable,
+	.get_property = axp20x_usb_power_get_property,
+	.set_property = axp20x_usb_power_set_property,
+	.usb_types = axp813_usb_types,
+	.num_usb_types = ARRAY_SIZE(axp813_usb_types),
+};
+
 static const char * const axp20x_irq_names[] = {
 	"VBUS_PLUGIN",
 	"VBUS_REMOVAL",
@@ -364,6 +553,13 @@ static const char * const axp20x_irq_names[] = {
 static const char * const axp22x_irq_names[] = {
 	"VBUS_PLUGIN",
 	"VBUS_REMOVAL",
+};
+
+static const char * const axp813_irq_names[] = {
+	"VBUS_PLUGIN",
+	"VBUS_REMOVAL",
+	"BC_USB_CHNG",
+	"MV_CHNG",
 };
 
 static int axp192_usb_curr_lim_table[] = {
@@ -433,9 +629,10 @@ static const struct axp_data axp223_data = {
 };
 
 static const struct axp_data axp813_data = {
-	.power_desc	= &axp22x_usb_power_desc,
-	.irq_names	= axp22x_irq_names,
-	.num_irq_names	= ARRAY_SIZE(axp22x_irq_names),
+	.axp20x_id	= AXP813_ID,
+	.power_desc	= &axp813_usb_power_desc,
+	.irq_names	= axp813_irq_names,
+	.num_irq_names	= ARRAY_SIZE(axp813_irq_names),
 	.curr_lim_table = axp813_usb_curr_lim_table,
 	.curr_lim_fld   = REG_FIELD(AXP20X_VBUS_IPSOUT_MGMT, 0, 1),
 	.usb_bc_en_bit	= REG_FIELD(AXP288_BC_GLOBAL, 0, 0),
