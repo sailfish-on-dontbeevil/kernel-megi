@@ -875,7 +875,7 @@ wl_cfg80211_handle_if_role_conflict(struct bcm_cfg80211 *cfg,
 #endif /* WL_IFACE_MGMT */
 
 s32
-wl_release_vif_macaddr(struct bcm_cfg80211 *cfg, u8 *mac_addr, u16 wl_iftype)
+wl_release_vif_macaddr(struct bcm_cfg80211 *cfg, const u8 *mac_addr, u16 wl_iftype)
 {
 	struct net_device *ndev =  bcmcfg_to_prmry_ndev(cfg);
 	u16 org_toggle_bytes;
@@ -4792,6 +4792,13 @@ static void wl_tdls_enable(struct bcm_cfg80211 *cfg)
 
 #endif  /* WLTDLS */
 
+
+
+	int	(*tdls_mgmt)(struct wiphy *wiphy, struct net_device *dev,
+			     const u8 *peer, u8 action_code,  u8 dialog_token,
+			     u16 status_code, u32 peer_capability,
+			     bool initiator, const u8 *buf, size_t len);
+
 #if (LINUX_VERSION_CODE > KERNEL_VERSION(3, 2, 0)) || \
 	defined(WL_COMPAT_WIRELESS)
 s32
@@ -4807,7 +4814,7 @@ wl_cfg80211_tdls_mgmt(struct wiphy *wiphy, struct net_device *dev,
 	u32 peer_capability, const u8 *buf, size_t len)
 #elif (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 18, 0))
 wl_cfg80211_tdls_mgmt(struct wiphy *wiphy, struct net_device *dev,
-       const u8 *peer, u8 action_code, u8 dialog_token, u16 status_code,
+       const u8 *peer, int link_id, u8 action_code, u8 dialog_token, u16 status_code,
        u32 peer_capability, bool initiator, const u8 *buf, size_t len)
 #else /* CONFIG_ARCH_MSM && TDLS_MGMT_VERSION2 */
 wl_cfg80211_tdls_mgmt(struct wiphy *wiphy, struct net_device *dev,
@@ -5249,7 +5256,7 @@ wl_cfg80211_ch_switch_notify(struct net_device *dev, uint16 chanspec, struct wip
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION (3, 8, 0))
 	freq = chandef.chan ? chandef.chan->center_freq : chandef.center_freq1;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 2) || defined(CFG80211_BKPORT_MLO)
-	cfg80211_ch_switch_notify(dev, &chandef, 0);
+	cfg80211_ch_switch_notify(dev, &chandef, 0, 0);
 #else
 	cfg80211_ch_switch_notify(dev, &chandef);
 #endif

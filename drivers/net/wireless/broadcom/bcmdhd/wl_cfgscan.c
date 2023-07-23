@@ -25,6 +25,7 @@
 #include <linuxver.h>
 #include <osl.h>
 #include <linux/kernel.h>
+#include <linux/sched/clock.h>
 
 #include <bcmutils.h>
 #include <bcmstdlib_s.h>

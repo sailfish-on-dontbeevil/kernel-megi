@@ -12,8 +12,9 @@
 #include <sbchipc.h>
 #include <pcie_core.h>
 #include <dhd_pcie.h>
-#include <linux/aspm_ext.h>
+//#include <linux/aspm_ext.h>
 
+#if 0
 static inline void
 rk_dhd_bus_l1ss_enable_rc_ep(dhd_bus_t *bus, bool enable)
 {
@@ -32,5 +33,6 @@ rk_dhd_bus_is_rc_ep_l1ss_capable(dhd_bus_t *bus)
 {
 	return pcie_aspm_ext_is_rc_ep_l1ss_capable(bus->dev, bus->rc_dev);
 }
+#endif
 
 #endif /* __RK_DHD_PCIE_LINUX_H__ */
