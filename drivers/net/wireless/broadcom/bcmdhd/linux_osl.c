@@ -33,6 +33,7 @@
 #endif /* __ARM_ARCH_7A__ && !DHD_USE_COHERENT_MEM_FOR_RING */
 
 #include <linux/random.h>
+#include <linux/sched/clock.h>
 
 #include <osl.h>
 #include <bcmutils.h>

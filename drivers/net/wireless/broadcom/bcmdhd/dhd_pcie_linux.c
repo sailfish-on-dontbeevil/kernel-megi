@@ -621,8 +621,8 @@ dhd_bus_is_rc_ep_l1ss_capable(dhd_bus_t *bus)
 	uint32 ep_l1ss_cap;
 
 #ifdef CUSTOMER_HW_ROCKCHIP
-	if (IS_ENABLED(CONFIG_PCIEASPM_ROCKCHIP_WIFI_EXTENSION))
-		return rk_dhd_bus_is_rc_ep_l1ss_capable(bus);
+	//if (IS_ENABLED(CONFIG_PCIEASPM_ROCKCHIP_WIFI_EXTENSION))
+		//return rk_dhd_bus_is_rc_ep_l1ss_capable(bus);
 #endif
 	/* RC Extendend Capacility */
 	rc_l1ss_cap = dhdpcie_access_cap(bus->rc_dev, PCIE_EXTCAP_ID_L1SS,

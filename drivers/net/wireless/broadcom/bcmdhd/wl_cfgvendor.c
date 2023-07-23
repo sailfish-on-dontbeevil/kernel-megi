@@ -31,6 +31,7 @@
 #include <osl.h>
 #include <linux/kernel.h>
 #include <linux/vmalloc.h>
+#include <linux/sched/clock.h>
 
 #include <bcmutils.h>
 #include <bcmwifi_channels.h>

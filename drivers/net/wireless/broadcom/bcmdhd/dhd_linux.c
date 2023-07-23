@@ -32,6 +32,8 @@
 #include <event_log.h>
 #endif /* SHOW_LOGTRACE */
 
+#include <linux/sched/clock.h>
+
 #if defined(PCIE_FULL_DONGLE) || defined(SHOW_LOGTRACE)
 #include <bcmmsgbuf.h>
 #endif /* PCIE_FULL_DONGLE */
@@ -793,8 +795,6 @@ module_param(instance_base, int, 0644);
  *
  * Device drivers are strongly advised to not use bigger value than NAPI_POLL_WEIGHT
  */
-static int dhd_napi_weight = NAPI_POLL_WEIGHT;
-module_param(dhd_napi_weight, int, 0644);
 #endif /* DHD_LB_RXP && PCIE_FULL_DONGLE */
 
 #ifdef PCIE_FULL_DONGLE
@@ -3062,7 +3062,7 @@ _dhd_set_multicast_list(dhd_info_t *dhd, int ifidx)
 }
 
 int
-_dhd_set_mac_address(dhd_info_t *dhd, int ifidx, uint8 *addr, bool skip_stop)
+_dhd_set_mac_address(dhd_info_t *dhd, int ifidx, const uint8 *addr, bool skip_stop)
 {
 	int ret;
 
@@ -9472,10 +9472,10 @@ dhd_open(struct net_device *net)
 			dhd->rx_napi_netdev = dhd->iflist[ifidx]->net;
 			memset(&dhd->rx_napi_struct, 0, sizeof(struct napi_struct));
 			netif_napi_add(dhd->rx_napi_netdev, &dhd->rx_napi_struct,
-				dhd_napi_poll, dhd_napi_weight);
-			DHD_INFO(("%s napi<%p> enabled ifp->net<%p,%s> dhd_napi_weight: %d\n",
+				dhd_napi_poll);
+			DHD_INFO(("%s napi<%p> enabled ifp->net<%p,%s>\n",
 				__FUNCTION__, &dhd->rx_napi_struct, net,
-				net->name, dhd_napi_weight));
+				net->name));
 			napi_enable(&dhd->rx_napi_struct);
 			DHD_INFO(("%s load balance init rx_napi_struct\n", __FUNCTION__));
 			skb_queue_head_init(&dhd->rx_napi_queue);
@@ -12779,8 +12779,8 @@ dhd_bus_start(dhd_pub_t *dhdp)
 #endif /* BT_OVER_PCIE */
 
 #if defined(CUSTOMER_HW_ROCKCHIP) && defined(BCMPCIE)
-	if (IS_ENABLED(CONFIG_PCIEASPM_ROCKCHIP_WIFI_EXTENSION))
-		rk_dhd_bus_l1ss_enable_rc_ep(dhdp->bus, TRUE);
+	//if (IS_ENABLED(CONFIG_PCIEASPM_ROCKCHIP_WIFI_EXTENSION))
+		//rk_dhd_bus_l1ss_enable_rc_ep(dhdp->bus, TRUE);
 #endif /* CUSTOMER_HW_ROCKCHIP && BCMPCIE */
 
 #if defined(CONFIG_ARCH_EXYNOS) && defined(BCMPCIE)
