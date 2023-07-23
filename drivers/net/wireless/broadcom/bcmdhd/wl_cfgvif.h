@@ -126,7 +126,7 @@ extern wl_iftype_t wl_cfg80211_get_sec_iface(struct bcm_cfg80211 *cfg);
 #endif /* WL_IFACE_MGMT */
 
 extern s32 wl_get_vif_macaddr(struct bcm_cfg80211 *cfg, u16 wl_iftype, u8 *mac_addr);
-extern s32 wl_release_vif_macaddr(struct bcm_cfg80211 *cfg, u8 *mac_addr, u16 wl_iftype);
+extern s32 wl_release_vif_macaddr(struct bcm_cfg80211 *cfg, const u8 *mac_addr, u16 wl_iftype);
 
 int wl_cfg80211_set_he_mode(struct net_device *dev, struct bcm_cfg80211 *cfg,
 		s32 bssidx, u32 interface_type, bool set);
@@ -159,7 +159,7 @@ extern s32 wl_cfg80211_tdls_mgmt(struct wiphy *wiphy, struct net_device *dev,
 	u32 peer_capability, const u8 *buf, size_t len);
 #elif (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 18, 0))
 extern s32 wl_cfg80211_tdls_mgmt(struct wiphy *wiphy, struct net_device *dev,
-       const u8 *peer, u8 action_code, u8 dialog_token, u16 status_code,
+       const u8 *peer, int link_id, u8 action_code, u8 dialog_token, u16 status_code,
        u32 peer_capability, bool initiator, const u8 *buf, size_t len);
 #else /* CONFIG_ARCH_MSM && TDLS_MGMT_VERSION2 */
 extern s32 wl_cfg80211_tdls_mgmt(struct wiphy *wiphy, struct net_device *dev,

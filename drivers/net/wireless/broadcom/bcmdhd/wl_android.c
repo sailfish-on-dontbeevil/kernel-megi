@@ -450,8 +450,8 @@ typedef struct android_wifi_af_params {
 #define BUFSZ 8
 #define BUFSZN	BUFSZ + 1
 
-#define _S(x) #x
-#define S(x) _S(x)
+#define _SS(x) #x
+#define S(x) _SS(x)
 
 #define  MAXBANDS    2  /**< Maximum #of bands */
 #define BAND_2G_INDEX      1
@@ -12209,7 +12209,7 @@ wl_handle_private_cmd(struct net_device *net, char *command, u32 cmd_len)
 		if ((rev_info_delim) &&
 			(strnicmp(rev_info_delim, CMD_COUNTRY_DELIMITER,
 			strlen(CMD_COUNTRY_DELIMITER)) == 0) &&
-			(rev_info_delim + 1)) {
+			*(rev_info_delim + 1)) {
 			revinfo  = bcm_atoi(rev_info_delim + 1);
 		} else {
 			revinfo = 0;

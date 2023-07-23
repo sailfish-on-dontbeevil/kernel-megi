@@ -6,10 +6,10 @@ MODULE_NAME := bcmdhd
 else
 MODULE_NAME := bcmdhd_pcie
 endif
-CONFIG_BCMDHD = m
+CONFIG_BCMDHD = y
 
 #CONFIG_BCMDHD_SDIO := y
-#CONFIG_BCMDHD_PCIE := y
+CONFIG_BCMDHD_PCIE := y
 #CONFIG_BCMDHD_USB := y
 
 CONFIG_BCMDHD_OOB := y
@@ -38,7 +38,6 @@ CONFIG_MACH_PLATFORM := y
 
 DHDCFLAGS = -Wall -Wstrict-prototypes -Wno-date-time                      \
 	-Wno-implicit-fallthrough -Wno-declaration-after-statement            \
-	-Wno-fortify-source                                                   \
 	-Dlinux -DLINUX -DBCMDRIVER                                           \
 	-DBCMDONGLEHOST -DBCMDMA32 -DBCMFILEIMAGE                             \
 	-DDHDTHREAD -DDHD_DEBUG -DSHOW_EVENTS -DGET_OTP_MAC_ENABLE            \
@@ -51,6 +50,7 @@ DHDCFLAGS = -Wall -Wstrict-prototypes -Wno-date-time                      \
 	-DUSE_NEW_RSPEC_DEFS                                                  \
 	-DWL_EXT_IAPSTA -DWL_ESCAN -DCCODE_LIST -DSUSPEND_EVENT               \
 	-DKEY_INSTALL_CHECK                                                   \
+	-DCFG80211_BKPORT_MLO                                                 \
 	-DENABLE_INSMOD_NO_FW_LOAD
 
 DHDOFILES = aiutils.o siutils.o sbutils.o                                 \
@@ -301,7 +301,7 @@ ifneq ($(CONFIG_BCMDHD_SDIO),)
 endif
 ifneq ($(CONFIG_BCMDHD_PCIE),)
 	DHDCFLAGS += -DDHD_LB_TXP_DEFAULT_ENAB
-	DHDCFLAGS += -DSET_RPS_CPUS -DSET_XPS_CPUS
+#	DHDCFLAGS += -DSET_RPS_CPUS -DSET_XPS_CPUS
 	DHDCFLAGS += -DDHD_LB_PRIMARY_CPUS=0xF0 -DDHD_LB_SECONDARY_CPUS=0x0E
 endif
 endif
@@ -386,7 +386,7 @@ ifeq  ($(CONFIG_BCMDHD_STATIC_BUF_IN_DHD),y)
 	DHDOFILES += dhd_static_buf.o
 	DHDCFLAGS += -DDHD_STATIC_IN_DRIVER
 else
-	obj-m += dhd_static_buf.o
+	obj-y += dhd_static_buf.o
 endif
 	DHDCFLAGS += -DSTATIC_WL_PRIV_STRUCT -DENHANCED_STATIC_BUF
 	DHDCFLAGS += -DCONFIG_DHD_USE_STATIC_BUF
@@ -396,34 +396,12 @@ ifneq ($(CONFIG_BCMDHD_PCIE),)
 endif
 endif
 
-ARCH ?= arm64
-BCMDHD_ROOT = $(src)
-#$(warning "BCMDHD_ROOT=$(BCMDHD_ROOT)")
+BCMDHD_ROOT = $(srctree)/$(src)
+$(warning "BCMDHD_ROOT=$(BCMDHD_ROOT)")
 EXTRA_CFLAGS = $(DHDCFLAGS)
 EXTRA_CFLAGS += -DDHD_COMPILED=\"$(BCMDHD_ROOT)\"
 EXTRA_CFLAGS += -I$(BCMDHD_ROOT)/include/ -I$(BCMDHD_ROOT)/
-ifeq ($(CONFIG_BCMDHD),m)
-EXTRA_LDFLAGS += --strip-debug
-endif
 
-obj-m += $(MODULE_NAME).o
+obj-y += $(MODULE_NAME).o
 $(MODULE_NAME)-objs += $(DHDOFILES)
 ccflags-y := $(EXTRA_CFLAGS)
-
-all: bcmdhd_pcie bcmdhd_sdio bcmdhd_usb
-
-bcmdhd_pcie:
-	$(warning "building BCMDHD_PCIE..........")
-	$(MAKE) -C $(LINUXDIR) M=$(PWD) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) modules CONFIG_BCMDHD=m CONFIG_BCMDHD_PCIE=y
-
-bcmdhd_sdio:
-	$(warning "building BCMDHD_SDIO..........")
-	$(MAKE) -C $(LINUXDIR) M=$(PWD) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) modules CONFIG_BCMDHD=m CONFIG_BCMDHD_SDIO=y
-
-bcmdhd_usb:
-	$(warning "building BCMDHD_USB..........")
-	$(MAKE) -C $(LINUXDIR) M=$(PWD) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) modules CONFIG_BCMDHD=m CONFIG_BCMDHD_USB=y
-
-clean:
-	rm -rf *.o *.ko *.mod.c *~ .*.cmd *.o.cmd .*.o.cmd *.mod \
-	Module.symvers modules.order .tmp_versions modules.builtin

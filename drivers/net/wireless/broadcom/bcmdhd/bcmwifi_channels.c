@@ -28,8 +28,8 @@
 
 #ifdef BCMDRIVER
 #include <osl.h>
-#define strtoul(nptr, endptr, base) bcm_strtoul((nptr), (endptr), (base))
-#define tolower(c) (bcm_isupper((c)) ? ((c) + 'a' - 'A') : (c))
+//#define strtoul(nptr, endptr, base) bcm_strtoul((nptr), (endptr), (base))
+//#define tolower(c) (bcm_isupper((c)) ? ((c) + 'a' - 'A') : (c))
 #else
 #include <stdio.h>
 #include <stdlib.h>
@@ -568,7 +568,7 @@ read_uint(const char **p, unsigned int *num)
 	unsigned long val;
 	char *endp = NULL;
 
-	val = strtoul(*p, &endp, 10);
+	val = bcm_strtoul(*p, &endp, 10);
 	/* if endp is the initial pointer value, then a number was not read */
 	if (endp == *p)
 		return 0;

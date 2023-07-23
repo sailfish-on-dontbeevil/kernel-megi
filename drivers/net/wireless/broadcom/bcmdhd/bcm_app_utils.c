@@ -27,8 +27,8 @@
 
 #ifdef BCMDRIVER
 #include <osl.h>
-#define strtoul(nptr, endptr, base) bcm_strtoul((nptr), (endptr), (base))
-#define tolower(c) (bcm_isupper((c)) ? ((c) + 'a' - 'A') : (c))
+//#define strtoul(nptr, endptr, base) bcm_strtoul((nptr), (endptr), (base))
+//#define tolower(c) (bcm_isupper((c)) ? ((c) + 'a' - 'A') : (c))
 #else /* BCMDRIVER */
 #include <stdio.h>
 #include <string.h>
