@@ -1125,11 +1125,16 @@ int bes2600_load_firmware_sdio(struct sbus_ops *ops, struct sbus_priv *priv)
 		return -ENOMEM;
 
 	bes2600_factory_lock();
+#ifdef CONFIG_FW_LOADER
+	ret = bes2600_get_factory_cali_data_fwloader(&factory_data, &factory_data_len);
+	if (ret) {
+#else
 #ifdef FACTORY_SAVE_MULTI_PATH
 	if (!(factory_data = bes2600_get_factory_cali_data(file_buffer, &factory_data_len, FACTORY_PATH)) &&
 		!(factory_data = bes2600_get_factory_cali_data(file_buffer, &factory_data_len, FACTORY_DEFAULT_PATH))) {
 #else
 	if (!(factory_data = bes2600_get_factory_cali_data(file_buffer, &factory_data_len, FACTORY_PATH))) {
+#endif
 #endif
 		bes2600_warn(BES2600_DBG_DOWNLOAD, "factory cali data get failed.\n");
 	} else {
