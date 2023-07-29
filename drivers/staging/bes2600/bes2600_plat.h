@@ -33,10 +33,10 @@ struct bes2600_platform_data_sdio {
 	/* All others are optional */
 	bool have_5ghz;
 	bool no_nptb;       /* SDIO hardware does not support non-power-of-2-blocksizes */
-	int reset;          /* GPIO to RSTn signal (0 disables) */
-	int powerup;        /* GPIO to POWERUP signal (0 disables) */
-	int wakeup;         /* GPIO to WAKEUP signal (0 disables) */
-	int host_wakeup;    /* wifi GPIO to WAKEUP host signal (0 disables) */
+	struct gpio_desc *reset;          /* GPIO to RSTn signal (0 disables) */
+	struct gpio_desc *powerup;        /* GPIO to POWERUP signal (0 disables) */
+	struct gpio_desc *wakeup;         /* GPIO to WAKEUP signal (0 disables) */
+	struct gpio_desc *host_wakeup;    /* wifi GPIO to WAKEUP host signal (0 disables) */
 	bool wlan_bt_hostwake_registered;/* wifi request_irq success or not */
 	int gpio_irq;       /* IRQ line or 0 to use SDIO IRQ */
 	int (*power_ctrl)(const struct bes2600_platform_data_sdio *pdata,
