@@ -13,6 +13,7 @@
 #include <linux/sched.h>
 #include <linux/fs.h>
 #include <linux/slab.h>
+#include <linux/firmware.h>
 #include <linux/mutex.h>
 #include <linux/crc32.h>
 #include <linux/version.h>
@@ -208,7 +209,7 @@ static int factory_section_write_file(char *path, void *buffer, int size)
 	return ret;
 }
 
-static inline int factory_parse(uint8_t *source_buf, struct factory_t *factory)
+static inline int factory_parse(const uint8_t *source_buf, struct factory_t *factory)
 {
 	int ret = 0;
 
@@ -469,6 +470,52 @@ u8* bes2600_get_factory_cali_data(u8 *file_buffer, u32 *data_len, char *path)
 	ret_p = (u8 *)factory_p;
 
 	return ret_p;
+}
+
+int bes2600_get_factory_cali_data_fwloader(u8 **data, u32 *data_len)
+{
+	const struct firmware *fw_bin;
+	int ret;
+
+	factory_p = NULL;
+
+	ret = request_firmware(&fw_bin, "bes2600/bes2600_factory.txt", NULL);
+	if (ret) {
+		bes2600_err(BES2600_DBG_FACTORY, "request firmware err:%d\n", ret);
+		return ret;
+	}
+
+	if (fw_bin->size > FACTORY_MAX_SIZE) {
+		bes2600_err(BES2600_DBG_FACTORY,
+			    "bes2600_factory.txt size check failed, read_size: %zu max_size: %d\n",
+			    fw_bin->size, FACTORY_MAX_SIZE);
+		return -E2BIG;
+	}
+
+	memset(&factory_cali_data, 0, sizeof(struct factory_t));
+
+	ret = factory_parse(fw_bin->data, &factory_cali_data);
+	if (ret < 0)
+		return ret;
+
+	ret = bes2600_factory_head_info_check(&factory_cali_data);
+	if (ret < 0)
+		return ret;
+
+	ret = bes2600_factory_crc_check(&factory_cali_data);
+	if (ret < 0)
+		return ret;
+
+	bes2600_info(BES2600_DBG_FACTORY, "open wifi factory section success");
+
+	if (data_len)
+		*data_len = sizeof(struct factory_t);
+	if (data)
+		*data = (u8 *)&factory_cali_data;
+
+	factory_p = &factory_cali_data;
+
+	return 0;
 }
 
 /**
