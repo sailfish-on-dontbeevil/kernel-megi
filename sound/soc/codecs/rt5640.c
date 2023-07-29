@@ -2951,6 +2951,8 @@ static const struct snd_soc_component_driver soc_component_dev_rt5640 = {
 	.num_dapm_widgets	= ARRAY_SIZE(rt5640_dapm_widgets),
 	.dapm_routes		= rt5640_dapm_routes,
 	.num_dapm_routes	= ARRAY_SIZE(rt5640_dapm_routes),
+	.suspend_bias_off	= 1,
+	.idle_bias_on		= 1,
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
 };
