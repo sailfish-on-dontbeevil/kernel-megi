@@ -1250,7 +1250,7 @@ int bes2600_chrdev_init(struct sbus_ops *ops)
 	}
 
 	/* create class for creating device node */
-	bes2600_cdev.class = class_create(THIS_MODULE, "bes2600_chrdev");
+	bes2600_cdev.class = class_create("bes2600_chrdev");
 	if (IS_ERR(bes2600_cdev.class)){
 		bes2600_err(BES2600_DBG_CHARDEV, "bes2600 char device add fail\n");
 		ret = -EFAULT;
