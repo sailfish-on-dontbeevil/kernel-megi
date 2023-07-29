@@ -275,8 +275,8 @@
 		gpio = <&gpio0 RK_PA1 GPIO_ACTIVE_HIGH>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&sdmmc0_pwr_h_pin>;
+		regulator-boot-on;
 		regulator-name = "vcc3v0_sd";
-		regulator-always-on;
 		regulator-min-microvolt = <3000000>;
 		regulator-max-microvolt = <3000000>;
 		vin-supply = <&vcc3v3_sys>;
@@ -537,13 +537,12 @@
 
 			vcc_sdio: LDO_REG4 {
 				regulator-name = "vcc_sdio";
-				regulator-always-on;
 				regulator-boot-on;
 				regulator-min-microvolt = <1800000>;
 				regulator-max-microvolt = <3000000>;
 
 				regulator-state-mem {
-					regulator-on-in-suspend;
+					regulator-off-in-suspend;
 					regulator-suspend-microvolt = <3000000>;
 				};
 			};
