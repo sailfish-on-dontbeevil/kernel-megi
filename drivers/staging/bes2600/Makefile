@@ -1,3 +1,24 @@
+CONFIG_BES2600_WLAN_SDIO = y
+CONFIG_BES2600_WLAN_USB = n
+CONFIG_BES2600_WLAN_SPI = n
+CONFIG_BES2600_USE_GPIO_IRQ = n
+CONFIG_BES2600_5GHZ_SUPPORT = y
+CONFIG_BES2600_WAPI_SUPPORT = y
+CONFIG_BES2600_USE_STE_EXTENSIONS = n
+CONFIG_BES2600_DISABLE_BEACON_HINTS = n
+CONFIG_BES2600_TESTMODE = n
+CONFIG_BES2600_DEBUGFS = y
+CONFIG_BES2600_BH_DEBUG = n
+CONFIG_BES2600_WSM_DEBUG = n
+CONFIG_BES2600_WSM_DUMPS = n
+CONFIG_BES2600_WSM_DUMPS_SHORT = y
+CONFIG_BES2600_TXRX_DEBUG = n
+CONFIG_BES2600_TX_POLICY_DEBUG = n
+CONFIG_BES2600_STA_DEBUG = n
+CONFIG_BES2600_DUMP_ON_ERROR = n
+CONFIG_BES2600_ITP = n
+
+
 # feature option
 BES2600                                 ?= m
 
@@ -184,6 +205,8 @@ ccflags-y += $(call boolen_flag,PLAT_CVITEK_182X,y)
 
 ccflags-y += $(call boolen_flag,CONFIG_BES2600_VENDOR_CMD,y)
 
+ccflags-y += $(call boolen_flag,CONFIG_BES2600_USE_STE_EXTENSIONS,y)
+
 ccflags-y += $(call boolen_flag,CONFIG_BES2600_5GHZ_SUPPORT,y)
 ccflags-y += $(call boolen_flag,CONFIG_BES2600_STATIC_SDD,y)
 ccflags-y += $(call boolen_flag,P2P_MULTIVIF,y)
@@ -257,7 +280,6 @@ ccflags-y += -DDCW1260_DETECTION_LOGIC
 # sdd options
 ccflags-y += -DTEST_11B=0
 ccflags-y += -DDPD_CALI=0
-ccflags-y += -DDPD_CALI=0
 ccflags-y += -DALI_CONFG=0
 ccflags-y += -DCHIP_WIFI_ROM_VER=1
 ccflags-y += -DWIFI_OUT_FEM=0
@@ -316,14 +338,3 @@ bes2600-y += bes2600_factory.o
 endif
 
 obj-$(BES2600) += bes2600.o
-
-ifeq ($(KERNELRELEASE),)
-KVERSION = $(shell uname -r)
-all:
-	make -C /lib/modules/$(KVERSION)/build M=$(shell pwd) modules
-clean:
-	make -C /lib/modules/$(KVERSION)/build M=$(shell pwd) clean
-endif
-
-clean:
-	rm -rf *.o .*.o.d *.ko *.o.ur-safe .*.cmd *.mod *.mod.c .cache.mk modules.order Module.symvers .tmp_versions
