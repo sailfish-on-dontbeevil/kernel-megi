@@ -21,6 +21,6 @@
 	};
 };
 
-&vcc_wl {
+&w_vbat {
 	gpio = <&gpio0 RK_PA0 GPIO_ACTIVE_LOW>;
 };
