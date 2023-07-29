@@ -275,6 +275,7 @@ static const struct ieee80211_iface_combination bes2600_if_comb[] = {
 static const struct ieee80211_ops bes2600_ops = {
 	.start			= bes2600_start,
 	.stop			= bes2600_stop,
+	.wake_tx_queue		= ieee80211_handle_wake_tx_queue,
 	.add_interface		= bes2600_add_interface,
 	.remove_interface	= bes2600_remove_interface,
 	.change_interface	= bes2600_change_interface,
