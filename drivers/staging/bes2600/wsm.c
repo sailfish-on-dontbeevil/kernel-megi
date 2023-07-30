@@ -314,6 +314,7 @@ int wsm_vendor_rf_test_indication(struct bes2600_common *hw_priv, struct wsm_buf
 		break;
 	case VENDOR_RF_SIGNALING_CMD:
 	case VENDOR_RF_NOSIGNALING_CMD:
+	case VENDOR_RF_GET_CALI_FROM_EFUSE:
 		bes2600_rf_cmd_msg_assembly(cmd_type, buf->data, wsm_len - sizeof(struct wsm_mcu_hdr));
 		break;
 	default:
@@ -1213,8 +1214,7 @@ nomem:
 	return -ENOMEM;
 }
 
-#ifdef PLAT_ALLWINNER_R329
-int wsm_save_factory_txt_to_flash(struct bes2600_common *hw_priv, const u8 *data, int if_id)
+int wsm_save_factory_txt_to_mcu(struct bes2600_common *hw_priv, const u8 *data, int if_id, enum bes2600_rf_cmd_type cmd_type)
 {
 	int ret, i;
 	const struct factory_t *factory_cali = (const struct factory_t *)data;
@@ -1223,8 +1223,7 @@ int wsm_save_factory_txt_to_flash(struct bes2600_common *hw_priv, const u8 *data
 	wsm_cmd_lock(hw_priv);
 
 	/* cmd type */
-	WSM_PUT32(buf, BES2600_RF_CMD_CALI_TXT_TO_FLASH);
-
+	WSM_PUT32(buf, cmd_type);
 	WSM_PUT32(buf, factory_cali->data.iQ_offset);
 	WSM_PUT16(buf, factory_cali->data.freq_cal);
 
@@ -1253,10 +1252,7 @@ int wsm_save_factory_txt_to_flash(struct bes2600_common *hw_priv, const u8 *data
 nomem:
 	wsm_cmd_unlock(hw_priv);
 	return -ENOMEM;
-
 }
-#endif
-
 /* ******************************************************************** */
 #ifdef MCAST_FWDING
 /* 3.66 */
@@ -1477,6 +1473,7 @@ static int wsm_receive_indication(struct bes2600_common *hw_priv,
 					struct sk_buff **skb_p)
 {
 	struct bes2600_vif *priv;
+	s8 pkt_signal = 0;
 
 	hw_priv->rx_timestamp = jiffies;
 	if (hw_priv->wsm_cbc.rx) {
@@ -1542,8 +1539,23 @@ static int wsm_receive_indication(struct bes2600_common *hw_priv,
 
 		/* If no RSSI subscription has been made,
 		* convert RCPI to RSSI here */
-		if (!priv->cqm_use_rssi)
+		if (!priv->cqm_use_rssi) {
+			pkt_signal = rx.rcpiRssi / 2 - 110;
 			rx.rcpiRssi = rx.rcpiRssi / 2 - 110;
+		}
+
+		if(ieee80211_is_data(hdr->frame_control)) {
+			if (priv->signal == 0) {
+				priv->signal = pkt_signal;
+				priv->signal_mul = pkt_signal * 100;
+			} else {
+				priv->signal_mul = priv->signal_mul * 80 / 100 + pkt_signal * 20;
+				priv->signal = priv->signal_mul / 100;
+			}
+
+			bes2600_dbg(BES2600_DBG_TXRX, "pkt signal:%d\n", priv->signal);
+		}
+
 
 		fctl = *(__le16 *)buf->data;
 		hdr_len = buf->data - buf->begin;
@@ -1579,7 +1591,7 @@ static int wsm_receive_indication(struct bes2600_common *hw_priv,
 							(*skb_p)->len, has_mmie, priv->pmf);
 					if (has_mmie ^ priv->pmf)
 						ignore = true;
-				} else if (ether_addr_equal(hdr->addr1, hw_priv->addresses[rx.if_id].addr)) {
+				} else if (ether_addr_equal(hdr->addr1, priv->vif->addr)) {
 					bool has_protected = ieee80211_has_protected(fctl);
 					bes2600_info(BES2600_DBG_WSM, "[WSM] RX unicast deauth: protected=%d, pmf=%d, connect_in_process=%d\n",
 							has_protected, priv->pmf, atomic_read(&priv->connect_in_process));
@@ -1600,10 +1612,19 @@ static int wsm_receive_indication(struct bes2600_common *hw_priv,
 					bes2600_info(BES2600_DBG_WSM, "[WSM] Issue unjoin command (RX).\n");
 					wsm_lock_tx_async(hw_priv);
 					if (queue_work(hw_priv->workqueue,
-								   &priv->unjoin_work) <= 0)
+								   &priv->unjoin_work) <= 0) {
 						wsm_unlock_tx(hw_priv);
+					}
+#ifdef CONFIG_PM
+					else if(bes2600_suspend_status_get(hw_priv)) {
+						bes2600_pending_unjoin_set(hw_priv, priv->if_id);
+					}
+#endif
+					if (bes2600_chrdev_wakeup_by_event_get() == WAKEUP_EVENT_PEER_DETACH)
+						bes2600_chrdev_wifi_update_wakeup_reason(WAKEUP_REASON_WIFI_DEAUTH_DISASSOC, 0);
 				}
 			}
+			bes2600_chrdev_wakeup_by_event_set(WAKEUP_EVENT_NONE);
 		}
 		hw_priv->wsm_cbc.rx(priv, &rx, skb_p);
 		if (*skb_p)
@@ -2014,7 +2035,7 @@ bool wsm_vif_flush_tx(struct bes2600_vif *priv)
 {
 	struct bes2600_common *hw_priv = priv->hw_priv;
 	unsigned long timestamp = jiffies;
-	long timeout;
+	unsigned long timeout;
 	int i;
 	int if_id = priv->if_id;
 
@@ -2045,11 +2066,17 @@ bool wsm_vif_flush_tx(struct bes2600_vif *priv)
 		if (!hw_priv->hw_bufs_used_vif[if_id])
 			return true;
 
-		timeout = timestamp + WSM_CMD_LAST_CHANCE_TIMEOUT - jiffies;
-		if (timeout < 0 || wait_event_timeout(hw_priv->bh_evt_wq,
+		/* calculate wait time */
+		timeout = timestamp + WSM_CMD_LAST_CHANCE_TIMEOUT;
+		if (timeout >= jiffies)
+			timeout -= jiffies;
+		else
+			timeout += (ULONG_MAX - jiffies);
+
+		/* wait packets on vif to be flushed */
+		if (wait_event_timeout(hw_priv->bh_evt_wq,
 				!hw_priv->hw_bufs_used_vif[if_id],
 				timeout) <= 0) {
-
 			/* Hmmm... Not good. Frame had stuck in firmware. */
 			bes2600_chrdev_wifi_force_close(hw_priv, true);
 		}
@@ -2202,9 +2229,7 @@ int wsm_handle_rx(struct bes2600_common *hw_priv, int id,
 	if (IS_DRIVER_TO_MCU_CMD(id))
 		ind_confirm_label = __le32_to_cpu(((struct wsm_mcu_hdr *)wsm)->handle_label);
 
-	if (id == 0x0C30) {
-		ret = wsm_bt_ts_request(hw_priv, &wsm_buf);
-	} else if (id == 0x404) {
+	if (id == 0x404) {
 		ret = wsm_tx_confirm(hw_priv, &wsm_buf, interface_link_id);
 #ifdef MCAST_FWDING
 #if 1
@@ -2312,10 +2337,10 @@ int wsm_handle_rx(struct bes2600_common *hw_priv, int id,
 		case 0x0C25:
 			ret = wsm_vendor_rf_cmd_confirm(hw_priv, wsm_arg, &wsm_buf);
 			break;
+#endif /* CONFIG_BES2600_TESTMODE */
 		case 0x0C27:
 			ret = wsm_driver_rf_cmd_confirm(hw_priv, wsm_arg, &wsm_buf);
 			break;
-#endif /* CONFIG_BES2600_TESTMODE */
 #ifdef BES_UNIFIED_PM
 		case 0x0424: /* wifi sleep disable */
 			break;
@@ -2408,6 +2433,9 @@ int wsm_handle_rx(struct bes2600_common *hw_priv, int id,
 			ret = wsm_vendor_rf_test_indication(hw_priv, &wsm_buf);
 			break;
 #endif /* CONFIG_BES2600_TESTMODE */
+		case 0x0C30:
+			ret = wsm_bt_ts_request(hw_priv, &wsm_buf);
+			break;
 		default:
 			break;
 		}
@@ -2712,7 +2740,7 @@ static int bes2600_get_prio_queue(struct bes2600_vif *priv,
 		edca = &priv->edca.params[i];
 		score = ((edca->aifns + edca->cwMin) << 16) +
 				(edca->cwMax - edca->cwMin) *
-				(get_random_int() & 0xFFFF);
+				(get_random_long() & 0xFFFF);
 		if (score < best && (winner < 0 || i != 3)) {
 			best = score;
 			winner = i;
@@ -3126,6 +3154,8 @@ static struct bes2600_vif
 static inline int get_interface_id_scanning(struct bes2600_common *hw_priv)
 {
 	if (hw_priv->scan.req)
+		return hw_priv->scan.if_id;
+	else if (hw_priv->scan.direct_probe == 1)
 		return hw_priv->scan.if_id;
 	else
 		return -1;

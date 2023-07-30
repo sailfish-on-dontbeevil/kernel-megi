@@ -27,6 +27,13 @@ struct bes_event_test_t {
 	int dummy;
 };
 
+#ifdef STANDARD_FACTORY_EFUSE_FLAG
+/*example command structure for set select efuse*/
+struct bes_select_calib_t {
+    uint16_t select_efuse_flag;
+};
+#endif
+
 /* vendor to mcu cmd msg reply structure */
 struct vendor_rf_cmd_msg_reply {
 	u32 id;
@@ -65,6 +72,8 @@ enum bes_msg_id {
 	BES_MSG_EPTA_PARM_CONFIG,
 	BES_MSG_GET_KEEP_ALIVE_STREAM,
 	BES_MSG_MCU_CPUUSAGE,
+	BES_MSG_SAVE_CALI_TXT_TO_EFUSE,
+	BES_MSG_SET_SELECT_EFUSE_FLAG,
 	/* Add new IDs here */
 
 	BES_MSG_ID_MAX,
@@ -78,6 +87,7 @@ enum vendor_rf_cmd_type {
 	VENDOR_RF_SAVE_FREQOFFSET_CMD,
 	VENDOR_RF_SAVE_POWERLEVEL_CMD,
 	VENDOR_RF_POWER_CALIB_FINISH,
+	VENDOR_RF_GET_CALI_FROM_EFUSE,
 	/* add new here */
 
 	VENDOR_RF_CMD_MAX,

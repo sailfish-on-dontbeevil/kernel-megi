@@ -19,13 +19,20 @@
 #include <linux/list.h>
 /* open it for enhance wifi throughput */
 #define BES2600_TX_RX_OPT   1
+
+/* Threshold for powrt table switch */
+#define BES2600_TX_RSSI_LOW     -65
+#define BES2600_TX_RSSI_HIGH    -60
+
 void bes2600_add_tx_ac_delta_time(int ac, uint32_t del_time);
 void bes2600_add_tx_delta_time(uint32_t tx_time);
 void bes2600_rx_status(struct bes2600_vif *priv, struct sk_buff *skb);
 void bes2600_tx_status(struct bes2600_vif *priv, struct sk_buff *skb);
 void bes2600_dynamic_opt_rxtx(struct bes2600_common *hw_priv,struct bes2600_vif *priv, int rssi);
-int txrx_opt_timer_init(struct bes2600_common *hw_priv);
-int txrx_opt_timer_exit(struct bes2600_common *hw_priv);
+void bes2600_txrx_opt_multivif_connected_handler(struct bes2600_common *hw_priv, bool multivif_connected);
+void bes2600_txrx_opt_timer_restore(void);
+int txrx_opt_timer_init(struct bes2600_vif *priv);
+void txrx_opt_timer_exit(struct bes2600_vif *priv);
 
 #endif
 

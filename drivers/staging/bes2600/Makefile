@@ -6,11 +6,9 @@ CONFIG_BES2600_WLAN_SPI                 ?= n
 CONFIG_BES2600_WLAN_USB                 ?= n
 
 CONFIG_BES2600_VENDOR_CMD               ?= y
-ifneq ($(CONFIG_BES2600_WLAN_USB),y)
-CONFIG_BES2600_TESTMODE                 ?= y
-endif
+CONFIG_BES2600_TESTMODE                 ?= n
 
-CONFIG_BES2600_WAPI_SUPPORT             ?= y
+CONFIG_BES2600_WAPI_SUPPORT             ?= n
 CONFIG_BES2600_5GHZ_SUPPORT             ?= y
 CONFIG_BES2600_STA_DEBUG                ?= y
 CONFIG_BES2600_STATIC_SDD               ?= y
@@ -31,17 +29,19 @@ CONFIG_BES2600_ITP                      ?= n
 CONFIG_BES2600_NON_POWER_OF_TWO_BLOCKSIZES ?= n
 CONFIG_BES2600_CALIB_FROM_LINUX         ?= y
 
-CONFIG_BES2600_WIFI_BOOT_ON             ?= n
+CONFIG_BES2600_WIFI_BOOT_ON             ?= y
 CONFIG_BES2600_BT_BOOT_ON               ?= n
 
 PLAT_ALLWINNER_T507                     ?= n
 PLAT_ALLWINNER_R329                     ?= n
-PLAT_ROCKCHIP                           ?= y
+PLAT_ROCKCHIP                           ?= n
 PLAT_UBUNTU_VUB300                      ?= n
 PLAT_QCOM_QM215                         ?= n
+PLAT_CVITEK_182X                        ?= n
 
-BES2600_GPIO_WAKEUP_AP                  ?= y
+BES2600_GPIO_WAKEUP_AP                  ?= n
 BES2600_WRITE_DPD_TO_FILE               ?= n
+BES2600_TX_MORE_RETRY                   ?= n
 
 # bes evb
 BES2600_INDEPENDENT_EVB                 ?= n
@@ -54,13 +54,13 @@ BES2600_INTEGRATED_MODULE_V3            ?= n
 
 # 0: use dynamic_ps_timeout value
 # other: override dynamic_ps_timeout value
-BES2600_FASTPS_IDLE_TIME		?= 0
+BES2600_FASTPS_IDLE_TIME		?= 8
 
 #1.rock api(fixed macaddr)
 #2.read from file(macaddr of customers)
 #3.read from file(macaddr template)
 #4.random macaddr
-GET_MAC_ADDR_METHOD                     ?= 4
+GET_MAC_ADDR_METHOD                     ?= 0
 
 ifeq ($(CONFIG_BES2600_DEBUGFS),y)
 BES2600_DUMP_FW_DPD_LOG                 ?= n
@@ -73,7 +73,7 @@ ccflags-y += -DVENDOR_XM_KEEPALIVE
 endif
 endif
 
-BES2600_DRV_VERSION := bes2600_0.3.10_2022.1125
+BES2600_DRV_VERSION := bes2600_0.3.5_2023.0209
 
 ifeq ($(GET_MAC_ADDR_METHOD)_$(PLAT_ROCKCHIP),1_n)
  $(error Parameter setting error, GET_MAC_ADDR_METHOD can only be set to 1 on rockchip platform)
@@ -89,7 +89,8 @@ endif
 
 ifeq ($(CONFIG_BES2600_CALIB_FROM_LINUX),y)
 FACTORY_CRC_CHECK                    ?= n
-FACTORY_SAVE_MULTI_PATH              ?= n
+FACTORY_SAVE_MULTI_PATH              ?= y
+STANDARD_FACTORY_EFUSE_FLAG          ?= y
 ifeq ($(FACTORY_SAVE_MULTI_PATH),y)
 FACTORY_PATH                         ?= /data/cfg/bes2600_factory.txt
 FACTORY_DEFAULT_PATH                 ?= /lib/firmware/bes2600_factory.txt
@@ -100,7 +101,7 @@ FACTORY_PATH ?= /vendor/firmware/bes2600_factory.txt
 endif
 endif
 
-FACTORY_PATH ?= /vendor/lib/firmware/bes2600_factory.txt
+FACTORY_PATH ?= /lib/firmware/bes2600_factory.txt
 
 # basic function
 define boolen_flag
@@ -144,7 +145,7 @@ ccflags-y += -DBES_UNIFIED_PM
 endif # CONFIG_BES2600_WLAN_SPI
 
 ifeq ($(CONFIG_BES2600_WLAN_USB),y)
-FW_DOWNLOAD_BY_USB                     ?= n
+FW_DOWNLOAD_BY_USB                     ?= y
 ccflags-y += -DCONFIG_BES2600_WLAN_BES
 endif # CONFIG_BES2600_WLAN_USB
 
@@ -179,6 +180,7 @@ ccflags-y += $(call boolen_flag,PLAT_ALLWINNER_T507,y)
 ccflags-y += $(call boolen_flag,PLAT_UBUNTU_VUB300,y)
 ccflags-y += $(call boolen_flag,PLAT_ROCKCHIP,y)
 ccflags-y += $(call boolen_flag,PLAT_QCOM_QM215,y)
+ccflags-y += $(call boolen_flag,PLAT_CVITEK_182X,y)
 
 ccflags-y += $(call boolen_flag,CONFIG_BES2600_VENDOR_CMD,y)
 
@@ -192,6 +194,7 @@ ccflags-y += $(call boolen_flag,WIFI_BT_COEXIST_EPTA_ENABLE,y)
 ccflags-y += $(call boolen_flag,WIFI_BT_COEXIST_EPTA_FDD,y)
 ccflags-y += $(call boolen_flag,CONFIG_BES2600_DISABLE_BEACON_HINTS,y)
 ccflags-y += $(call boolen_flag,CONFIG_BES2600_NON_POWER_OF_TWO_BLOCKSIZES,y)
+ccflags-y += $(call boolen_flag,BES2600_TX_MORE_RETRY,y)
 
 ccflags-y += $(call boolen_flag,CONFIG_BES2600_ITP,y)
 ccflags-y += $(call boolen_flag,CONFIG_BES2600_DEBUGFS,y)
@@ -244,6 +247,7 @@ ccflags-y += $(call boolen_flag,BES2600_WRITE_DPD_TO_FILE,y)
 ccflags-y += $(call boolen_flag,BES2600_DUMP_FW_DPD_LOG,y)
 ccflags-y += $(call string_flag,BES2600_DPD_LOG_PATH)
 
+ccflags-y += $(call boolen_flag,STANDARD_FACTORY_EFUSE_FLAG,y)
 
 # internal feature options
 ccflags-y += -DAP_HT_CAP_UPDATE
@@ -259,6 +263,10 @@ ccflags-y += -DCHIP_WIFI_ROM_VER=1
 ccflags-y += -DWIFI_OUT_FEM=0
 ccflags-y += -DRF_TX_CONTROL_IO=16
 
+# stbc rx option
+ccflags-y += -DSTBC_RX_24G=0
+ccflags-y += -DSTBC_RX_5G=0
+
 #ccflags-y += -DP2P_STA_COEX
 #ccflags-y += -DCUSTOM_FEATURE
 #ccflags-y += -DMCAST_FWDING
@@ -267,7 +275,7 @@ ccflags-y += -DRF_TX_CONTROL_IO=16
 # For offloading probe response to FW, the extra IE must be included
 # in the probe response template
 #ccflags-y += -DPROBE_RESP_EXTRA_IE
-#ccflags-y += -DIPV6_FILTERING
+ccflags-y += -DIPV6_FILTERING
 
 # basic files for building module
 bes2600-y := \

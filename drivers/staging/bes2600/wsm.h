@@ -379,6 +379,9 @@ struct bes2600_vif;
 #define WSM_PS_ERROR_AP_SENT_UNICAST_IN_DOZE        3
 #define WSM_PS_ERROR_AP_NO_DATA_AFTER_TIM           4
 
+/* eth filter extended flags */
+#define WSM_ETH_FILTER_EXT_DISABLE_IPV6_MATCH			BIT(0)
+
 /* WSM events */
 /* Error */
 #define WSM_EVENT_ERROR			(0)
@@ -570,6 +573,7 @@ struct bes2600_vif;
 #define WSM_MIB_ID_EXT_TCP_KEEP_ALIVE_PERIOD        (WSM_MIB_ID_EXT_BASE + 2)  /* Mib to set tcp keep alive period */
 #define WSM_MIB_ID_EXT_TX_SHORT_GI_ENABLED          (WSM_MIB_ID_EXT_BASE + 3)  /* Mib to set tx short enabled */
 #define WSM_MIB_ID_EXT_TXRX_OPT_PARAM               (WSM_MIB_ID_EXT_BASE + 4)  /* Mib to set tx/rx opt param to enhance wifi throuhput */
+#define WSM_MIB_ID_EXT_PWR_TBL_UPDATE               (WSM_MIB_ID_EXT_BASE + 5)  /* Mib to update power table */
 
 
 #ifdef IPV6_FILTERING
@@ -591,6 +595,7 @@ struct bes2600_vif;
 
 #ifdef IPV6_FILTERING
 #define WSM_FRAME_TYPE_NA               (7)
+#define WSM_MAX_IPV6_ADDR_FILTER_ELTS	(8)
 #endif /*IPV6_FILTERING*/
 
 #define WSM_FRAME_GREENFIELD		(0x80)	/* See 4.11 */
@@ -653,6 +658,9 @@ struct bes2600_vif;
 #define WSM_FILTER_PORT_TYPE_DST	(0)
 #define WSM_FILTER_PORT_TYPE_SRC	(1)
 
+#define WSM_IP_DATA_FRAME_ADDRMODE_SRC       (0x01)
+#define WSM_IP_DATA_FRAME_ADDRMODE_DEST      (0x02)
+#define WSM_IP_DATA_FRAME_ADDRMODE_TCPACK    (0x03)
 
 
 struct wsm_hdr {
@@ -1538,34 +1546,41 @@ static inline int wsm_set_beacon_filter_table(struct bes2600_common *hw_priv,
 					struct wsm_beacon_filter_table *ft,
 					int if_id)
 {
+	static __le32 numOfIEs;
 	size_t size = __le32_to_cpu(ft->numOfIEs) *
 		     sizeof(struct wsm_beacon_filter_table_entry) +
 		     sizeof(__le32);
 
+	if (numOfIEs == ft->numOfIEs && numOfIEs == 0) {
+		return 0;
+	}
+	numOfIEs = ft->numOfIEs;
 	return wsm_write_mib(hw_priv, WSM_MIB_ID_BEACON_FILTER_TABLE, ft, size,
 			if_id);
 }
 
 #define WSM_BEACON_FILTER_ENABLE	BIT(0) /* Enable/disable beacon filtering */
 #define WSM_BEACON_FILTER_AUTO_ERP	BIT(1) /* If 1 FW will handle ERP IE changes internally */
+#define WSM_BEACON_FILTER_AUTO_HT	BIT(2) /* If 1 FW will handle HT OP IE changes internally */
 
 struct wsm_beacon_filter_control {
-	int enabled;
-	int bcn_count;
+	__le32 enabled;
+	__le32 bcn_count;
 };
 
 static inline int wsm_beacon_filter_control(struct bes2600_common *hw_priv,
 					struct wsm_beacon_filter_control *arg,
 					int if_id)
 {
-	struct {
-		__le32 enabled;
-		__le32 bcn_count;
-	} val;
-	val.enabled = __cpu_to_le32(arg->enabled);
-	val.bcn_count = __cpu_to_le32(arg->bcn_count);
-	return wsm_write_mib(hw_priv, WSM_MIB_ID_BEACON_FILTER_ENABLE, &val,
-			     sizeof(val), if_id);
+	static __le32 enabled, bcn_count;
+
+	if (enabled == arg->enabled && bcn_count == arg->bcn_count) {
+		return 0;
+	}
+	enabled = arg->enabled;
+	bcn_count = arg->bcn_count;
+	return wsm_write_mib(hw_priv, WSM_MIB_ID_BEACON_FILTER_ENABLE, arg,
+			     sizeof(struct wsm_beacon_filter_control), if_id);
 }
 
 enum wsm_power_mode {
@@ -1734,7 +1749,8 @@ static inline int wsm_set_tx_rate_retry_policy(struct bes2600_common *hw_priv,
 /* 4.32 SetEtherTypeDataFrameFilter */
 struct wsm_ether_type_filter_hdr {
 	u8 nrFilters;		/* Up to WSM_MAX_FILTER_ELEMENTS */
-	u8 reserved[3];
+	u8 extFlags;
+	u8 reserved[2];
 } __packed;
 
 struct wsm_ether_type_filter {
@@ -1932,13 +1948,28 @@ struct wsm_ip6_addr_info {
 	u8 ipv6[16];
 };
 
-/* IPV6 Addr Filter */
-struct wsm_ipv6_filter {
+struct wsm_ipv6_filter_header {
 	u8 numfilter;
 	u8 action_mode;
 	u8 Reserved[2];
-	struct wsm_ip6_addr_info ipv6filter[0];
+};
+
+/* IPV6 Addr Filter */
+struct wsm_ipv6_filter {
+	struct wsm_ipv6_filter_header hdr;
+	struct wsm_ip6_addr_info ipv6filter[WSM_MAX_IPV6_ADDR_FILTER_ELTS];
 } __packed;
+
+static inline int wsm_set_ipv6_filter(struct bes2600_common *hw_priv,
+					struct wsm_ipv6_filter_header *arg,
+					int if_id)
+{
+	size_t size = sizeof(struct wsm_ipv6_filter_header) +
+		arg->numfilter * sizeof(struct wsm_ip6_addr_info);
+
+	return wsm_write_mib(hw_priv, WSM_MIB_IP_IPV6_ADDR_FILTER,
+		arg, size, if_id);
+}
 #endif /*IPV6_FILTERING*/
 
 struct wsm_ip4_addr_info {
@@ -2157,6 +2188,7 @@ enum bes2600_rf_cmd_type {
 	BES2600_RF_CMD_CH_INFO           = 1,
 	BES2600_RF_CMD_CPU_USAGE         = 2,
 	BES2600_RF_CMD_WIFI_STATUS       = 3,
+	BES2600_RF_CMD_CALI_TXT_TO_EFUSE = 4,
 	/* add new here */
 
 	BES2600_RF_CMD_MAX,
@@ -2204,8 +2236,7 @@ int wsm_cpu_usage_cmd(struct bes2600_common *hw_priv);
 
 int wsm_wifi_status_cmd(struct bes2600_common *hw_priv, uint32_t status);
 
-#ifdef PLAT_ALLWINNER_R329
-int wsm_save_factory_txt_to_flash(struct bes2600_common *hw_priv, const u8 *data, int if_id);
+#if defined(PLAT_ALLWINNER_R329) || defined(STANDARD_FACTORY_EFUSE_FLAG)
+int wsm_save_factory_txt_to_mcu(struct bes2600_common *hw_priv, const u8 *data, int if_id, enum bes2600_rf_cmd_type cmd_type);
 #endif
-
 #endif /* BES2600_HWIO_H_INCLUDED */

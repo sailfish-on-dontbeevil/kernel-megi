@@ -87,8 +87,8 @@ static int bes2600_disable_filtering(struct bes2600_vif *priv)
 			priv->if_id);
 
 	/* Beacon Filter Disable */
-	bf_control.enabled = 0;
-	bf_control.bcn_count = 1;
+	bf_control.enabled = __cpu_to_le32(0);
+	bf_control.bcn_count = __cpu_to_le32(1);
 	if (!ret)
 		ret = wsm_beacon_filter_control(hw_priv, &bf_control,
 					priv->if_id);
@@ -651,8 +651,8 @@ void bes2600_scan_work(struct work_struct *work)
 		if (scan.band == NL80211_BAND_2GHZ) {
 			coex_calc_wifi_scan_time(&minChannelTime, &maxChannelTime);
 		} else {
-			minChannelTime = 90;
-			maxChannelTime = 90;
+			minChannelTime = 100;
+			maxChannelTime = 100;
 		}
 #endif
 
@@ -1078,7 +1078,7 @@ void bes2600_probe_work(struct work_struct *work)
 		return;
 	}
 
-	if (bes2600_queue_get_skb(queue,	hw_priv->pending_frame_id,
+	if (bes2600_queue_get_skb(queue, hw_priv->pending_frame_id,
 			&frame.skb, &txpriv)) {
 		up(&hw_priv->scan.lock);
 		up(&hw_priv->conf_lock);
