@@ -33,8 +33,8 @@
 #define CW12XX_GENERIC_IF_ID		(2)
 #define CW12XX_HOST_VIF0_11N_THROTTLE	(63)
 #define CW12XX_HOST_VIF1_11N_THROTTLE	(63)
-#define CW12XX_HOST_VIF0_11BG_THROTTLE	(15)
-#define CW12XX_HOST_VIF1_11BG_THROTTLE	(15)
+#define CW12XX_HOST_VIF0_11BG_THROTTLE	(20)
+#define CW12XX_HOST_VIF1_11BG_THROTTLE	(20)
 #if 0
 #define CW12XX_FW_VIF0_THROTTLE		(15)
 #define CW12XX_FW_VIF1_THROTTLE		(15)
@@ -374,6 +374,13 @@ struct bes2600_common {
 	atomic_t			bh_term;
 	atomic_t			bh_suspend;
 
+#ifdef CONFIG_PM
+	/*Suspend*/
+	u8				unjoin_if_id_slots;
+	bool				suspend_in_progress;
+	struct notifier_block		pm_notify;
+#endif
+
 	struct workqueue_struct         *bh_workqueue;
 	struct work_struct              bh_work;
 
@@ -642,24 +649,28 @@ struct bes2600_vif {
 #endif
 	bool pmf;
 
-    u32 hw_value;
-    /* dot11CountersTable */
-    u32 dot11TransmittedFragmentCount;
-    u32 dot11MulticastTransmittedFrameCount;
-    u32 dot11FailedCount;
-    u32 dot11RetryCount;
-    u32 dot11MultipleRetryCount;
-    u32 dot11FrameDuplicateCount;
-    u32 dot11ReceivedFragmentCount;
-    u32 dot11RxReorderLeakCount;
-    u32 dot11ReceivedBytes;
-    u32 dot11ReceivedDataBytes;
-    u32 dot11MulticastReceivedFrameCount;
-    u32 dot11TransmittedFrameCount;
-    u32 dot11TransmittedBytes;
-    u32 dot11TransmittedDataBytes;
-    u32 dot11Txbps;
-    u32 dot11Rxbps;
+	u32 hw_value;
+	/* dot11CountersTable */
+	u32 dot11TransmittedFragmentCount;
+	u32 dot11MulticastTransmittedFrameCount;
+	u32 dot11FailedCount;
+	u32 dot11RetryCount;
+	u32 dot11MultipleRetryCount;
+	u32 dot11FrameDuplicateCount;
+	u32 dot11ReceivedFragmentCount;
+	u32 dot11RxReorderLeakCount;
+	u32 dot11ReceivedBytes;
+	u32 dot11ReceivedDataBytes;
+	u32 dot11MulticastReceivedFrameCount;
+	u32 dot11TransmittedFrameCount;
+	u32 dot11TransmittedBytes;
+	u32 dot11TransmittedDataBytes;
+	u32 dot11Txbps;
+	u32 dot11Rxbps;
+
+	/* used to calculate signal strength */
+	s32 signal;
+	s32 signal_mul;
 };
 struct bes2600_sta_priv {
 	int link_id;

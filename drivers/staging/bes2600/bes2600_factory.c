@@ -100,13 +100,17 @@ static int bes2600_factory_crc_check(struct factory_t *factory_data)
 {
 #ifdef FACTORY_CRC_CHECK
 	u32 cal_crc = 0;
+	u32 crc_len = sizeof(factory_data_t);
+#ifndef STANDARD_FACTORY_EFUSE_FLAG
+	crc_len = (crc_len - sizeof(u16) + 3) & (~0x3);
+#endif
 
 	if (!factory_data) {
 		bes2600_err(BES2600_DBG_FACTORY, "%s NULL pointer err \n", __func__);
 		return -1;
 	}
 
-	cal_crc = factory_crc32((uint8_t *)(&(factory_data->data)), sizeof(factory_data_t));
+	cal_crc = factory_crc32((uint8_t *)(&(factory_data->data)), crc_len);
 	if (factory_data->head.crc != cal_crc) {
 		bes2600_err(BES2600_DBG_CHARDEV,
 			"bes2600 factory check failed, calc_crc:0x%08x factory_crc: 0x%08x\n",
@@ -243,9 +247,19 @@ static inline int factory_parse(uint8_t *source_buf, struct factory_t *factory)
 		&factory->data.bt_tx_power[0],\
 		&factory->data.bt_tx_power[1],\
 		&factory->data.bt_tx_power[2],\
-		&factory->data.bt_tx_power[3]);
+		&factory->data.bt_tx_power[3]
+#ifdef STANDARD_FACTORY_EFUSE_FLAG
+		,&factory->data.select_efuse);
+#else
+		);
+#endif
 
-	if (ret != 30) {
+#ifndef STANDARD_FACTORY_EFUSE_FLAG
+	factory->data.select_efuse = 0;
+#endif
+
+	if (ret != FACTORY_MEMBER_NUM)
+	{
 		bes2600_err(BES2600_DBG_FACTORY, "bes2600_factory.txt parse fail\n");
 		return -1;
 	}
@@ -401,6 +415,7 @@ void factory_little_endian_cvrt(u8 *data)
 
 	TRANS_LE16(trans_data->data.tx_power_flags_5G);
 	TRANS_LE16(trans_data->data.temperature_5G);
+	TRANS_LE16(trans_data->data.select_efuse);
 
 }
 
@@ -520,6 +535,9 @@ static int bes2600_factory_cali_file_hdr_fill(struct factory_t **factory_head)
 	(*factory_head)->data.bt_tx_power[1] = 0x10;
 	(*factory_head)->data.bt_tx_power[2] = 0x05;
 	(*factory_head)->data.bt_tx_power[3] = 0x15;
+#ifdef STANDARD_FACTORY_EFUSE_FLAG
+	(*factory_head)->data.select_efuse = 0;
+#endif
 
 	return 0;
 }
@@ -741,6 +759,49 @@ err:
 	return ret;
 }
 
+#ifdef STANDARD_FACTORY_EFUSE_FLAG
+int16_t bes2600_select_efuse_flag_write(uint16_t select_efuse_flag)
+{
+	struct factory_t *factory_flag_p = NULL;
+	u8 *file_buffer = NULL;
+	int16_t ret = 0;
+
+	if (!(file_buffer = bes2600_factory_get_file_buffer()))
+		return -FACTORY_GET_INPUT_NULL_POINTER;
+
+	bes2600_factory_lock();
+
+	/**
+	 * When it returns true, it means that the factory file has been read.
+	 * When it returns false, it means that the factory file does not exist,
+	 * or the operation of reading the text file fails. At this time, a new factory file will be created.
+	 */
+	if (bes2600_factory_file_status_read(file_buffer)) {
+		factory_flag_p = factory_p;
+	} else {
+		if (bes2600_factory_cali_file_hdr_fill(&factory_flag_p)) {
+			bes2600_warn(BES2600_DBG_FACTORY, "%s, create bes2600_factory.txt fail.", __func__);
+			ret = -FACTORY_FACTORY_TXT_CREATE_FAIL;
+			goto err;
+		}
+	}
+
+	factory_flag_p->data.select_efuse = select_efuse_flag;
+	bes2600_dbg(BES2600_DBG_FACTORY, "%s: select_efuse = %x\n", __func__, select_efuse_flag);
+
+	/* save to file */
+	if (bes2600_wifi_cali_table_save(file_buffer, factory_flag_p)) {
+		ret = -FACTORY_SAVE_WRITE_ERR;
+		goto err;
+	}
+
+err:
+	bes2600_factory_free_file_buffer(file_buffer);
+	bes2600_factory_unlock();
+	return ret;
+}
+#endif
+
 int16_t vendor_set_power_cali_flag(struct wifi_power_cali_flag_t *cali_flag)
 {
 	struct factory_t *factory_power_flag_p = NULL;
@@ -823,13 +884,22 @@ static inline int factory_build(uint8_t *dest_buf, struct factory_t *factory)
 		factory->data.bt_tx_power[0],\
 		factory->data.bt_tx_power[1],\
 		factory->data.bt_tx_power[2],\
-		factory->data.bt_tx_power[3]);
+		factory->data.bt_tx_power[3]
+#ifdef STANDARD_FACTORY_EFUSE_FLAG
+		,factory->data.select_efuse);
+#else
+		);
+#endif
 }
 
 static int bes2600_wifi_cali_table_save(u8 *file_buffer, struct factory_t *factory_save_p)
 {
 	int ret = 0;
 	int w_size;
+	u32 crc_len = sizeof(factory_data_t);
+#ifndef STANDARD_FACTORY_EFUSE_FLAG
+	crc_len = (crc_len - sizeof(u16) + 3) & (~0x3);
+#endif
 
 	bes2600_info(BES2600_DBG_FACTORY, "enter %s\n", __func__);
 
@@ -846,7 +916,7 @@ static int bes2600_wifi_cali_table_save(u8 *file_buffer, struct factory_t *facto
 	file_buffer[FACTORY_MAX_SIZE - 1] = '\n';
 
 	factory_save_p->head.crc =
-		factory_crc32((uint8_t *)(&(factory_save_p->data)), sizeof(factory_data_t));
+		factory_crc32((uint8_t *)(&(factory_save_p->data)), crc_len);
 
 	w_size = factory_build(file_buffer, factory_save_p);
 

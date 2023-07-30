@@ -110,6 +110,7 @@ int bes2600_vendor_rf_cmd(struct ieee80211_hw *hw, struct ieee80211_vif *vif, u8
 	case VENDOR_RF_NOSIGNALING_CMD:
 	case VENDOR_RF_SAVE_FREQOFFSET_CMD:
 	case VENDOR_RF_SAVE_POWERLEVEL_CMD:
+	case VENDOR_RF_GET_CALI_FROM_EFUSE:
 		sema_init(&hw_priv->vendor_rf_cmd_replay_sema, 0);
 		ret = wsm_vendor_rf_cmd(hw_priv, if_id, vendor_rf_cmd);
 
