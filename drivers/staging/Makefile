@@ -11,6 +11,7 @@ obj-$(CONFIG_RTS5208)		+= rts5208/
 obj-$(CONFIG_OCTEON_ETHERNET)	+= octeon/
 obj-$(CONFIG_VT6655)		+= vt6655/
 obj-$(CONFIG_VT6656)		+= vt6656/
+obj-$(CONFIG_BES2600)		+= bes2600/
 obj-$(CONFIG_VME_BUS)		+= vme_user/
 obj-$(CONFIG_IIO)		+= iio/
 obj-$(CONFIG_FB_SM750)		+= sm750fb/
