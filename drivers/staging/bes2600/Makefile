@@ -111,7 +111,7 @@ endif
 ifeq ($(CONFIG_BES2600_CALIB_FROM_LINUX),y)
 FACTORY_CRC_CHECK                    ?= n
 FACTORY_SAVE_MULTI_PATH              ?= y
-STANDARD_FACTORY_EFUSE_FLAG          ?= y
+STANDARD_FACTORY_EFUSE_FLAG          ?= n
 ifeq ($(FACTORY_SAVE_MULTI_PATH),y)
 FACTORY_PATH                         ?= /data/cfg/bes2600_factory.txt
 FACTORY_DEFAULT_PATH                 ?= /lib/firmware/bes2600_factory.txt
