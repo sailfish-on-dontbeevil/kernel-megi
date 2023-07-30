@@ -19,7 +19,7 @@
 #define NVREC_CURRENT_VERSION	2
 
 #define FACTORY_MAX_SIZE 600
-#define STANDARD_FACTORY "##head\n\
+#define __STANDARD_FACTORY "##head\n\
 magic:0x%hx\n\
 version:0x%hx\n\
 crc:0x%x\n\
@@ -53,8 +53,17 @@ temperature_5G:0x%hx\n\
 bdr_div:0x%x\n\
 bdr_power:0x%x\n\
 edr_div:0x%x\n\
-edr_power:0x%x\n\
-%%%%\n"
+edr_power:0x%x\n"
+
+#ifdef STANDARD_FACTORY_EFUSE_FLAG
+#define STANDARD_FACTORY_EFUSE "##select_efuse_flag\nselect_efuse:%hx\n"
+#define FACTORY_MEMBER_NUM 31
+#else
+#define STANDARD_FACTORY_EFUSE
+#define FACTORY_MEMBER_NUM 30
+#endif
+
+#define STANDARD_FACTORY  __STANDARD_FACTORY STANDARD_FACTORY_EFUSE "%%%%\n"
 
 typedef struct {
 	uint16_t magic;
@@ -103,6 +112,7 @@ typedef struct {
 	uint32_t bt_tx_power[4];
 	/* The temperature after 5G clibrating. */
 	uint16_t temperature_5G;
+	uint16_t select_efuse;
 } factory_data_t;
 
 struct factory_t {
@@ -204,5 +214,7 @@ int16_t bes2600_wifi_cali_freq_write(struct wifi_freq_cali_t *data_cali);
 int16_t vendor_get_freq_cali(struct wifi_freq_cali_t *vendor_freq);
 int16_t vendor_get_power_cali(struct wifi_get_power_cali_t *power_cali);
 int16_t vendor_set_power_cali_flag(struct wifi_power_cali_flag_t *cali_flag);
-
+#ifdef STANDARD_FACTORY_EFUSE_FLAG
+int16_t bes2600_select_efuse_flag_write(uint16_t select_efuse_flag);
+#endif
 #endif
