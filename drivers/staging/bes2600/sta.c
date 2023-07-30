@@ -2361,6 +2361,8 @@ void bes2600_join_work(struct work_struct *work)
 			priv->join_status = BES2600_JOIN_STATUS_STA;
 			atomic_set(&priv->connect_in_process, 1);
 
+			cancel_delayed_work_sync(&priv->join_timeout);
+
 			/* Due to beacon filtering it is possible that the
 			 * AP's beacon is not known for the mac80211 stack.
 			 * Disable filtering temporary to make sure the stack
