@@ -134,7 +134,7 @@ static struct ieee80211_channel bes2600_2ghz_chantable[] = {
 };
 
 #ifdef CONFIG_BES2600_5GHZ_SUPPORT
-#if 0
+#if 1
 static struct ieee80211_channel bes2600_5ghz_chantable[] = {
 	CHAN5G(34, 0),		CHAN5G(36, 0),
 	CHAN5G(38, 0),		CHAN5G(40, 0),
