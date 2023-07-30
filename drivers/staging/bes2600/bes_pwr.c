@@ -436,8 +436,8 @@ static void bes2600_pwr_delete_all_cb(struct bes2600_common *hw_priv)
 
 	/* delete all cb in exit_cb_list */
 	list_for_each_entry_safe(item1, temp1, &hw_priv->bes_power.exit_cb_list, link) {
-		list_del(&item->link);
-		kfree(item);
+		list_del(&item1->link);
+		kfree(item1);
 	}
 
 	mutex_unlock(&hw_priv->bes_power.pwr_cb_mutex);
@@ -487,13 +487,14 @@ static int bes2600_pwr_enter_lp_mode(struct bes2600_common *hw_priv)
 
 		if (priv->join_status == BES2600_JOIN_STATUS_STA &&
 		    priv->bss_params.aid &&
-		    priv->setbssparams_done &&
-		    priv->filter4.enable) {
+		    priv->setbssparams_done) {
 			/* enable arp filter */
-			bes2600_dbg(BES2600_DBG_PWR, "%s, arp filter, enable:%d addr:%s\n",
-				__func__, priv->filter4.enable, bes2600_get_mac_str(ip_str, priv->filter4.ipv4Address[0]));
-			ret = wsm_set_arp_ipv4_filter(hw_priv, &priv->filter4, priv->if_id);
-			bes2600_err_with_cond(ret, BES2600_DBG_PWR, "%s, set arp filter failed\n", __func__);
+			if (priv->filter4.enable) {
+				bes2600_dbg(BES2600_DBG_PWR, "%s, arp filter, enable:%d addr:%s\n",
+					__func__, priv->filter4.enable, bes2600_get_mac_str(ip_str, priv->filter4.ipv4Address[0]));
+				ret = wsm_set_arp_ipv4_filter(hw_priv, &priv->filter4, priv->if_id);
+				bes2600_err_with_cond(ret, BES2600_DBG_PWR, "%s, set arp filter failed\n", __func__);
+			}
 
 			/* skip beacon receive if applications don't have muticast service */
 			if(priv->join_dtim_period && !priv->has_multicast_subscription) {
@@ -501,14 +502,15 @@ static int bes2600_pwr_enter_lp_mode(struct bes2600_common *hw_priv)
 				if(priv->join_dtim_period >= CONFIG_BES2600_LISTEN_INTERVAL) {
 					listen_interval = priv->join_dtim_period;
 				} else {
-					listen_interval = CONFIG_BES2600_LISTEN_INTERVAL / priv->join_dtim_period;
+					listen_interval = CONFIG_BES2600_LISTEN_INTERVAL / priv->join_dtim_period * priv->join_dtim_period;
 				}
 				ret = wsm_set_beacon_wakeup_period(hw_priv, 1, listen_interval, priv->if_id);
 				bes2600_err_with_cond(ret, BES2600_DBG_PWR, "%s, set wakeup period failed\n", __func__);
 			}
 
 			/* Set Enable Broadcast Address Filter */
-			priv->broadcast_filter.action_mode = WSM_FILTER_ACTION_FILTER_OUT;
+			priv->broadcast_filter.action_mode = priv->filter4.enable ? 
+						WSM_FILTER_ACTION_FILTER_OUT : WSM_FILTER_ACTION_IGNORE;
 			if (priv->join_status == BES2600_JOIN_STATUS_AP)
 				priv->broadcast_filter.address_mode = WSM_FILTER_ADDR_MODE_A3;
 			ret = bes2600_set_macaddrfilter(hw_priv, priv, (u8 *)&priv->broadcast_filter);
@@ -587,15 +589,16 @@ static int bes2600_pwr_exit_lp_mode(struct bes2600_common *hw_priv)
 
 		if (priv->join_status == BES2600_JOIN_STATUS_STA &&
 		    priv->bss_params.aid &&
-		    priv->setbssparams_done &&
-		    priv->filter4.enable) {
-			/* enable arp filter */
-			filter = priv->filter4;
-			filter.enable = false;
-			bes2600_dbg(BES2600_DBG_PWR, "%s, arp filter, enable:%d addr:%s\n",
-				__func__, filter.enable, bes2600_get_mac_str(ip_str, filter.ipv4Address[0]));
-			ret = wsm_set_arp_ipv4_filter(hw_priv, &filter, priv->if_id);
-			bes2600_err_with_cond(ret, BES2600_DBG_PWR, "%s, set arp filter failed\n", __func__);
+		    priv->setbssparams_done) {
+			/* disable arp filter */
+			if (priv->filter4.enable) {
+				filter = priv->filter4;
+				filter.enable = false;
+				bes2600_dbg(BES2600_DBG_PWR, "%s, arp filter, enable:%d addr:%s\n",
+					__func__, filter.enable, bes2600_get_mac_str(ip_str, filter.ipv4Address[0]));
+				ret = wsm_set_arp_ipv4_filter(hw_priv, &filter, priv->if_id);
+				bes2600_err_with_cond(ret, BES2600_DBG_PWR, "%s, set arp filter failed\n", __func__);
+			}
 
 			/* set wakeup perioid */
 			wsm_set_beacon_wakeup_period(hw_priv, priv->join_dtim_period, 0, priv->if_id);
@@ -1395,6 +1398,31 @@ int bes2600_pwr_busy_event_dump(struct bes2600_common *hw_priv, char *buffer, u3
 	if(!list_empty(&hw_priv->bes_power.pending_event_list)) {
 		list_for_each_entry(item, &hw_priv->bes_power.pending_event_list, link) {
 					used_len += snprintf(buffer + used_len, buf_len - used_len, "%9s\t\t%s\t\t%lu\n",
+					bes2600_get_pwr_busy_event_name(item),
+					BES_PWR_IS_CONSTANT_EVENT(item->event) ? "C" : "D",
+					bes2600_get_pwr_busy_event_timeout(item));
+		}
+	}
+	spin_unlock_irqrestore(&hw_priv->bes_power.pwr_lock, flags);
+
+	return 0;
+}
+
+int bes2600_pwr_busy_event_record(struct bes2600_common *hw_priv, char *buffer, u32 buf_len)
+{
+	unsigned long max_timeout = 0;
+	struct bes2600_pwr_event_t *item = NULL;
+	unsigned long flags;
+
+	if(!buffer) {
+		return -1;
+	}
+
+	spin_lock_irqsave(&hw_priv->bes_power.pwr_lock, flags);
+	bes2600_update_power_delay_events(&hw_priv->bes_power, &max_timeout);
+	if(!list_empty(&hw_priv->bes_power.pending_event_list)) {
+		list_for_each_entry(item, &hw_priv->bes_power.pending_event_list, link) {
+					snprintf(buffer, buf_len, "Event: %9s. Flag: %s. timeout(ticks): %lu.\n",
 					bes2600_get_pwr_busy_event_name(item),
 					BES_PWR_IS_CONSTANT_EVENT(item->event) ? "C" : "D",
 					bes2600_get_pwr_busy_event_timeout(item));

@@ -135,6 +135,7 @@ void bes2600_pwr_mcu_sleep_directly(struct bes2600_common *hw_priv);
 void bes2600_pwr_mark_ap_lp_bad(struct bes2600_common *hw_priv);
 void bes2600_pwr_clear_ap_lp_bad_mark(struct bes2600_common *hw_priv);
 int bes2600_pwr_busy_event_dump(struct bes2600_common *hw_priv, char *buffer, u32 buf_len);
+int bes2600_pwr_busy_event_record(struct bes2600_common *hw_priv, char *buffer, u32 buf_len);
 #else
 static inline void bes2600_pwr_init(struct bes2600_common *hw_priv) { }
 static inline void bes2600_pwr_exit(struct bes2600_common *hw_priv) { }
@@ -162,6 +163,7 @@ static inline void bes2600_pwr_mcu_sleep_directly(struct bes2600_common *hw_priv
 static inline void bes2600_pwr_mark_ap_lp_bad(struct bes2600_common *hw_priv) { }
 static inline void bes2600_pwr_clear_ap_lp_bad_mark(struct bes2600_common *hw_priv) { }
 static inline int bes2600_pwr_busy_event_dump(struct bes2600_common *hw_priv, char *buffer, u32 buf_len) { return 0; }
+static inline int bes2600_pwr_busy_event_record(struct bes2600_common *hw_priv, char *buffer, u32 buf_len) { return 0; }
 #endif
 
 #endif

@@ -30,7 +30,7 @@
 
 #define BES2600_ENABLE_ARP_FILTER_OFFLOAD	3
 
-#define BES2600_KEEP_ALIVE_PERIOD	(20)
+#define BES2600_KEEP_ALIVE_PERIOD	(15)
 
 #ifndef ERP_INFO_BYTE_OFFSET
 #define ERP_INFO_BYTE_OFFSET 2
@@ -249,8 +249,11 @@ static int bes2600_set_tim_impl(struct bes2600_vif *priv, bool aid0_bit_set)
 	bes2600_dbg(BES2600_DBG_AP, "[AP] %s mcast: %s.\n",
 		__func__, aid0_bit_set ? "ena" : "dis");
 
-	skb = ieee80211_beacon_get_tim(priv->hw, priv->vif,
-			&tim_offset, &tim_length);
+	// skb = ieee80211_beacon_get_tim(priv->hw, priv->vif,
+	// 		&tim_offset, &tim_length);
+	   skb = ieee80211_beacon_get_tim(priv->hw, priv->vif,
+				       &tim_offset, &tim_length, 0);
+	
 	if (!skb) {
 		if (!__bes2600_flush(hw_priv, true, priv->if_id))
 			wsm_unlock_tx(hw_priv);
@@ -393,18 +396,19 @@ static int bes2600_set_btcoexinfo(struct bes2600_vif *priv)
 void bes2600_bss_info_changed(struct ieee80211_hw *dev,
 			     struct ieee80211_vif *vif,
 			     struct ieee80211_bss_conf *info,
-			     u32 changed)
+			     u64 changed)
 {
 	struct bes2600_common *hw_priv = dev->priv;
 	struct bes2600_vif *priv = cw12xx_get_vif_from_ieee80211(vif);
 	struct ieee80211_conf *conf = &dev->conf;
 	const u8 override_fpsm_timeout = BES2600_FASTPS_IDLE_TIME;
+	struct ieee80211_vif_cfg cfg;
 
 #ifdef P2P_MULTIVIF
 	if (priv->if_id == CW12XX_GENERIC_IF_ID)
 		return;
 #endif
-	bes2600_info(BES2600_DBG_AP, "BSS CHANGED:	%08x\n", changed);
+	bes2600_info(BES2600_DBG_AP, "BSS CHANGED:	%08llx\n", changed);
 	down(&hw_priv->conf_lock);
 	if (changed & BSS_CHANGED_BSSID) {
 #ifdef CONFIG_BES2600_TESTMODE
@@ -430,19 +434,19 @@ void bes2600_bss_info_changed(struct ieee80211_hw *dev,
 		struct wsm_arp_ipv4_filter filter = {0};
 		int i;
 		bes2600_dbg(BES2600_DBG_AP, "[STA] BSS_CHANGED_ARP_FILTER cnt: %d",
-				     info->arp_addr_cnt);
+				      vif->cfg.arp_addr_cnt);
 
 #ifdef WIFI_BT_COEXIST_EPTA_ENABLE
-		if (info->arp_addr_cnt > 0) {
+		if (vif->cfg.arp_addr_cnt > 0) {
 			bwifi_change_current_status(hw_priv, BWIFI_STATUS_GOT_IP);
 		}
 #endif
 		/* Currently only one IP address is supported by firmware.
 		 * In case of more IPs arp filtering will be disabled. */
-		if (info->arp_addr_cnt > 0 &&
-		    info->arp_addr_cnt <= WSM_MAX_ARP_IP_ADDRTABLE_ENTRIES) {
-			for (i = 0; i < info->arp_addr_cnt; i++) {
-				filter.ipv4Address[i] = info->arp_addr_list[i];
+		if (vif->cfg.arp_addr_cnt > 0 &&
+		    vif->cfg.arp_addr_cnt <= WSM_MAX_ARP_IP_ADDRTABLE_ENTRIES) {
+			for (i = 0; i < vif->cfg.arp_addr_cnt; i++) {
+				filter.ipv4Address[i] = vif->cfg.arp_addr_list[i];
 				bes2600_dbg(BES2600_DBG_AP, "[STA] addr[%d]: 0x%X\n",
 					  i, filter.ipv4Address[i]);
 			}
@@ -490,7 +494,7 @@ void bes2600_bss_info_changed(struct ieee80211_hw *dev,
 			priv->power_set_true = 0;
 			priv->user_power_set_true = 0;
 
-			if(!info->ps) {
+			if(!cfg.ps) {
 				bes2600_pwr_set_busy_event(priv->hw_priv, BES_PWR_LOCK_ON_PS_ACTIVE);
 			}
 		}
@@ -498,7 +502,8 @@ void bes2600_bss_info_changed(struct ieee80211_hw *dev,
 		bes2600_pwr_clear_busy_event(priv->hw_priv, BES_PWR_LOCK_ON_GET_IP);
 	}
 
-#ifdef IPV6_FILTERING
+// #if (defined(IPV6_FILTERING) && LINUX_VERSION_CODE > KERNEL_VERSION(4,19,0))
+#if 0
 	if (changed & BSS_CHANGED_NDP_FILTER) {
 		struct wsm_ndp_ipv6_filter filter = {0};
 		int i;
@@ -606,7 +611,7 @@ void bes2600_bss_info_changed(struct ieee80211_hw *dev,
 		priv->wep_default_key_id = -1;
 		wsm_unlock_tx(hw_priv);
 
-		if (!info->assoc /* && !info->ibss_joined */) {
+		if (!cfg.assoc /* && !info->ibss_joined */) {
 			#ifdef P2P_STA_COEX
 			priv->cqm_link_loss_count = 400;
 			priv->cqm_beacon_loss_count = 200;
@@ -628,8 +633,8 @@ void bes2600_bss_info_changed(struct ieee80211_hw *dev,
 		int is_combo = 0;
 		int i;
 		struct bes2600_vif *tmp_priv;
-		bes2600_info(BES2600_DBG_AP, "BSS_CHANGED_ASSOC assoc: %d.\n", info->assoc);
-		if (info->assoc) { /* TODO: ibss_joined */
+		bes2600_info(BES2600_DBG_AP, "BSS_CHANGED_ASSOC assoc: %d.\n", vif->cfg.assoc );
+		if (cfg.assoc) { /* TODO: ibss_joined */
 			struct ieee80211_sta *sta = NULL;
 			if (info->dtim_period)
 				priv->join_dtim_period = info->dtim_period;
@@ -640,7 +645,9 @@ void bes2600_bss_info_changed(struct ieee80211_hw *dev,
 				cancel_delayed_work_sync(&priv->join_timeout);
 				bes2600_pwr_clear_busy_event(priv->hw_priv, BES_PWR_LOCK_ON_JOIN);
 				bes2600_pwr_set_busy_event(priv->hw_priv, BES_PWR_LOCK_ON_GET_IP);
-				txrx_opt_timer_init(priv->hw_priv);
+#ifdef BES2600_TX_RX_OPT
+				txrx_opt_timer_init(priv);
+#endif
 			}
 
 			rcu_read_lock();
@@ -651,11 +658,11 @@ void bes2600_bss_info_changed(struct ieee80211_hw *dev,
 				* mac80211 changes are available */
 				enum nl80211_channel_type ch_type;
 				BUG_ON(!hw_priv->channel);
-				hw_priv->ht_info.ht_cap = sta->ht_cap;
+				hw_priv->ht_info.ht_cap = sta->deflink.ht_cap;
 				priv->bss_params.operationalRateSet =
 					__cpu_to_le32(
 					bes2600_rate_mask_to_wsm(hw_priv,
-					sta->supp_rates[
+					sta->deflink.supp_rates[
 						hw_priv->channel->band]));
 				rcu_read_unlock();
 				ch_type = cfg80211_get_chandef_type(&info->chandef);
@@ -769,7 +776,7 @@ void bes2600_bss_info_changed(struct ieee80211_hw *dev,
 					priv->cqm_beacon_loss_count :
 					priv->cqm_link_loss_count;
 
-			priv->bss_params.aid = info->aid;
+			priv->bss_params.aid = cfg.aid;
 
 			if (priv->join_dtim_period < 1)
 				priv->join_dtim_period = 1;
@@ -975,7 +982,7 @@ void bes2600_bss_info_changed(struct ieee80211_hw *dev,
 	if (changed & BSS_CHANGED_BANDWIDTH) {
 		enum nl80211_channel_type ch_type = cfg80211_get_chandef_type(&info->chandef);
 
-		if (info->assoc &&
+		if (cfg.assoc &&
 		    hw_priv->ht_info.channel_type != ch_type &&
 		    priv->join_status == BES2600_JOIN_STATUS_STA) {
 			struct wsm_switch_channel channel;
@@ -990,7 +997,7 @@ void bes2600_bss_info_changed(struct ieee80211_hw *dev,
 	}
 
 	if (changed & BSS_CHANGED_PS) {
-		if (info->ps == false)
+		if (cfg.ps == false)
 			priv->powersave_mode.pmMode = WSM_PSM_ACTIVE;
 		else if (conf->dynamic_ps_timeout <= 0)
 			priv->powersave_mode.pmMode = WSM_PSM_PS;
@@ -999,7 +1006,7 @@ void bes2600_bss_info_changed(struct ieee80211_hw *dev,
 
 		/* set/clear ps active power busy event */
 		if(priv->join_status == BES2600_JOIN_STATUS_STA) {
-			if(!info->ps) {
+			if(!cfg.ps) {
 				bes2600_pwr_set_busy_event(priv->hw_priv, BES_PWR_LOCK_ON_PS_ACTIVE);
 			} else {
 				bes2600_pwr_clear_busy_event(priv->hw_priv, BES_PWR_LOCK_ON_PS_ACTIVE);
@@ -1292,7 +1299,8 @@ static int bes2600_upload_beacon(struct bes2600_vif *priv)
 #endif
 		frame.rate = WSM_TRANSMIT_RATE_6;
 
-	frame.skb = ieee80211_beacon_get(priv->hw, priv->vif);
+	// frame.skb = ieee80211_beacon_get(priv->hw, priv->vif);
+	frame.skb = ieee80211_beacon_get(priv->hw, priv->vif, 0);
 	if (WARN_ON(!frame.skb))
 		return -ENOMEM;
 
@@ -1461,7 +1469,8 @@ static int bes2600_upload_null(struct bes2600_vif *priv)
 	};
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0))
-	frame.skb = ieee80211_nullfunc_get(priv->hw, priv->vif, false);
+	// frame.skb = ieee80211_nullfunc_get(priv->hw, priv->vif, false);
+	frame.skb = ieee80211_nullfunc_get(priv->hw, priv->vif, -1, true);
 #else
 	frame.skb = ieee80211_nullfunc_get(priv->hw, priv->vif);
 #endif
@@ -1486,7 +1495,8 @@ static int bes2600_upload_qosnull(struct bes2600_vif *priv)
 	};
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0))
-	frame.skb = ieee80211_nullfunc_get(priv->hw, priv->vif, true);
+	// frame.skb = ieee80211_nullfunc_get(priv->hw, priv->vif, true);
+	frame.skb = ieee80211_nullfunc_get(priv->hw, priv->vif, -1, true);
 #else
 	frame.skb = ieee80211_nullfunc_get(priv->hw, priv->vif);
 #endif
@@ -1609,7 +1619,8 @@ static int bes2600_start_ap(struct bes2600_vif *priv)
 
 #ifndef HIDDEN_SSID
 	/* Get SSID */
-	skb = ieee80211_beacon_get(priv->hw, priv->vif);
+	// skb = ieee80211_beacon_get(priv->hw, priv->vif);
+	skb = ieee80211_beacon_get(priv->hw, priv->vif, 0);
 	if (WARN_ON(!skb))
 		return -ENOMEM;
 
@@ -1960,7 +1971,8 @@ void bes2600_ht_info_update_work(struct work_struct *work)
                 .count = 1,
         };
 
-        skb = ieee80211_beacon_get(priv->hw, priv->vif);
+        // skb = ieee80211_beacon_get(priv->hw, priv->vif);
+		skb = ieee80211_beacon_get(priv->hw, priv->vif, 0);
 	if (WARN_ON(!skb))
 		return;
 

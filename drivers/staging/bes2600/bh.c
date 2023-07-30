@@ -955,6 +955,7 @@ static void bes2600_bh_parse_wakeup_event(struct bes2600_common *hw_priv, struct
 {
 	struct wsm_hdr *wsm = (struct wsm_hdr *)skb->data;
 	u16 wsm_id = __le16_to_cpu(wsm->id) & 0xFFF;
+	bool set_wakeup_reason_later = false;
 
 	if (hw_priv->sbus_ops->wakeup_source &&
 	    hw_priv->sbus_ops->wakeup_source(hw_priv->sbus_priv)) {
@@ -966,15 +967,29 @@ static void bes2600_bh_parse_wakeup_event(struct bes2600_common *hw_priv, struct
 			if (ieee80211_is_mgmt(fctl)) {
 				u16 type = (fctl & cpu_to_le16(IEEE80211_FCTL_FTYPE)) >> 2;
 				u16 stype = (fctl & cpu_to_le16(IEEE80211_FCTL_STYPE)) >> 4;
+				if (ieee80211_is_deauth(fctl) || ieee80211_is_disassoc(fctl)) {
+					bes2600_chrdev_wakeup_by_event_set(WAKEUP_EVENT_PEER_DETACH);
+					set_wakeup_reason_later = true;
+					bes2600_info(BES2600_DBG_BH, "Host was waked by mgmt(deauth or disassoc)\n");
+				}
 				bes2600_info(BES2600_DBG_BH, "Host was waked by mgmt, type:%d(%d)\n", type, stype);
-			} else if(ieee80211_is_data(fctl)){
+			} else if (ieee80211_is_data(fctl)){
 				bes2600_bh_parse_data_pkt(hw_priv, skb);
 			} else {
 				bes2600_info(BES2600_DBG_BH, "Host was waked by unexpected frame, fctl:0x%04x\n", fctl);
 			}
+		} else if (wsm_id == 0x0C31) {
+			bes2600_info(BES2600_DBG_BH, "Host was waked by BT:0x%04x.\n", wsm_id);
+			bes2600_chrdev_wifi_update_wakeup_reason(WAKEUP_REASON_BT_PLAY, 0);
 		} else {
+			if (wsm_id == 0x0805) {
+				bes2600_chrdev_wakeup_by_event_set(WAKEUP_EVENT_WSME);
+				set_wakeup_reason_later = true;
+			}
 			bes2600_info(BES2600_DBG_BH, "Host was waked by event:0x%04x.\n", wsm_id);
 		}
+		if (!set_wakeup_reason_later)
+			bes2600_chrdev_wakeup_by_event_set(WAKEUP_EVENT_NONE);
 	}
 }
 
@@ -1451,7 +1466,8 @@ static int bes2600_bh(void *arg)
 
 		if (!hw_priv->hw_bufs_used &&
 		    !bes2600_pwr_device_is_idle(hw_priv) &&
-		    !atomic_read(&hw_priv->recent_scan)) {
+		    !atomic_read(&hw_priv->recent_scan) &&
+			bes2600_chrdev_is_signal_mode()) {
 			status = 5 * HZ;
 		} else if (hw_priv->hw_bufs_used) {
 			/* Interrupt loss detection */

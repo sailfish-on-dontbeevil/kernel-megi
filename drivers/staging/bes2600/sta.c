@@ -38,7 +38,7 @@
 #include "epta_request.h"
 #include "epta_coex.h"
 
-#ifdef PLAT_ALLWINNER_R329
+#if defined(PLAT_ALLWINNER_R329) || defined(STANDARD_FACTORY_EFUSE_FLAG)
 #include "bes2600_factory.h"
 #endif
 
@@ -132,7 +132,7 @@ static inline void __bes2600_bf_configure(struct bes2600_vif *priv)
 					WSM_BEACON_FILTER_IE_NO_LONGER_PRESENT |
 					WSM_BEACON_FILTER_IE_HAS_APPEARED;
 
-	priv->bf_control.enabled = WSM_BEACON_FILTER_ENABLE;
+	priv->bf_control.enabled = __cpu_to_le32(WSM_BEACON_FILTER_ENABLE);
 }
 
 /* ******************************************************************** */
@@ -236,8 +236,20 @@ void bes2600_stop(struct ieee80211_hw *dev)
 	spin_unlock(&hw_priv->event_queue_lock);
 	__bes2600_free_event_queue(&list);
 
-	for (i = 0; i < 4; i++)
-		bes2600_queue_clear(&hw_priv->tx_queue[i], CW12XX_ALL_IFS);
+	spin_lock(&hw_priv->vif_list_lock);
+	bes2600_for_each_vif(hw_priv, priv, i) {
+		if (!priv)
+			continue;
+		if (!(hw_priv->if_id_slot & BIT(priv->if_id)))
+			return;
+		/* protect tx confirm flow */
+		spin_lock(&priv->vif_lock);
+		for (i = 0; i < 4; i++)
+			bes2600_queue_clear(&hw_priv->tx_queue[i], i);
+		spin_unlock(&priv->vif_lock);
+	}
+	spin_unlock(&hw_priv->vif_list_lock);
+	
 
 	/* HACK! */
 	if (atomic_xchg(&hw_priv->tx_lock, 1) != 1)
@@ -424,6 +436,9 @@ void bes2600_remove_interface(struct ieee80211_hw *dev,
 			bes2600_info(BES2600_DBG_STA, "AP REMOVE 11BG %d\n",hw_priv->vif0_throttle);
 		}
 		bes2600_pwr_clear_busy_event(hw_priv, BES2600_JOIN_STATUS_AP);
+#ifdef BES2600_TX_RX_OPT
+		bes2600_txrx_opt_timer_restore();
+#endif
 		break;
 	case BES2600_JOIN_STATUS_MONITOR:
 		bes2600_disable_listening(priv);
@@ -600,12 +615,12 @@ void bes2600_update_filtering(struct bes2600_vif *priv)
 	struct bes2600_common *hw_priv = cw12xx_vifpriv_to_hwpriv(priv);
 	bool bssid_filtering = !priv->rx_filter.bssid;
 	static struct wsm_beacon_filter_control bf_disabled = {
-		.enabled = 0,
-		.bcn_count = 1,
+		.enabled = __cpu_to_le32(0),
+		.bcn_count = __cpu_to_le32(1),
 	};
 	bool ap_mode = 0;
 	static struct wsm_beacon_filter_table bf_table_auto = {
-		.numOfIEs = __cpu_to_le32(2),
+		.numOfIEs = __cpu_to_le32(1),
 		.entry[0].ieId = WLAN_EID_VENDOR_SPECIFIC,
 		.entry[0].actionFlags = WSM_BEACON_FILTER_IE_HAS_CHANGED |
 					WSM_BEACON_FILTER_IE_NO_LONGER_PRESENT |
@@ -613,18 +628,14 @@ void bes2600_update_filtering(struct bes2600_vif *priv)
 		.entry[0].oui[0] = 0x50,
 		.entry[0].oui[1] = 0x6F,
 		.entry[0].oui[2] = 0x9A,
-
-		.entry[1].ieId = WLAN_EID_HT_OPERATION,
-		.entry[1].actionFlags = WSM_BEACON_FILTER_IE_HAS_CHANGED |
-					WSM_BEACON_FILTER_IE_NO_LONGER_PRESENT |
-					WSM_BEACON_FILTER_IE_HAS_APPEARED,
 	};
 	static struct wsm_beacon_filter_control bf_auto = {
-		.enabled = WSM_BEACON_FILTER_ENABLE |
-			WSM_BEACON_FILTER_AUTO_ERP,
-		.bcn_count = 1,
+		.enabled = __cpu_to_le32(WSM_BEACON_FILTER_ENABLE |
+			WSM_BEACON_FILTER_AUTO_ERP | WSM_BEACON_FILTER_AUTO_HT),
+		// .bcn_count = __cpu_to_le32(priv->bf_control.bcn_count);
 	};
-	bf_auto.bcn_count = priv->bf_control.bcn_count;
+	// bf_table_auto.numOfIEs = 0; /* No filtering to do - so discarding */
+	bf_auto.bcn_count = __cpu_to_le32(priv->bf_control.bcn_count);
 
 	if (priv->join_status == BES2600_JOIN_STATUS_PASSIVE)
 		return;
@@ -783,8 +794,8 @@ void bes2600_configure_filter(struct ieee80211_hw *hw,
 		priv->rx_filter.bssid = (*total_flags & (FIF_OTHER_BSS |
 				FIF_PROBE_REQ)) ? 1 : 0;
 		priv->rx_filter.fcs = (*total_flags & FIF_FCSFAIL) ? 1 : 0;
-		priv->bf_control.bcn_count = (*total_flags &
-				(FIF_BCN_PRBRESP_PROMISC | FIF_PROBE_REQ)) ? 1 : 0;
+		priv->bf_control.bcn_count = __cpu_to_le32((*total_flags &
+				(FIF_BCN_PRBRESP_PROMISC | FIF_PROBE_REQ)) ? 1 : 0);
 #if 0
 		if (priv->listening ^ listening) {
 			priv->listening = listening;
@@ -800,7 +811,7 @@ void bes2600_configure_filter(struct ieee80211_hw *hw,
 }
 
 int bes2600_conf_tx(struct ieee80211_hw *dev, struct ieee80211_vif *vif,
-		u16 queue, const struct ieee80211_tx_queue_params *params)
+		unsigned int link_id, u16 queue, const struct ieee80211_tx_queue_params *params)
 {
 	struct bes2600_common *hw_priv = dev->priv;
 	struct bes2600_vif *priv = cw12xx_get_vif_from_ieee80211(vif);
@@ -829,9 +840,9 @@ int bes2600_conf_tx(struct ieee80211_hw *dev, struct ieee80211_vif *vif,
 			goto out;
 		}
 
-                WSM_EDCA_SET(&priv->edca, queue, params->aifs,
-                                params->cw_min, params->cw_max, params->txop, 0xc8,
-                                params->uapsd);
+		WSM_EDCA_SET(&priv->edca, queue, params->aifs,
+						params->cw_min, params->cw_max, params->txop, 0xc8,
+						params->uapsd);
 		ret = wsm_set_edca_params(hw_priv, &priv->edca, priv->if_id);
 		if (ret) {
 			ret = -EINVAL;
@@ -1183,9 +1194,12 @@ int __bes2600_flush(struct bes2600_common *hw_priv, bool drop, int if_id)
 		 * Temporary workaround: 2s
 		 */
 		if (drop) {
+			/* protect tx confirm flow */
+			spin_lock(&priv->vif_lock);
 			for (i = 0; i < 4; ++i)
 				bes2600_queue_clear(&hw_priv->tx_queue[i],
 					if_id);
+			spin_unlock(&priv->vif_lock);
 		} else {
 			ret = wait_event_timeout(
 				hw_priv->tx_queue_stats.wait_link_id_empty,
@@ -1224,6 +1238,7 @@ void bes2600_flush(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 	struct bes2600_vif *priv = NULL;
 	struct bes2600_common *hw_priv = hw->priv;
 	unsigned int ret = 0;
+	int hw_bufs_used = 0;
 	int i;
 
 	/* get queue status */
@@ -1231,6 +1246,7 @@ void bes2600_flush(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 		priv = cw12xx_get_vif_from_ieee80211(vif);
 		ret |= !bes2600_queue_stats_is_empty(
 				&hw_priv->tx_queue_stats, -1, priv->if_id);
+		hw_bufs_used = hw_priv->hw_bufs_used_vif[priv->if_id];
 	} else {
 		bes2600_for_each_vif(hw_priv, priv, i) {
 			if (!priv)
@@ -1239,11 +1255,12 @@ void bes2600_flush(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 				return;
 			ret |= !bes2600_queue_stats_is_empty(
 				&hw_priv->tx_queue_stats, -1, priv->if_id);
+			hw_bufs_used = hw_priv->hw_bufs_used;
 		}
 	}
 
 	/* no need to do the next work if queue was already clear */
-	if(ret == 0) {
+	if((ret == 0) && (hw_bufs_used == 0)) {
 		bes2600_info(BES2600_DBG_STA, "no need to flush\n");
 		return;
 	}
@@ -1385,6 +1402,10 @@ void bes2600_event_handler(struct work_struct *work)
 				break;
 			case WSM_EVENT_BSS_LOST:
 			{
+				if (bes2600_chrdev_wakeup_by_event_get() == WAKEUP_EVENT_WSME) {
+					bes2600_chrdev_wifi_update_wakeup_reason(WAKEUP_REASON_WIFI_BSSLOST, 0);
+					bes2600_chrdev_wakeup_by_event_set(WAKEUP_EVENT_NONE);
+				}
 				spin_lock(&priv->bss_loss_lock);
 				if (priv->bss_loss_status > BES2600_BSS_LOSS_NONE) {
 					spin_unlock(&priv->bss_loss_lock);
@@ -1498,11 +1519,22 @@ void bes2600_event_handler(struct work_struct *work)
 				break;
 			}
 		case WSM_EVENT_WAKEUP_EVENT:
-			bes2600_info(BES2600_DBG_STA, "wifi wakeup, Reason:%u\n", event->evt.eventData);
-			bes2600_chrdev_wifi_update_wakeup_reason(event->evt.eventData);
+			{
+				if (bes2600_chrdev_wakeup_by_event_get() == WAKEUP_EVENT_WSME) {
+					u16 src_port, reason;
+					reason = event->evt.eventData & 0xFFFF;
+					src_port = event->evt.eventData >> 16;
+					src_port = __be16_to_cpu(src_port);
+					bes2600_info(BES2600_DBG_STA, "wifi wakeup, reason: %u, src_port: %u\n", reason, src_port);
+					bes2600_chrdev_wifi_update_wakeup_reason(reason, src_port);
+					bes2600_chrdev_wakeup_by_event_set(WAKEUP_EVENT_NONE);
+				}
+			}
+
 			break;
 		}
 	}
+	bes2600_chrdev_wakeup_by_event_set(WAKEUP_EVENT_NONE);
 	up(&hw_priv->conf_lock);
 	__bes2600_free_event_queue(&list);
 }
@@ -1529,7 +1561,7 @@ void bes2600_bss_loss_work(struct work_struct *work)
 
 	spin_lock(&priv->bss_loss_lock);
 #ifdef BSS_LOSS_CHECK
-	if (!priv->vif->bss_conf.assoc) {
+	if (!priv->vif->cfg.assoc) {
 		priv->bss_loss_status = BES2600_BSS_LOSS_NONE;
 		spin_unlock(&priv->bss_loss_lock);
 		bl_ck_cnt = 0;
@@ -1545,7 +1577,8 @@ void bes2600_bss_loss_work(struct work_struct *work)
 		bl_ck_cnt = 0;
 		bl_cfm_cnt = 0;
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0))
-		skb = ieee80211_nullfunc_get(priv->hw, priv->vif, false);
+		// skb = ieee80211_nullfunc_get(priv->hw, priv->vif, false);
+		skb = ieee80211_nullfunc_get(priv->hw, priv->vif, -1, false);
 #else
 		skb = ieee80211_nullfunc_get(priv->hw, priv->vif);
 #endif
@@ -1575,7 +1608,8 @@ void bes2600_bss_loss_work(struct work_struct *work)
 			spin_unlock(&priv->bss_loss_lock);
 			priv->bss_loss_status = BES2600_BSS_LOSS_CHECKING;
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0))
-			skb = ieee80211_nullfunc_get(priv->hw, priv->vif, false);
+			// skb = ieee80211_nullfunc_get(priv->hw, priv->vif, false);
+			skb = ieee80211_nullfunc_get(priv->hw, priv->vif, -1, false);
 #else
 			skb = ieee80211_nullfunc_get(priv->hw, priv->vif);
 #endif
@@ -1611,7 +1645,8 @@ void bes2600_bss_loss_work(struct work_struct *work)
 			spin_unlock(&priv->bss_loss_lock);
 			priv->bss_loss_status = BES2600_BSS_LOSS_CHECKING;
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0))
-			skb = ieee80211_nullfunc_get(priv->hw, priv->vif, false);
+			// skb = ieee80211_nullfunc_get(priv->hw, priv->vif, false);
+			skb = ieee80211_nullfunc_get(priv->hw, priv->vif, -1, false);
 #else
 			skb = ieee80211_nullfunc_get(priv->hw, priv->vif);
 #endif
@@ -1661,9 +1696,14 @@ void bes2600_connection_loss_work(struct work_struct *work)
 	struct bes2600_vif *priv =
 		container_of(work, struct bes2600_vif,
 				connection_loss_work.work);
+	struct bes2600_common *hw_priv = cw12xx_vifpriv_to_hwpriv(priv);
+
 	bes2600_info(BES2600_DBG_STA, "[CQM] Reporting connection loss.\n");
 	bes2600_pwr_clear_busy_event(priv->hw_priv, BES_PWR_LOCK_ON_BSS_LOST);
-	ieee80211_connection_loss(priv->vif);
+	if(bes2600_suspend_status_get(hw_priv)) {
+		bes2600_pending_unjoin_set(hw_priv, priv->if_id);
+	} else
+		ieee80211_connection_loss(priv->vif);
 #ifdef WIFI_BT_COEXIST_EPTA_ENABLE
 	// set disconnected in BSS_CHANGED_ASSOC
 	// bwifi_change_current_status(hw_priv, BWIFI_STATUS_DISCONNECTED);
@@ -2295,6 +2335,7 @@ void bes2600_join_work(struct work_struct *work)
 #else
 			wsm_set_template_frame(hw_priv, &probe_tmp, priv->if_id);
 #endif
+			dev_kfree_skb(probe_tmp.skb);
 		}
 
 		if (wsm_join(hw_priv, &join, priv->if_id)) {
@@ -2390,7 +2431,7 @@ void bes2600_unjoin_work(struct work_struct *work)
 		cancel_work_sync(&priv->set_beacon_wakeup_period_work);
 		memset(&priv->join_bssid[0], 0, sizeof(priv->join_bssid));
 #ifdef BES2600_TX_RX_OPT
-		txrx_opt_timer_exit(hw_priv);
+		txrx_opt_timer_exit(priv);
 #endif
 		bes2600_pwr_clear_busy_event(priv->hw_priv, BES_PWR_LOCK_ON_PS_ACTIVE);
 		bes2600_pwr_clear_ap_lp_bad_mark(hw_priv);
@@ -2838,11 +2879,15 @@ void bes2600_rem_chan_timeout(struct work_struct *work)
 
 void bes2600_dynamic_opt_txrx_work(struct work_struct *work)
 {
+	bool multivif_connected = false;
 	struct bes2600_common *hw_priv =
 		container_of(work, struct bes2600_common, dynamic_opt_txrx_work);
-	struct bes2600_vif *priv = __cw12xx_hwpriv_to_vifpriv(hw_priv, 0);
-	bes2600_dynamic_opt_rxtx(hw_priv,priv, 0);
-	bes2600_dbg(BES2600_DBG_STA, "bes2600_dynamic_opt_txrx_work called\n");
+	struct bes2600_vif *priv = __cw12xx_hwpriv_to_vifpriv(hw_priv, 1);
+
+	if (priv != NULL && priv->join_status > BES2600_JOIN_STATUS_MONITOR) {
+		multivif_connected = true;
+	}
+	bes2600_txrx_opt_multivif_connected_handler(hw_priv, multivif_connected);
 }
 
 
@@ -2980,7 +3025,7 @@ static int bes2600_set_ipv6addrfilter(struct ieee80211_hw *hw,
 	ipv6_info = (struct ipv6_addr_info *)&data[2];
 
 	/* Computing sizeof Mac addr filter */
-	ipaddrfiltersize =  sizeof(*ipv6_filter) + \
+	ipaddrfiltersize =  sizeof(struct wsm_ipv6_filter_header) + \
 			(no_of_ip_addr * sizeof(struct wsm_ip6_addr_info));
 
 
@@ -2989,8 +3034,8 @@ static int bes2600_set_ipv6addrfilter(struct ieee80211_hw *hw,
 		ret = -ENOMEM;
 		goto exit_p;
 	}
-	ipv6_filter->action_mode = action_mode;
-	ipv6_filter->numfilter = no_of_ip_addr;
+	ipv6_filter->hdr.action_mode = action_mode;
+	ipv6_filter->hdr.numfilter = no_of_ip_addr;
 
 	for (i = 0; i < no_of_ip_addr; i++) {
 		ipv6_filter->ipv6filter[i].address_mode = \
@@ -3025,8 +3070,10 @@ void bes2600_set_data_filter(struct ieee80211_hw *hw,
 			   void *data, int len)
 {
 	int ret = 0;
-	//struct bes2600_vif *priv = cw12xx_get_vif_from_ieee80211(vif);
 	int filter_id;
+#ifdef IPV6_FILTERING
+	struct bes2600_vif *priv = cw12xx_get_vif_from_ieee80211(vif);
+#endif /*IPV6_FILTERING*/
 
 	if (!data) {
 		ret = -EINVAL;
@@ -4344,8 +4391,8 @@ static int net_device_en_ip_offload(struct ieee80211_hw *hw, struct ieee80211_vi
 }
 #endif /* CONFIG_BES2600_KEEP_ALIVE */
 
-#ifdef PLAT_ALLWINNER_R329
-static int bes2600_factory_cali_to_flash(struct ieee80211_hw *hw)
+#if defined(PLAT_ALLWINNER_R329) || defined(STANDARD_FACTORY_EFUSE_FLAG)
+static int bes2600_factory_cali_to_mcu(struct ieee80211_hw *hw, enum bes2600_rf_cmd_type cmd_type)
 {
 	struct bes2600_common *hw_priv = hw->priv;
 	u8 *factory_data = NULL;
@@ -4367,8 +4414,8 @@ static int bes2600_factory_cali_to_flash(struct ieee80211_hw *hw)
 	} else {
 		bes2600_factory_data_check(factory_data);
 		factory_little_endian_cvrt(factory_data);
-		ret = wsm_save_factory_txt_to_flash(hw_priv, factory_data, 0);
-		bes2600_err_with_cond(ret, BES2600_DBG_DOWNLOAD, "save factory data to flash failed.\n");
+		ret = wsm_save_factory_txt_to_mcu(hw_priv, factory_data, 0, cmd_type);
+		bes2600_err_with_cond(ret, BES2600_DBG_DOWNLOAD, "save factory data to mcu failed.\n");
 	}
 	bes2600_factory_free_file_buffer(file_buffer);
 	bes2600_factory_unlock();
@@ -4377,7 +4424,16 @@ static int bes2600_factory_cali_to_flash(struct ieee80211_hw *hw)
 		return bes2600_testmode_reply(hw->wiphy, &ret, sizeof(int));
 
 	return ret;
+}
+#endif
 
+#ifdef STANDARD_FACTORY_EFUSE_FLAG
+static int bes2600_set_select_efuse_flag_to_txt(struct ieee80211_hw *hw,
+		       void *data, int len)
+{
+	struct bes_select_calib_t *test_p = (struct bes_select_calib_t *)data;
+	int ret = bes2600_select_efuse_flag_write(test_p->select_efuse_flag);
+    return bes2600_testmode_reply(hw->wiphy, &ret, sizeof(int));
 }
 #endif
 
@@ -4490,9 +4546,23 @@ int bes2600_testmode_cmd(struct ieee80211_hw *hw, struct ieee80211_vif *vif, voi
 		break;
 	case BES_MSG_SAVE_CALI_TXT_TO_FLASH:
 #ifdef PLAT_ALLWINNER_R329
-		ret = bes2600_factory_cali_to_flash(hw);
+		ret = bes2600_factory_cali_to_mcu(hw, BES2600_RF_CMD_CALI_TXT_TO_FLASH);
 #else
 		ret = -EPERM;
+#endif
+		break;
+	case BES_MSG_SAVE_CALI_TXT_TO_EFUSE:
+#ifdef STANDARD_FACTORY_EFUSE_FLAG
+		ret = bes2600_factory_cali_to_mcu(hw, BES2600_RF_CMD_CALI_TXT_TO_EFUSE);
+#else
+		ret = -EPERM;
+#endif
+		break;
+	case BES_MSG_SET_SELECT_EFUSE_FLAG:
+#ifdef STANDARD_FACTORY_EFUSE_FLAG
+		ret = bes2600_set_select_efuse_flag_to_txt(hw, nla_data(data_p), nla_len(data_p));
+#else
+		ret = EPERM;
 #endif
 		break;
 	case BES_MSG_VENDOR_RF_CMD:

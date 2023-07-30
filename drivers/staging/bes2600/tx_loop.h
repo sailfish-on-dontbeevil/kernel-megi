@@ -21,6 +21,8 @@ struct bes2600_tx_loop
         u8 start_mcu_seq;
         struct sk_buff_head rx_queue;
         u8 *wsm_cmd_ptr;
+        struct list_head pending_record_list;
+        spinlock_t pending_record_lock;
 };
 
 void bes2600_tx_loop_init(struct bes2600_common *hw_priv);
