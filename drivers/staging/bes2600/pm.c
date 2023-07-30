@@ -11,6 +11,7 @@
 
 #include <linux/platform_device.h>
 #include <linux/if_ether.h>
+#include <linux/suspend.h>
 #include "bes2600.h"
 #include "pm.h"
 #include "sta.h"
@@ -30,9 +31,9 @@ struct bes2600_udp_port_filter {
 
 struct bes2600_ether_type_filter {
 	struct wsm_ether_type_filter_hdr hdr;
-	struct wsm_ether_type_filter ip;
 	struct wsm_ether_type_filter pae;
 	struct wsm_ether_type_filter wapi;
+	struct wsm_ether_type_filter append;
 } __packed;
 
 static struct bes2600_udp_port_filter bes2600_udp_port_filter_on = {
@@ -65,12 +66,10 @@ static struct wsm_udp_port_filter_hdr bes2600_udp_port_filter_off = {
 #define ETH_P_WAPI     0x88B4
 #endif
 
+#define ETH_P_UNKNOWN 0xFFFF
 static struct bes2600_ether_type_filter bes2600_ether_type_filter_on = {
 	.hdr.nrFilters = 3,
-	.ip = {
-		.filterAction = WSM_FILTER_ACTION_FILTER_OUT,
-		.etherType = __cpu_to_le16(ETH_P_IPV6),
-	},
+	.hdr.extFlags = WSM_ETH_FILTER_EXT_DISABLE_IPV6_MATCH, // patch for disable lmac SUSPEND_MODE_IPV6_FIX
 	.pae = {
 		.filterAction = WSM_FILTER_ACTION_FILTER_IN,
 		.etherType = __cpu_to_le16(ETH_P_PAE),
@@ -78,6 +77,11 @@ static struct bes2600_ether_type_filter bes2600_ether_type_filter_on = {
 	.wapi = {
 		.filterAction = WSM_FILTER_ACTION_FILTER_IN,
 		.etherType = __cpu_to_le16(ETH_P_WAPI),
+	},
+	// add for lmac ether filter strategy: If every filtermode is FilterIN, discard all the frame which is mismatched
+	.append = {
+		.filterAction = WSM_FILTER_ACTION_FILTER_OUT,
+		.etherType = __cpu_to_le16(ETH_P_UNKNOWN),
 	},
 	/* Please add other known ether types to be filtered out here and
 	 * update nrFilters field in the header.
@@ -87,6 +91,25 @@ static struct bes2600_ether_type_filter bes2600_ether_type_filter_on = {
 static struct wsm_ether_type_filter_hdr bes2600_ether_type_filter_off = {
 	.nrFilters = 0,
 };
+
+#ifdef IPV6_FILTERING
+static struct wsm_ipv6_filter bes2600_ipv6_filter_on = {
+	.hdr.numfilter = 1,
+	.hdr.action_mode = WSM_FILTER_ACTION_FILTER_IN,
+	.ipv6filter[0] = {
+		.filter_mode = WSM_FILTER_ACTION_FILTER_IN,
+		.address_mode = WSM_IP_DATA_FRAME_ADDRMODE_DEST,
+		/* a random ipvd addr, in order to filter all ipv6 packet */
+		.ipv6 = {0x01, 0x28, 0x35, 0xde, 0xbf, 0x34, 0x9d, 0x8a,
+				 0x47, 0x62, 0x85, 0x69, 0x7e, 0x8c, 0x29, 0x38},
+	}
+};
+
+static struct wsm_ipv6_filter bes2600_ipv6_filter_off = {
+	.hdr.numfilter = 0,
+	.hdr.action_mode = WSM_FILTER_ACTION_IGNORE,
+};
+#endif
 
 static int __bes2600_wow_suspend(struct bes2600_vif *priv,
 				struct cfg80211_wowlan *wowlan);
@@ -101,6 +124,88 @@ struct bes2600_suspend_state {
 	unsigned long direct_probe;
 	unsigned long link_id_gc;
 };
+
+void bes2600_suspend_status_set(struct bes2600_common *hw_priv, bool status)
+{
+	hw_priv->suspend_in_progress = status;
+}
+
+bool bes2600_suspend_status_get(struct bes2600_common *hw_priv)
+{
+	return hw_priv->suspend_in_progress;
+}
+
+void bes2600_pending_unjoin_reset(struct bes2600_common *hw_priv)
+{
+	hw_priv->unjoin_if_id_slots = 0x00;
+}
+
+void bes2600_pending_unjoin_set(struct bes2600_common *hw_priv, int if_id)
+{
+	if(if_id > 1)
+		bes2600_err(BES2600_DBG_PM, "unexpected if_id: %d\n", if_id);
+	else
+		hw_priv->unjoin_if_id_slots |= (1 << if_id);
+}
+
+bool bes2600_pending_unjoin_get(struct bes2600_common *hw_priv, int if_id)
+{
+	if(if_id > 1) {
+		bes2600_err(BES2600_DBG_PM, "unexpected if_id: %d\n", if_id);
+		return false;
+	} else
+		return hw_priv->unjoin_if_id_slots & (1 << if_id);
+}
+
+static int bes2600_pm_notifier(struct notifier_block *notifier,
+			       unsigned long pm_event,
+			       void *unused)
+{
+	int if_id;
+	struct bes2600_vif *priv;
+	struct bes2600_common *hw_priv = container_of(notifier,
+						    struct bes2600_common,
+						    pm_notify);
+
+	switch (pm_event) {
+	case PM_HIBERNATION_PREPARE:
+	case PM_SUSPEND_PREPARE:
+		bes2600_suspend_status_set(hw_priv, true);
+		break;
+
+	case PM_POST_RESTORE:
+	case PM_POST_HIBERNATION:
+	case PM_POST_SUSPEND:
+		bes2600_suspend_status_set(hw_priv, false);
+		if(hw_priv->unjoin_if_id_slots) {
+			for(if_id = 0; if_id < 2; if_id++) {
+				if(bes2600_pending_unjoin_get(hw_priv, if_id)) {
+					priv = __cw12xx_hwpriv_to_vifpriv(hw_priv, if_id);
+					ieee80211_connection_loss(priv->vif);
+				}
+			}
+			bes2600_pending_unjoin_reset(hw_priv);
+		}
+		break;
+
+	case PM_RESTORE_PREPARE:
+	default:
+		break;
+	}
+
+	return NOTIFY_DONE;
+}
+
+void bes2600_register_pm_notifier(struct bes2600_common *hw_priv)
+{
+	hw_priv->pm_notify.notifier_call = bes2600_pm_notifier;
+	register_pm_notifier(&hw_priv->pm_notify);
+}
+
+void bes2600_unregister_pm_notifier(struct bes2600_common *hw_priv)
+{
+	unregister_pm_notifier(&hw_priv->pm_notify);
+}
 
 static long bes2600_suspend_work(struct delayed_work *work)
 {
@@ -143,13 +248,14 @@ int bes2600_wow_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan)
 	struct bes2600_vif *priv;
 	int i, ret = 0;
 	unsigned long begin, end, diff;
+	char *busy_event_buffer = NULL;
 
 	bes2600_info(BES2600_DBG_PM, "bes2600_wow_suspend enter\n");
 
 	WARN_ON(!atomic_read(&hw_priv->num_vifs));
 
 	/* reset wakeup reason to default */
-	bes2600_chrdev_wifi_update_wakeup_reason(0);
+	bes2600_chrdev_wifi_update_wakeup_reason(0, 0);
 
 #ifdef ROAM_OFFLOAD
 	bes2600_for_each_vif(hw_priv, priv, i) {
@@ -198,6 +304,18 @@ int bes2600_wow_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan)
 		if (wait_event_timeout(hw_priv->bes_power.dev_lp_wq,
 			bes2600_pwr_device_is_idle(hw_priv), HZ * 5) <= 0) {
 			bes2600_err(BES2600_DBG_PM, "wait device idle timeout\n");
+			busy_event_buffer = kmalloc(4096, GFP_KERNEL);
+
+			if(!busy_event_buffer)
+				goto revert2;
+
+			if(bes2600_pwr_busy_event_record(hw_priv, busy_event_buffer, 4096) == 0) {
+				bes2600_info(BES2600_DBG_PM, "%s\n", busy_event_buffer);
+			} else {
+				bes2600_err(BES2600_DBG_PM, "busy event show failed\n");
+			}
+
+			kfree(busy_event_buffer);
 			goto revert2;
 		}
 	}
@@ -287,10 +405,10 @@ static int __bes2600_wow_suspend(struct bes2600_vif *priv,
 	int ret;
 
 #ifdef MCAST_FWDING
-        struct wsm_forwarding_offload fwdoffload = {
-                .fwenable = 0x1,
-                .flags = 0x1,
-        };
+	struct wsm_forwarding_offload fwdoffload = {
+		.fwenable = 0x1,
+		.flags = 0x1,
+	};
 #endif
 
 	/* Do not suspend when join work is scheduled */
@@ -300,6 +418,11 @@ static int __bes2600_wow_suspend(struct bes2600_vif *priv,
 	bes2600_set_ehter_and_udp_filter(hw_priv, &bes2600_ether_type_filter_on.hdr,
 				&bes2600_udp_port_filter_on.hdr, priv->if_id);
 
+	/* Set ipv6 filer */
+#ifdef IPV6_FILTERING
+	wsm_set_ipv6_filter(hw_priv, &bes2600_ipv6_filter_on.hdr, priv->if_id);
+#endif
+
   	if (priv->join_status == BES2600_JOIN_STATUS_AP)
 		WARN_ON(wsm_set_keepalive_filter(priv, true));
 
@@ -307,7 +430,7 @@ static int __bes2600_wow_suspend(struct bes2600_vif *priv,
 	if (priv->multicast_filter.numOfAddresses) {
 		priv->multicast_filter.enable = __cpu_to_le32(2);
 		wsm_set_multicast_filter(hw_priv, &priv->multicast_filter, priv->if_id);
-       }
+	}
 
 #ifdef MCAST_FWDING
 	if (priv->join_status == BES2600_JOIN_STATUS_AP)
@@ -362,7 +485,7 @@ revert2:
 	if (priv->multicast_filter.numOfAddresses) {
 		priv->multicast_filter.enable = __cpu_to_le32(1);
 		wsm_set_multicast_filter(hw_priv, &priv->multicast_filter, priv->if_id);
-       }
+	}
 
 
 #ifdef MCAST_FWDING
@@ -422,10 +545,10 @@ static int __bes2600_wow_resume(struct bes2600_vif *priv)
 	struct bes2600_suspend_state *state;
 
 #ifdef MCAST_FWDING
-        struct wsm_forwarding_offload fwdoffload = {
-                .fwenable = 0x1,
-                .flags = 0x0,
-        };
+	struct wsm_forwarding_offload fwdoffload = {
+		.fwenable = 0x1,
+		.flags = 0x0,
+	};
 #endif
 	state = pm_state_vif->suspend_state;
 	pm_state_vif->suspend_state = NULL;
@@ -443,7 +566,7 @@ static int __bes2600_wow_resume(struct bes2600_vif *priv)
 	if (priv->multicast_filter.numOfAddresses) {
 		priv->multicast_filter.enable = __cpu_to_le32(1);
 		wsm_set_multicast_filter(hw_priv, &priv->multicast_filter, priv->if_id);
-       }
+	}
 
 #ifdef MCAST_FWDING
 	if (priv->join_status == BES2600_JOIN_STATUS_AP)
@@ -467,6 +590,12 @@ static int __bes2600_wow_resume(struct bes2600_vif *priv)
 	/* Remove ethernet frame type filter */
 	wsm_set_ether_type_filter(hw_priv, &bes2600_ether_type_filter_off,
 				  priv->if_id);
+
+	/* Remove ipv6 filer */
+#ifdef IPV6_FILTERING
+	wsm_set_ipv6_filter(hw_priv, &bes2600_ipv6_filter_off.hdr, priv->if_id);
+#endif
+
 	/* Free memory */
 	kfree(state);
 

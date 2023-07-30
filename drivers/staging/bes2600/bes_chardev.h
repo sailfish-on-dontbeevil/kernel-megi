@@ -16,14 +16,35 @@
 #define BES2600_FW_TYPE_BT		2
 #define BES2600_FW_TYPE_MAX_NUM     3
 
-#define DPD_BIN_SIZE            0x3AF8
+#define DPD_VERSION_OFFSET      0x3AF4
+#define DPD_BIN_SIZE            0x3B14
 #define DPD_BIN_FILE_SIZE       0x4000
+#define DPD_CUR_VERSION         7
 
 enum pend_read_op {
 	BES_CDEV_READ_WAKEUP_STATE = 0,
 	/* add new here */
 
 	BES_CDEV_READ_NUM_MAX,
+};
+
+enum wifi_wakeup_reason_code {
+	WAKEUP_REASON_WIFI_DEAUTH_DISASSOC = 0x1000,
+	WAKEUP_REASON_WIFI_BSSLOST,
+	/* add new here */
+};
+
+enum bt_wakeup_reason_code {
+	WAKEUP_REASON_BT_PLAY = 0x0100,
+	/* add new here */
+};
+
+enum wakeup_event {
+	WAKEUP_EVENT_NONE = 0,
+	WAKEUP_EVENT_SETTING,
+	WAKEUP_EVENT_WSME,
+	WAKEUP_EVENT_PEER_DETACH,
+	/* add new here */
 };
 
 /* dpd management */
@@ -54,9 +75,17 @@ bool bes2600_chrdev_is_bus_error(void);
 void bes2600_chrdev_start_bus_probe(void);
 void bes2600_chrdev_bus_probe_notify(void);
 
+#if defined(CONFIG_BES2600_WLAN_SDIO) || defined(CONFIG_BES2600_WLAN_SPI)
 /* set wifi wakeup state */
-void bes2600_chrdev_wifi_update_wakeup_reason(u32 val);
-
+void bes2600_chrdev_wifi_update_wakeup_reason(u16 reason, u16 port);
+void bes2600_chrdev_wakeup_by_event_set(enum wakeup_event wakeup_event);
+int bes2600_chrdev_wakeup_by_event_get(void);
+#else
+/* set wifi wakeup state */
+static inline void bes2600_chrdev_wifi_update_wakeup_reason(u16 reason, u16 port) { }
+static inline void bes2600_chrdev_wakeup_by_event_set(enum wakeup_event wakeup_event) { }
+static inline int bes2600_chrdev_wakeup_by_event_get(void) { return 0; }
+#endif
 /* init and deinit module */
 int bes2600_chrdev_init(struct sbus_ops *ops);
 void bes2600_chrdev_free(void);

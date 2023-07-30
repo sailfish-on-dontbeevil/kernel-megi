@@ -27,6 +27,7 @@
 #include "sbus.h"
 #include "bes2600_log.h"
 #include "bes_pwr.h"
+#include "txrx_opt.h"
 
 #define TXRX_OPT_CLOSE_EDCA     0
 #define TXRX_OPT_EDCA_MAX_LEVEL 4
@@ -34,15 +35,25 @@
 #define TXRX_OPT_PEROID         500
 #define TXRX_OPT_DEBUG          1
 
-#define TXRX_HIGH_TP_THRESHOLD_2G4    30000   //unit is kbps
-#define TXRX_HIGH_TP_THRESHOLD_5G    40000    //unit is kbps
-#define TXRX_HIGH_TP_DELTA_TIME_2G4   8       //unit ms
-#define TXRX_HIGH_TP_DELTA_TIME_5G   6       //unit ms
+#define TXRX_HIGH_TP_THRESHOLD_2G4    	30000   // unit is kbps
+#define TXRX_HIGH_TP_THRESHOLD_5G    	40000   // unit is kbps
+#define TXRX_HIGH_TP_DELTA_TIME_2G4   	8       // unit ms
+#define TXRX_HIGH_TP_DELTA_TIME_5G   	6       // unit ms
+
+#define TXRX_RTS_PROT_TRIG_THRESH		80		// percent * 100
+#define TXRX_RTS_PROT_DURATION			10		// unit second
+
+#define TXRX_RTS_PROT_OPEN(x)			(x = 512)
+#define TXRX_RTS_PROT_CLOSE(x)			(x = 2437)
+#define TXRX_RTS_PROT_OPENED(x)			(x < 1536)
 
 static uint32_t tx_delta_time_arr[4][TX_AVG_TIME_COUNT];
 static uint32_t tx_queue_arr[4] = {0};
 static uint32_t tx_delta_time_total = 0;
 static uint32_t tx_delta_time_total_cnt = 0;
+static u8 cur_pwr_tbl = 1;
+static u16 cur_rts_thres = 2437;
+static unsigned long last_rts_set_time = -1;
 
 void bes2600_add_tx_delta_time(uint32_t tx_delta_time)
 {
@@ -185,8 +196,9 @@ int bes2600_set_high_edca_params(struct bes2600_common *hw_priv, struct bes2600_
 	if (lev == level)
 		return 0;
 
-	memcpy(&arg, &(priv->edca), sizeof(struct wsm_edca_params));
+	lev = level;
 
+	memcpy(&arg, &(priv->edca), sizeof(struct wsm_edca_params));
 
 	if (level == 0) {
 		bes2600_set_default_params(hw_priv, priv);
@@ -245,6 +257,26 @@ void bes2600_set_dynamic_agc(struct bes2600_common *hw_priv, struct bes2600_vif 
 {
 // todo set agc alg 
 }
+
+int bes2600_update_pwr_table(struct bes2600_common *hw_priv,
+			      struct bes2600_vif *priv,
+			      u8 pwr_tbl_idx)
+{
+	int ret = 0;
+	static u8 cur_pwr_tbl_idx = 0xff;
+
+	if (cur_pwr_tbl_idx != pwr_tbl_idx) {
+		cur_pwr_tbl_idx = pwr_tbl_idx;
+		ret = WARN_ON(wsm_write_mib(hw_priv,
+					    WSM_MIB_ID_EXT_PWR_TBL_UPDATE,
+					    (u8 *)&cur_pwr_tbl_idx,
+					    sizeof(cur_pwr_tbl_idx),
+					    priv->if_id));
+		bes2600_info(BES2600_DBG_TXRX_OPT, "%s pwr_tbl_idx=%d\n\r", __func__, pwr_tbl_idx);
+	}
+	return ret;
+}
+
 int bes2600_get_tx_av_max_delta_time(void)
 {
 	int max_avg = 0;
@@ -278,8 +310,6 @@ void bes2600_dynamic_opt_rxtx(struct bes2600_common *hw_priv, struct bes2600_vif
 	static u32 tx_bps = 0, rx_bps = 0;
 	u32 total_kbps = 0;
 	static int level;
-	int rts_value = 2347;
-	int short_gi = 0;
 
 	/* calculate real time throughput */
 	if (hw_priv == NULL || priv == NULL) {
@@ -295,6 +325,8 @@ void bes2600_dynamic_opt_rxtx(struct bes2600_common *hw_priv, struct bes2600_vif
 	/*  if tx/rx < 100k/s, close*/
 	if (total_kbps < 100) {
 		level = 0;
+		last_rts_set_time = -1;
+		TXRX_RTS_PROT_CLOSE(cur_rts_thres);
 		goto txrx_opt_clear;
 	}
 
@@ -305,16 +337,18 @@ void bes2600_dynamic_opt_rxtx(struct bes2600_common *hw_priv, struct bes2600_vif
 	rx_cnt = (priv->dot11ReceivedFragmentCount - l_rx_cnt);
 	( (tx_cnt + tx_retry) > 0 ) ? (succPro = tx_cnt * 100 / (tx_cnt + tx_retry)) : (succPro = 0);
 
-	if (succPro != 0) {
-		/* hw value 21 is mcs7, dynamic set short GI */
-		if (priv->hw_value == 21 && succPro > 90)
-			short_gi = 1;
-		else
-			short_gi = 0;
+	bes2600_dbg(BES2600_DBG_TXRX_OPT, "%s, tx_cnt:%d prob:%d\n", __func__, tx_cnt, succPro);
 
-		/* dynamic set RTS/CTS */
-		if (succPro  < 80)
-			rts_value = 512;
+	/* set rts/cts protection dynamically */
+	if (tx_cnt > 50 && succPro != 0) {
+		if (succPro > TXRX_RTS_PROT_TRIG_THRESH && 
+			TXRX_RTS_PROT_OPENED(cur_rts_thres) &&
+		    time_after(jiffies, last_rts_set_time + TXRX_RTS_PROT_DURATION * HZ)) {
+			TXRX_RTS_PROT_CLOSE(cur_rts_thres);
+		} else if (succPro <= TXRX_RTS_PROT_TRIG_THRESH){
+			TXRX_RTS_PROT_OPEN(cur_rts_thres);
+			last_rts_set_time = jiffies;
+		}
 	}
 
 	/* dynamic set edca param */
@@ -348,14 +382,21 @@ void bes2600_dynamic_opt_rxtx(struct bes2600_common *hw_priv, struct bes2600_vif
 
 		}
 	}
+
+	/* dynamic set power table */
+	if (rssi <= BES2600_TX_RSSI_LOW)
+		cur_pwr_tbl = 2;	// use high power table
+	else if(rssi >= BES2600_TX_RSSI_HIGH)
+		cur_pwr_tbl = 1;	// use standard power table
+
 #if TXRX_OPT_CLOSE_EDCA
 	level = 0;
 #endif
 	if (level > TXRX_OPT_EDCA_MAX_LEVEL)
 		level = TXRX_OPT_EDCA_MAX_LEVEL;
 
-	bes2600_dbg(BES2600_DBG_TXRX_OPT, "txrx_opt: tx(cnt=%d retry=%d psr=%d tx_fail=%d (wsm rts=%d shortgi=%d level=%d) tx=%dk/s)\n\r",
-	       tx_cnt, tx_retry, succPro, tx_fail, rts_value, short_gi, level, tx_bps / 128);
+	bes2600_dbg(BES2600_DBG_TXRX_OPT, "txrx_opt: tx(cnt=%d retry=%d psr=%d tx_fail=%d (wsm level=%d) tx=%dk/s)\n\r",
+	       tx_cnt, tx_retry, succPro, tx_fail, level, tx_bps / 128);
 	bes2600_dbg(BES2600_DBG_TXRX_OPT, "txrx_opt: rx(cnt=%d  rx=%dk/s) total=%dk/s\n\r", rx_cnt, rx_bps / 128, total_kbps);
 	bes2600_dbg(BES2600_DBG_TXRX_OPT, "txrx_opt: tx_delta_time=%d [%d %d %d %d] hw_value=%d ht=%d maxtxcnt=%d\n\r",
 	       bes2600_get_tx_delta_time(), bes2600_get_tx_ac_delta_time(0), bes2600_get_tx_ac_delta_time(1),
@@ -367,10 +408,10 @@ void bes2600_dynamic_opt_rxtx(struct bes2600_common *hw_priv, struct bes2600_vif
 	bes2600_set_cca_method(hw_priv, priv, 0);
 	/* dynamic set agc */
 	bes2600_set_dynamic_agc(hw_priv, priv, 0);
+	bes2600_update_pwr_table(hw_priv, priv, cur_pwr_tbl);
 txrx_opt_clear:
-	bes2600_set_rts_threshold(priv->hw, rts_value);
-	bes2600_enable_tx_shortgi(hw_priv, priv, short_gi);
 	bes2600_set_high_edca_params(hw_priv, priv, level);
+	bes2600_set_rts_threshold(hw_priv->hw, cur_rts_thres);
 	bes2600_clear_tx_delta_time();
 	bes2600_clear_tx_ac_delta_time(0);
 	bes2600_clear_tx_ac_delta_time(1);
@@ -387,6 +428,21 @@ txrx_opt_clear:
 
 static struct bes2600_common *txrx_hw_priv = NULL;
 
+static bool bes2600_is_sta_connected(void)
+{
+	if (txrx_hw_priv == NULL)
+		return false;
+	else
+		return true;
+}
+
+void bes2600_txrx_opt_timer_restore(void)
+{
+	if (bes2600_is_sta_connected()) {
+		mod_timer(&txrx_hw_priv->txrx_opt_timer, jiffies + msecs_to_jiffies(TXRX_OPT_PEROID));
+	}
+}
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,15,0)
 static void txrx_opt_timer_callback(struct timer_list* data)
 #else
@@ -395,7 +451,6 @@ static void txrx_opt_timer_callback(unsigned long data)
 {
 	bes2600_dbg(BES2600_DBG_TXRX, "####Timer callback function Called time = %lu\n", jiffies);
 	queue_work(txrx_hw_priv->workqueue, &txrx_hw_priv->dynamic_opt_txrx_work);
-	mod_timer(&txrx_hw_priv->txrx_opt_timer, jiffies + msecs_to_jiffies(TXRX_OPT_PEROID));
 }
 
 static void txrx_opt_timer_start(struct bes2600_common *hw_priv)
@@ -410,12 +465,39 @@ static void txrx_opt_timer_stop(struct bes2600_common *hw_priv)
 
 int bes2600_set_txrx_opt_default_param(struct bes2600_common * hw_priv)
 {
-	MIB_TXRX_OPT_PARAM g_txrx_param = {2, (PROCTECT_MODE_RTS_CTS | PROCTECT_MODE_RTS_CTS_RETRY), 2002};
+	MIB_TXRX_OPT_PARAM g_txrx_param = {2, (PROCTECT_MODE_RTS_CTS | PROCTECT_MODE_RTS_CTS_RETRY), 3000};
 	struct bes2600_vif *priv = __cw12xx_hwpriv_to_vifpriv(hw_priv, 0);
+	struct ieee80211_sta *sta = NULL;
+
 	if (priv == NULL)
 		return 0;
+
+	/* reset states */
+	cur_pwr_tbl = 1;
+	TXRX_RTS_PROT_CLOSE(cur_rts_thres);
+	last_rts_set_time = -1;
 	memcpy(&hw_priv->txrx_opt_param, &g_txrx_param, sizeof(MIB_TXRX_OPT_PARAM));
+
+	/* reset device states */
 	bes2600_set_txrx_opt_param(hw_priv, priv, &hw_priv->txrx_opt_param);
+	bes2600_set_rts_threshold(hw_priv->hw, cur_rts_thres);	// close rts/cts
+	bes2600_update_pwr_table(hw_priv, priv, cur_pwr_tbl);	// use standard pwr table
+
+	if (priv->join_status == BES2600_JOIN_STATUS_STA) {
+		sta = ieee80211_find_sta(priv->vif, priv->vif->bss_conf.bssid);
+		if (sta->deflink.ht_cap.ht_supported &&
+		    ((priv->vif->bss_conf.chandef.width == NL80211_CHAN_WIDTH_20 && 
+			 sta->deflink.ht_cap.cap & IEEE80211_HT_CAP_SGI_20) ||
+			(priv->vif->bss_conf.chandef.width == NL80211_CHAN_WIDTH_40 && 
+			 sta->deflink.ht_cap.cap & IEEE80211_HT_CAP_SGI_40))) {
+			bes2600_info(BES2600_DBG_TXRX, "open short gi tx\n");
+			bes2600_enable_tx_shortgi(hw_priv, priv, 1);
+		} else {
+			bes2600_info(BES2600_DBG_TXRX, "close short gi tx\n");
+			bes2600_enable_tx_shortgi(hw_priv, priv, 0);
+		}
+	}
+
 	return 0;
 }
 
@@ -425,14 +507,35 @@ int bes2600_set_txrx_opt_unjoin_param(struct bes2600_common * hw_priv)
 	struct bes2600_vif *priv = __cw12xx_hwpriv_to_vifpriv(hw_priv, 0);
 	if (priv == NULL)
 		return 0;
+
+	/* reset states */
+	cur_pwr_tbl = 1;
+	bes2600_update_pwr_table(hw_priv, priv, cur_pwr_tbl);
 	memcpy(&hw_priv->txrx_opt_param, &g_txrx_param, sizeof(MIB_TXRX_OPT_PARAM));
 	bes2600_set_txrx_opt_param(hw_priv, priv, &hw_priv->txrx_opt_param);
 	return 0;
 }
 
-int txrx_opt_timer_init(struct bes2600_common *hw_priv)
+void bes2600_txrx_opt_multivif_connected_handler(struct bes2600_common *hw_priv, bool multivif_connected)
 {
+	struct bes2600_vif *priv = __cw12xx_hwpriv_to_vifpriv(hw_priv, 0);
+
+	if (multivif_connected) {
+		bes2600_set_txrx_opt_default_param(hw_priv);
+	} else {
+		bes2600_dbg(BES2600_DBG_STA, "%s, rssi:%d\n", __func__, priv->signal);
+		bes2600_dynamic_opt_rxtx(hw_priv, priv, priv->signal);
+		mod_timer(&hw_priv->txrx_opt_timer, jiffies + msecs_to_jiffies(TXRX_OPT_PEROID));
+	}
+}
+
+int txrx_opt_timer_init(struct bes2600_vif *priv)
+{
+	struct bes2600_common *hw_priv = cw12xx_vifpriv_to_hwpriv(priv);
 	bes2600_info(BES2600_DBG_TXRX_OPT, "txrx_opt_timer_init:%p", txrx_hw_priv);
+	if (priv->if_id != 0)
+		return 0;
+
 	if (!txrx_hw_priv) {
 		txrx_hw_priv = hw_priv;
 		bes2600_info(BES2600_DBG_TXRX, "####Timer init hw_priv = %p\n", txrx_hw_priv);
@@ -452,16 +555,21 @@ int txrx_opt_timer_init(struct bes2600_common *hw_priv)
 	return 0;
 }
 
-void txrx_opt_timer_exit(struct bes2600_common *hw_priv)
+void txrx_opt_timer_exit(struct bes2600_vif *priv)
 {
+	struct bes2600_common *hw_priv = cw12xx_vifpriv_to_hwpriv(priv);
 	bes2600_info(BES2600_DBG_TXRX_OPT, "txrx_opt_timer_exit");
 
-	del_timer_sync(&hw_priv->txrx_opt_timer);
-	cancel_work_sync(&hw_priv->dynamic_opt_txrx_work);
-	bes2600_pwr_unregister_en_lp_cb(hw_priv, txrx_opt_timer_stop);
-	bes2600_pwr_unregister_exit_lp_cb(hw_priv, txrx_opt_timer_start);
-	txrx_hw_priv = NULL;
-	bes2600_set_txrx_opt_unjoin_param(hw_priv);
+	if (priv->if_id == 0) {
+		del_timer_sync(&hw_priv->txrx_opt_timer);
+		cancel_work_sync(&hw_priv->dynamic_opt_txrx_work);
+		bes2600_pwr_unregister_en_lp_cb(hw_priv, txrx_opt_timer_stop);
+		bes2600_pwr_unregister_exit_lp_cb(hw_priv, txrx_opt_timer_start);
+		txrx_hw_priv = NULL;
+		bes2600_set_txrx_opt_unjoin_param(hw_priv);
+	} else if (priv->if_id == 1) {
+		bes2600_txrx_opt_timer_restore();
+	}
 }
 
 

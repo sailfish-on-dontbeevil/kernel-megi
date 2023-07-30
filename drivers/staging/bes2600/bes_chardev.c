@@ -73,7 +73,10 @@ struct bes_cdev
 	int no_dpd;
 #endif
 	enum pend_read_op read_flag;
-	u32 wakeup_state; /* for userspace check wakeup reason */
+	enum wakeup_event wakeup_by_event;	/* used to filter unwanted event wakeup reason report */
+	u16 wakeup_state; /* for userspace check wakeup reason */
+	wait_queue_head_t wakeup_reason_wq;
+	u16 src_port;
 #ifdef BES2600_DUMP_FW_DPD_LOG
 	u8 *dpd_log;
 	u16 dpd_log_len;
@@ -608,10 +611,17 @@ static ssize_t bes2600_chrdev_read(struct file *file, char __user *user_buf,
 {
 	char buf[64] = {0};
 	unsigned int len;
+	long status = 0;
 
 	switch (bes2600_cdev.read_flag) {
 	case BES_CDEV_READ_WAKEUP_STATE:
-		len = sprintf(buf, "wakeup_state:%u\n", bes2600_cdev.wakeup_state);
+		if (bes2600_chrdev_wakeup_by_event_get() > WAKEUP_EVENT_NONE) {
+			status = wait_event_timeout(bes2600_cdev.wakeup_reason_wq, 
+				bes2600_chrdev_wakeup_by_event_get() ==  WAKEUP_EVENT_NONE, HZ * 2);
+			WARN_ON(status <= 0);
+		}
+		len = sprintf(buf, "wakeup_reason: %u, src_port: %u\n",
+		              bes2600_cdev.wakeup_state, bes2600_cdev.src_port);
 		break;
 	default:
 		len = sprintf(buf, "dpd_calied:%d wifi_opened:%d bt_opened:%d fw_type:%d\n",
@@ -729,13 +739,35 @@ static int bes2600_chrdev_write_dpd_data_to_file(const char *path, void *buffer,
 	return ret;
 }
 
+static bool bes2600_chrdev_dpd_is_vaild(u8 *dpd_data)
+{
+	u32 cal_crc = 0;
+	u32 dpd_crc = le32_to_cpup((__le32 *)(dpd_data));
+	u32 dpd_ver = le32_to_cpup((__le32 *)(dpd_data + DPD_VERSION_OFFSET));
+
+	/* check version */
+	if (dpd_ver < DPD_CUR_VERSION)
+		return false;
+
+	cal_crc ^= 0xffffffffL;
+	cal_crc = crc32_le(cal_crc, dpd_data + 4, DPD_BIN_SIZE - 4);
+	cal_crc ^= 0xffffffffL;
+
+	/* check if the dpd data is valid */
+	if (cal_crc != dpd_crc) {
+		bes2600_err(BES2600_DBG_CHARDEV,
+			"bes2600 dpd data from file check failed, calc_crc:0x%08x dpd_crc: 0x%08x\n",
+			cal_crc, dpd_crc);
+		return false;
+	}
+
+	return true;
+}
+
 static int bes2600_chrdev_read_and_check_dpd_data(const char *file, u8 **data, u32 *len)
 {
 	int ret = 0;
-	u32 read_len = 0;
 	u8* read_data = NULL;
-	u32 cal_crc = 0;
-	u32 dpd_crc = 0;
 	struct file *fp;
 
 	/* open file */
@@ -773,27 +805,16 @@ static int bes2600_chrdev_read_and_check_dpd_data(const char *file, u8 **data, u
 		goto err2;
 	}
 
-	/* calculate crc value */
-	read_len = DPD_BIN_SIZE;
-	dpd_crc = *((u32 *)read_data);
-	cal_crc ^= 0xffffffffL;
-	cal_crc = crc32_le(cal_crc, read_data + 4, read_len - 4);
-	cal_crc ^= 0xffffffffL;
-
-	/* check if the dpd data is valid */
-	if(cal_crc != dpd_crc) {
-		bes2600_err(BES2600_DBG_CHARDEV,
-			"bes2600 dpd data from file check failed, calc_crc:0x%08x dpd_crc: 0x%08x\n",
-			cal_crc, dpd_crc);
+	/* check dpd version and crc */
+	if (!bes2600_chrdev_dpd_is_vaild(read_data))
 		goto err2;
-	}
 
 	/* close file */
 	filp_close(fp, NULL);
 
 	/* copy data to external */
 	*data = read_data;
-	*len = read_len;
+	*len = DPD_BIN_SIZE;;
 
 	/* output debug information */
 	bes2600_info(BES2600_DBG_CHARDEV, "read dpd data from %s\n", file);
@@ -862,7 +883,7 @@ void bes2600_chrdev_free_dpd_data(void)
 int bes2600_chrdev_update_dpd_data(void)
 {
 	u32 cal_crc = 0;
-	u32 dpd_crc = *((u32 *)bes2600_cdev.dpd_data);
+	u32 dpd_crc = le32_to_cpup((__le32 *)(bes2600_cdev.dpd_data));
 
 	/* check if the dpd data is valid */
 	cal_crc ^= 0xffffffffL;
@@ -1165,7 +1186,7 @@ void bes2600_chrdev_start_bus_probe(void)
 	spin_unlock(&bes2600_cdev.status_lock);
 
 	cancel_delayed_work_sync(&bes2600_cdev.probe_timeout_work);
-	schedule_delayed_work(&bes2600_cdev.probe_timeout_work, (HZ * 8) / 10);
+	schedule_delayed_work(&bes2600_cdev.probe_timeout_work, 3 * HZ);
 }
 
 void bes2600_chrdev_bus_probe_notify(void)
@@ -1178,12 +1199,29 @@ void bes2600_chrdev_bus_probe_notify(void)
 	wake_up(&bes2600_cdev.probe_done_wq);
 }
 
-void bes2600_chrdev_wifi_update_wakeup_reason(u32 val)
+#if defined(CONFIG_BES2600_WLAN_SDIO) || defined(CONFIG_BES2600_WLAN_SPI)
+void bes2600_chrdev_wifi_update_wakeup_reason(u16 reason, u16 port)
 {
 	spin_lock(&bes2600_cdev.status_lock);
-	bes2600_cdev.wakeup_state = val;
+	bes2600_cdev.wakeup_state = reason;
+	bes2600_cdev.src_port = port;
 	spin_unlock(&bes2600_cdev.status_lock);
 }
+
+void bes2600_chrdev_wakeup_by_event_set(enum wakeup_event wakeup_event)
+{
+	spin_lock(&bes2600_cdev.status_lock);
+	bes2600_cdev.wakeup_by_event = wakeup_event;
+	spin_unlock(&bes2600_cdev.status_lock);
+	if (wakeup_event == WAKEUP_EVENT_NONE)
+		wake_up(&bes2600_cdev.wakeup_reason_wq);
+}
+
+int bes2600_chrdev_wakeup_by_event_get(void)
+{
+	return bes2600_cdev.wakeup_by_event;
+}
+#endif
 
 int bes2600_chrdev_init(struct sbus_ops *ops)
 {
@@ -1234,6 +1272,8 @@ int bes2600_chrdev_init(struct sbus_ops *ops)
 	init_waitqueue_head(&bes2600_cdev.probe_done_wq);
 	INIT_WORK(&bes2600_cdev.wifi_force_close_work, bes2600_chrdev_wifi_force_close_work);
 	INIT_DELAYED_WORK(&bes2600_cdev.probe_timeout_work, bes2600_probe_timeout_work);
+	init_waitqueue_head(&bes2600_cdev.wakeup_reason_wq);
+	bes2600_chrdev_wakeup_by_event_set(WAKEUP_EVENT_NONE);
 #ifdef CONFIG_BES2600_WIFI_BOOT_ON
 	bes2600_cdev.wifi_opened = true;
 #else
@@ -1252,6 +1292,7 @@ int bes2600_chrdev_init(struct sbus_ops *ops)
 	bes2600_cdev.bus_error = false;
 	bes2600_cdev.halt_dev = false;
 	bes2600_cdev.read_flag = BES_CDEV_READ_NUM_MAX;
+	bes2600_cdev.wakeup_by_event = false;
 	bes2600_info(BES2600_DBG_CHARDEV, "%s done\n", __func__);
 
 	return 0;

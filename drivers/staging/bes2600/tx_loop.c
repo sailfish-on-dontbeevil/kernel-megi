@@ -27,6 +27,8 @@ void bes2600_tx_loop_init(struct bes2600_common *hw_priv)
         hw_priv->tx_loop.enabled = false;
         hw_priv->tx_loop.start_lmac_seq = 0;
         hw_priv->tx_loop.start_mcu_seq = 0;
+        INIT_LIST_HEAD(&hw_priv->tx_loop.pending_record_list);
+        spin_lock_init(&hw_priv->tx_loop.pending_record_lock);
         spin_lock_init(&hw_priv->tx_loop.tx_loop_lock);
         skb_queue_head_init(&hw_priv->tx_loop.rx_queue);
 }
@@ -108,6 +110,9 @@ void bes2600_tx_loop_set_enable(struct bes2600_common *hw_priv)
                 bes2600_queue_iterate_pending_packet(&hw_priv->tx_queue[i],
 				                bes2600_tx_loop_item_pending_item);
         }
+	spin_lock(&hw_priv->tx_loop.pending_record_lock);
+        bes2600_queue_iterate_record_pending_packet(hw_priv, bes2600_tx_loop_item_pending_item);
+	spin_unlock(&hw_priv->tx_loop.pending_record_lock);
 
         if (atomic_read(&hw_priv->bh_rx) > 0)
 		wake_up(&hw_priv->bh_wq);
