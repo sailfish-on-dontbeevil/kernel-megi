@@ -82,7 +82,11 @@ static void bes2600_queue_status_show(struct seq_file *seq,
 	seq_printf(seq, "  pending:  %ld\n", (long)q->num_pending);
 	seq_printf(seq, "  sent:     %ld\n", (long)q->num_sent);
 	seq_printf(seq, "  locked:   %s\n", q->tx_locked_cnt ? "yes" : "no");
-	seq_printf(seq, "  overfull: %s\n", q->overfull ? "yes" : "no");
+	seq_printf(seq, "  vif_overfull[0]: %s\n", q->vif_overfull[0] ? "yes" : "no");
+	seq_printf(seq, "  vif_overfull[1]: %s\n", q->vif_overfull[1] ? "yes" : "no");
+#ifdef P2P_MULTIVIF
+	seq_printf(seq, "  vif_overfull[2]: %s\n", q->vif_overfull[2] ? "yes" : "no");
+#endif
 	seq_puts(seq,   "  link map: 0-> ");
 	for (if_id = 0; if_id < CW12XX_MAX_VIFS; if_id++) {
 		for (i = 0; i < q->stats->map_capacity; ++i)

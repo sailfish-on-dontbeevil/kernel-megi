@@ -46,6 +46,9 @@ MODULE_AUTHOR("Dmitry Tarnyagin <dmitry.tarnyagin@stericsson.com>");
 MODULE_DESCRIPTION("Softmac BES2600 common code");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("bes2600");
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
+MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
+#endif
 
 static u8 bes2600_mac_template[ETH_ALEN] = {
 #if (GET_MAC_ADDR_METHOD == 2)||(GET_MAC_ADDR_METHOD == 3)
@@ -199,7 +202,7 @@ static struct ieee80211_supported_band bes2600_band_2ghz = {
 	.n_bitrates = bes2600_g_rates_size,
 	.ht_cap = {
 		.cap = IEEE80211_HT_CAP_GRN_FLD |
-			(1 << IEEE80211_HT_CAP_RX_STBC_SHIFT) |
+			(STBC_RX_24G << IEEE80211_HT_CAP_RX_STBC_SHIFT) |
 			IEEE80211_HT_CAP_SUP_WIDTH_20_40 |
 			IEEE80211_HT_CAP_SGI_20 |
 			IEEE80211_HT_CAP_SGI_40 |
@@ -223,7 +226,7 @@ static struct ieee80211_supported_band bes2600_band_5ghz = {
 	.n_bitrates = bes2600_a_rates_size,
 	.ht_cap = {
 		.cap = IEEE80211_HT_CAP_GRN_FLD |
-			(1 << IEEE80211_HT_CAP_RX_STBC_SHIFT) |
+			(STBC_RX_5G << IEEE80211_HT_CAP_RX_STBC_SHIFT) |
 			IEEE80211_HT_CAP_SUP_WIDTH_20_40 |
 			IEEE80211_HT_CAP_SGI_20 |
 			IEEE80211_HT_CAP_SGI_40 |
@@ -320,23 +323,23 @@ static const struct wiphy_wowlan_support bes2600_wowlan_support = {
 #endif
 
 #ifdef CONFIG_BES2600_WAPI_SUPPORT
-static void bes2600_init_wapi_cipher(struct ieee80211_hw *hw)
-{
-	static struct ieee80211_cipher_scheme wapi_cs = {
-		.cipher = WLAN_CIPHER_SUITE_SMS4,
-		.iftype = BIT(NL80211_IFTYPE_STATION),
-		.hdr_len = 18,
-		.pn_len = 16,
-		.pn_off = 2,
-		.key_idx_off = 0,
-		.key_idx_mask = 0x01,
-		.key_idx_shift = 0,
-		.mic_len = 16
-	};
+// static void bes2600_init_wapi_cipher(struct ieee80211_hw *hw)
+// {
+// 	static struct ieee80211_cipher_scheme wapi_cs = {
+// 		.cipher = WLAN_CIPHER_SUITE_SMS4,
+// 		.iftype = BIT(NL80211_IFTYPE_STATION),
+// 		.hdr_len = 18,
+// 		.pn_len = 16,
+// 		.pn_off = 2,
+// 		.key_idx_off = 0,
+// 		.key_idx_mask = 0x01,
+// 		.key_idx_shift = 0,
+// 		.mic_len = 16
+// 	};
 
-	hw->cipher_schemes = &wapi_cs;
-	hw->n_cipher_schemes = 1;
-}
+// 	hw->cipher_schemes = &wapi_cs;
+// 	hw->n_cipher_schemes = 1;
+// }
 #endif
 
 static void bes2600_get_base_mac(struct bes2600_common *hw_priv)
@@ -532,7 +535,7 @@ struct ieee80211_hw *bes2600_init_common(size_t hw_priv_data_len)
 #ifdef CONFIG_BES2600_WAPI_SUPPORT
 	hw_priv->last_ins_wapi_usk_id = -1;
 	hw_priv->last_del_wapi_usk_id = -1;
-	bes2600_init_wapi_cipher(hw);
+	// bes2600_init_wapi_cipher(hw);
 #endif
 
 	SET_IEEE80211_PERM_ADDR(hw, hw_priv->addresses[0].addr);
@@ -609,6 +612,11 @@ struct ieee80211_hw *bes2600_init_common(size_t hw_priv_data_len)
 
 	bes2600_tx_loop_init(hw_priv);
 
+#ifdef CONFIG_PM
+	bes2600_suspend_status_set(hw_priv, false);
+	bes2600_pending_unjoin_reset(hw_priv);
+#endif
+
 #ifdef CONFIG_BES2600_TESTMODE
 	hw_priv->test_frame.data = NULL;
 	hw_priv->test_frame.len = 0;
@@ -659,7 +667,9 @@ int bes2600_register_common(struct ieee80211_hw *dev)
 #endif /* CONFIG_BES2600_LEDS */
 
 	bes2600_debug_init_common(hw_priv);
-
+#ifdef CONFIG_PM
+	bes2600_register_pm_notifier(hw_priv);
+#endif /* CONFIG_PM */
 	bes2600_info(BES2600_DBG_INIT, "is registered as '%s'\n",
 			wiphy_name(dev->wiphy));
 	return 0;
@@ -697,7 +707,9 @@ void bes2600_unregister_common(struct ieee80211_hw *dev)
 	bes2600_unregister_bh(hw_priv);
 
 	bes2600_debug_release_common(hw_priv);
-
+#ifdef CONFIG_PM
+	bes2600_unregister_pm_notifier(hw_priv);
+#endif /* CONFIG_PM */
 #ifdef CONFIG_BES2600_LEDS
 	bes2600_unregister_leds(hw_priv);
 #endif /* CONFIG_BES2600_LEDS */
@@ -1014,7 +1026,7 @@ int access_file(char *path, char *buffer, int size, int isRead)
 #ifdef CONFIG_BES2600_WLAN_BES
 int bes2600_wifi_start(struct bes2600_common *hw_priv)
 {
-	int ret, if_id;
+	int ret = 0, if_id;
 #ifndef CONFIG_BES2600_WLAN_USB
 	if(hw_priv->sbus_ops->gpio_wake) {
 		hw_priv->sbus_ops->gpio_wake(hw_priv->sbus_priv, GPIO_WAKE_FLAG_WIFI_ON);

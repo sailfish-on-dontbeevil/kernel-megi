@@ -1341,7 +1341,13 @@ static int bes_read_dpd_data(struct sbus_ops *ops, struct sbus_priv *priv)
 		goto exit;
 	}
 
-	dpd_data = bes2600_chrdev_get_dpd_buffer(dpd_data_len);
+	/* dpd size check */
+	if (dpd_data_len != DPD_BIN_SIZE) {
+		bes2600_err(BES2600_DBG_DOWNLOAD, "get dpd data size err:%u\n", dpd_data_len);
+		return -1;
+	}
+
+	dpd_data = bes2600_chrdev_get_dpd_buffer(DPD_BIN_FILE_SIZE);
 	if (!dpd_data) {
 		ret = -ENOMEM;
 		goto exit;

@@ -41,7 +41,7 @@ struct bes2600_queue {
 	struct list_head	pending;
 	int			tx_locked_cnt;
 	int			*link_map_cache[CW12XX_MAX_VIFS];
-	bool			overfull;
+	bool			vif_overfull[CW12XX_MAX_VIFS];
 	spinlock_t		lock;
 	u8			queue_id;
 	u8			generation;
@@ -169,5 +169,6 @@ int bes2600_sw_retry_requeue(struct bes2600_common *hw_priv,
 	struct bes2600_queue *queue, u32 packetID, bool check);
 void bes2600_queue_iterate_pending_packet(struct bes2600_queue *queue,
 	void (*iterate_cb)(struct bes2600_common *hw_priv, struct sk_buff *skb));
-
+void bes2600_queue_iterate_record_pending_packet(struct bes2600_common	*hw_priv,
+	void (*iterate_cb)(struct bes2600_common *hw_priv, struct sk_buff *skb));
 #endif /* BES2600_QUEUE_H_INCLUDED */
