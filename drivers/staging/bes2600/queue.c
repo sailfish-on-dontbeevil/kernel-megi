@@ -129,6 +129,34 @@ static void bes2600_queue_register_post_gc(struct list_head *gc_list,
 	list_add_tail(&gc_item->head, gc_list);
 }
 
+static void bes2600_queue_pending_record(struct list_head *pending_record_list,
+				     struct bes2600_queue_item *pending_item)
+{
+	struct bes2600_queue_item *record_item;
+
+	record_item = kmalloc(sizeof(struct bes2600_queue_item),GFP_ATOMIC);
+	BUG_ON(!record_item);
+	memcpy(record_item, pending_item, sizeof(struct bes2600_queue_item));
+	record_item->skb = skb_clone(pending_item->skb, GFP_ATOMIC);
+	list_add_tail(&record_item->head, pending_record_list);
+}
+
+static void bes2600_queue_vif_wake_subqueue(struct bes2600_queue_stats *stats,
+				     struct bes2600_queue *queue, int vif)
+{
+	struct bes2600_vif *priv;
+	struct wireless_dev *wdev;
+
+	priv = __cw12xx_hwpriv_to_vifpriv(stats->hw_priv, vif);
+	if (priv && unlikely(queue->vif_overfull[vif])) {
+		wdev = ieee80211_vif_to_wdev(priv->vif);
+		if (wdev->netdev && !ieee80211_queue_stopped(stats->hw_priv->hw, queue->queue_id)) {
+			queue->vif_overfull[vif] = false;
+			netif_wake_subqueue(wdev->netdev, queue->queue_id);
+		}
+	}
+}
+
 static void __bes2600_queue_gc(struct bes2600_queue *queue,
 			      struct list_head *head,
 			      bool unlock)
@@ -136,6 +164,9 @@ static void __bes2600_queue_gc(struct bes2600_queue *queue,
 	struct bes2600_queue_stats *stats = queue->stats;
 	struct bes2600_queue_item *item = NULL;
 	struct bes2600_vif *priv;
+	struct wireless_dev *wdev;
+	int throttle;
+	int vif_i;
 	int if_id;
 	bool wakeup_stats = false;
 
@@ -169,17 +200,28 @@ static void __bes2600_queue_gc(struct bes2600_queue *queue,
 	if (wakeup_stats)
 		wake_up(&stats->wait_link_id_empty);
 
-	if (queue->overfull) {
-		if (queue->num_queued <= ((stats->hw_priv->vif0_throttle +
-						stats->hw_priv->vif1_throttle + 2)/2)) {
-			queue->overfull = false;
-			if (unlock)
-				__bes2600_queue_unlock(queue);
-		} else if (item) {
-			unsigned long tmo = item->queue_timestamp + queue->ttl;
-			mod_timer(&queue->gc, tmo);
-			bes2600_pwr_set_busy_event_with_timeout_async(stats->hw_priv,
-				BES_PWR_LOCK_ON_QUEUE_GC, jiffies_to_msecs(tmo - jiffies));
+	for (vif_i = 0; vif_i < CW12XX_MAX_VIFS; vif_i++) {
+		if (vif_i == 0)
+			throttle = stats->hw_priv->vif0_throttle - (num_present_cpus() - 1);
+		else if (vif_i == 1)
+			throttle = stats->hw_priv->vif1_throttle - (num_present_cpus() - 1);
+		else
+			throttle = 2;
+
+		priv = __cw12xx_hwpriv_to_vifpriv(stats->hw_priv, vif_i);
+
+		if (priv && queue->vif_overfull[vif_i]) {
+			wdev = ieee80211_vif_to_wdev(priv->vif);
+			if (wdev->netdev && queue->num_queued_vif[vif_i] < (throttle + 1)/2 && unlock &&
+			    !ieee80211_queue_stopped(stats->hw_priv->hw, queue->queue_id)) {
+				queue->vif_overfull[vif_i] = false;
+				netif_wake_subqueue(wdev->netdev, queue->queue_id);
+			} else if (item) {
+				unsigned long tmo = item->queue_timestamp + queue->ttl;
+				mod_timer(&queue->gc, tmo);
+				bes2600_pwr_set_busy_event_with_timeout_async(stats->hw_priv,
+					BES_PWR_LOCK_ON_QUEUE_GC, jiffies_to_msecs(tmo - jiffies));
+			}
 		}
 	}
 }
@@ -282,14 +324,24 @@ int bes2600_queue_init(struct bes2600_queue *queue,
 /* TODO:COMBO: Flush only a particular interface specific parts */
 int bes2600_queue_clear(struct bes2600_queue *queue, int if_id)
 {
-	int i, cnt, iter;
+	int i, cnt, iter, vif_i;
 	struct bes2600_queue_stats *stats = queue->stats;
 	LIST_HEAD(gc_list);
+	struct bes2600_queue_item *pending_item = NULL,  *temp_pending_item = NULL;
 
 	cnt = 0;
 	spin_lock_bh(&queue->lock);
 	queue->generation++;
 	queue->generation &= 0xf;
+
+	spin_lock(&stats->hw_priv->tx_loop.pending_record_lock);
+	if (!list_empty(&queue->pending)) {
+		list_for_each_entry_safe(pending_item, temp_pending_item, &queue->pending, head) {
+			bes2600_queue_pending_record(&stats->hw_priv->tx_loop.pending_record_list, pending_item);
+		}
+	}
+	spin_unlock(&stats->hw_priv->tx_loop.pending_record_lock);
+
 	list_splice_tail_init(&queue->queue, &queue->pending);
 	while (!list_empty(&queue->pending)) {
 		struct bes2600_queue_item *item = list_first_entry(
@@ -334,9 +386,12 @@ int bes2600_queue_clear(struct bes2600_queue *queue, int if_id)
 		}
 	}
 	spin_unlock_bh(&stats->lock);
-	if (unlikely(queue->overfull)) {
-		queue->overfull = false;
-		__bes2600_queue_unlock(queue);
+	if (CW12XX_ALL_IFS == if_id) {
+		for (vif_i = 0; vif_i < CW12XX_MAX_VIFS; vif_i++) {
+			bes2600_queue_vif_wake_subqueue(stats, queue, vif_i);
+		}
+	} else {
+		bes2600_queue_vif_wake_subqueue(stats, queue, if_id);
 	}
 	spin_unlock_bh(&queue->lock);
 	wake_up(&stats->wait_link_id_empty);
@@ -403,8 +458,15 @@ int bes2600_queue_put(struct bes2600_queue *queue,
 {
 	int ret = 0;
 #ifdef CONFIG_BES2600_TESTMODE
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 6, 0)
+	struct timespec64 tmval;
+#else
 	struct timeval tmval;
+#endif
 #endif /*CONFIG_BES2600_TESTMODE*/
+	struct bes2600_vif *priv;
+	struct wireless_dev *wdev;
+	int throttle = 0;
 
 	LIST_HEAD(gc_list);
 	struct bes2600_queue_stats *stats = queue->stats;
@@ -436,8 +498,13 @@ int bes2600_queue_put(struct bes2600_queue *queue,
 		}
 #endif
 #ifdef CONFIG_BES2600_TESTMODE
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 6, 0)
+		ktime_get_real_ts64(&tmval);
+		item->qdelay_timestamp = tmval.tv_nsec / 1000;
+#else
 		do_gettimeofday(&tmval);
 		item->qdelay_timestamp = tmval.tv_usec;
+#endif
 #endif /*CONFIG_BES2600_TESTMODE*/
 
 		++queue->num_queued;
@@ -453,14 +520,24 @@ int bes2600_queue_put(struct bes2600_queue *queue,
 		 * TX may happen in parallel sometimes.
 		 * Leave extra queue slots so we don't overflow.
 		 */
-		if (queue->overfull == false &&
-				queue->num_queued >=
-		((stats->hw_priv->vif0_throttle +
-			stats->hw_priv->vif1_throttle + 2)
-				- (num_present_cpus() - 1))) {
-			queue->overfull = true;
-			__bes2600_queue_lock(queue);
-			mod_timer(&queue->gc, jiffies);
+		if (txpriv->if_id == 0)
+			throttle = stats->hw_priv->vif0_throttle - (num_present_cpus() - 1);
+		else if (txpriv->if_id == 1)
+			throttle = stats->hw_priv->vif1_throttle - (num_present_cpus() - 1);
+		else if (txpriv->if_id == 2)
+			throttle = 2;
+		else
+			bes2600_warn(BES2600_DBG_TXRX, "%s: unexpected if_id = %d\n", __func__, txpriv->if_id);
+
+		priv = __cw12xx_hwpriv_to_vifpriv(stats->hw_priv, txpriv->if_id);
+
+		if (priv && queue->num_queued_vif[txpriv->if_id] >= throttle) {
+			wdev = ieee80211_vif_to_wdev(priv->vif);
+			if (wdev->netdev) {
+				queue->vif_overfull[txpriv->if_id] = true;
+				netif_stop_subqueue(wdev->netdev, queue->queue_id);
+				mod_timer(&queue->gc, jiffies);
+			}
 		}
 	} else {
 		ret = -ENOENT;
@@ -489,7 +566,11 @@ int bes2600_queue_get(struct bes2600_queue *queue,
 	struct bes2600_queue_stats *stats = queue->stats;
 	bool wakeup_stats = false;
 #ifdef CONFIG_BES2600_TESTMODE
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 6, 0)
+	struct timespec64 tmval;
+#else
 	struct timeval tmval;
+#endif
 #endif /*CONFIG_BES2600_TESTMODE*/
 
 	spin_lock_bh(&queue->lock);
@@ -513,8 +594,13 @@ int bes2600_queue_get(struct bes2600_queue *queue,
 				[item->txpriv.link_id];
 		item->xmit_timestamp = jiffies;
 #ifdef CONFIG_BES2600_TESTMODE
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 6, 0)
+		ktime_get_real_ts64(&tmval);
+		item->mdelay_timestamp = tmval.tv_nsec / 1000;
+#else
 		do_gettimeofday(&tmval);
 		item->mdelay_timestamp = tmval.tv_usec;
+#endif
 #endif /*CONFIG_BES2600_TESTMODE*/
 
 		spin_lock_bh(&stats->lock);
@@ -726,6 +812,9 @@ int bes2600_queue_remove(struct bes2600_queue *queue, u32 packetID)
 	struct bes2600_queue_stats *stats = queue->stats;
 	struct sk_buff *gc_skb = NULL;
 	struct bes2600_txpriv gc_txpriv;
+	struct bes2600_vif *priv;
+	struct wireless_dev *wdev;
+	int throttle = 0;
 
 	bes2600_queue_parse_id(packetID, &queue_generation, &queue_id,
 				&item_generation, &item_id, &if_id, &link_id);
@@ -758,9 +847,30 @@ int bes2600_queue_remove(struct bes2600_queue *queue, u32 packetID)
 		spin_lock_bh(&hw_priv->tsm_lock);
 		if (hw_priv->start_stop_tsm.start) {
 			if (queue_id == hw_priv->tsm_info.ac) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 6, 0)
+				struct timespec64 tmval;
+#else
 				struct timeval tmval;
+#endif
 				unsigned long queue_delay;
 				unsigned long media_delay;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 6, 0)
+				ktime_get_real_ts64(&tmval);
+
+				if (tmval.tv_nsec / 1000 > item->qdelay_timestamp)
+					queue_delay = tmval.tv_nsec / 1000 -
+						item->qdelay_timestamp;
+				else
+					queue_delay = tmval.tv_nsec / 1000 +
+					1000000 - item->qdelay_timestamp;
+
+				if (tmval.tv_nsec / 1000 > item->mdelay_timestamp)
+					media_delay = tmval.tv_nsec / 1000 -
+						item->mdelay_timestamp;
+				else
+					media_delay = tmval.tv_nsec / 1000 +
+					1000000 - item->mdelay_timestamp;
+#else
 				do_gettimeofday(&tmval);
 
 				if (tmval.tv_usec > item->qdelay_timestamp)
@@ -776,6 +886,7 @@ int bes2600_queue_remove(struct bes2600_queue *queue, u32 packetID)
 				else
 					media_delay = tmval.tv_usec +
 					1000000 - item->mdelay_timestamp;
+#endif
 				hw_priv->tsm_info.sum_media_delay +=
 							media_delay;
 				hw_priv->tsm_info.sum_pkt_q_delay += queue_delay;
@@ -796,10 +907,24 @@ int bes2600_queue_remove(struct bes2600_queue *queue, u32 packetID)
 		 */
 		list_move(&item->head, &queue->free_pool);
 
-		if (unlikely(queue->overfull) &&
-		    (queue->num_queued <= ((stats->hw_priv->vif0_throttle + stats->hw_priv->vif1_throttle + 2) / 2))) {
-			queue->overfull = false;
-			__bes2600_queue_unlock(queue);
+		if (if_id == 0)
+			throttle = stats->hw_priv->vif0_throttle - (num_present_cpus() - 1);
+		else if (if_id == 1)
+			throttle = stats->hw_priv->vif1_throttle - (num_present_cpus() - 1);
+		else if (if_id == 2)
+			throttle = 2;
+		else
+			bes2600_warn(BES2600_DBG_TXRX, "%s: unexpected if_id = %d\n", __func__, if_id);
+
+		priv = __cw12xx_hwpriv_to_vifpriv(stats->hw_priv, if_id);
+
+		if (priv && unlikely(queue->vif_overfull[if_id]) &&
+		 queue->num_queued_vif[if_id] < (throttle + 1)/2) {
+			wdev = ieee80211_vif_to_wdev(priv->vif);
+			if (wdev->netdev && !ieee80211_queue_stopped(stats->hw_priv->hw, queue->queue_id)) {
+				queue->vif_overfull[if_id] = false;
+				netif_wake_subqueue(wdev->netdev, queue->queue_id);
+			}
 		}
 	}
 	spin_unlock_bh(&queue->lock);
@@ -824,9 +949,24 @@ int bes2600_queue_get_skb(struct bes2600_queue *queue, u32 packetID,
 	int ret = 0;
 	u8 queue_generation, queue_id, item_generation, item_id, if_id, link_id;
 	struct bes2600_queue_item *item;
+	struct bes2600_queue_item *record_item = NULL, *temp_record_item = NULL;
 
 	bes2600_queue_parse_id(packetID, &queue_generation, &queue_id,
 				&item_generation, &item_id, &if_id, &link_id);
+
+	spin_lock(&queue->stats->hw_priv->tx_loop.pending_record_lock);
+	if (!list_empty(&queue->stats->hw_priv->tx_loop.pending_record_list)) {
+		list_for_each_entry_safe(record_item, temp_record_item, &queue->stats->hw_priv->tx_loop.pending_record_list, head) {
+			if (record_item->packetID == packetID) {
+				list_del(&record_item->head);
+				dev_kfree_skb(record_item->skb);
+				kfree(record_item);
+				spin_unlock(&queue->stats->hw_priv->tx_loop.pending_record_lock);
+				return -EINVAL;
+			}
+		}
+	}
+	spin_unlock(&queue->stats->hw_priv->tx_loop.pending_record_lock);
 
 	item = &queue->pool[item_id];
 
@@ -835,6 +975,7 @@ int bes2600_queue_get_skb(struct bes2600_queue *queue, u32 packetID,
 	/* TODO:COMBO: Add check for interface ID here */
 	if (unlikely(queue_generation != queue->generation)) {
 		bes2600_info(BES2600_DBG_TXRX, "%s, Queue Generation is not equal\n", __func__);
+		WARN_ON(1);
 		ret = -EINVAL;
 	} else if (unlikely(item_id >= (unsigned) queue->capacity)) {
 		WARN_ON(1);
@@ -922,10 +1063,23 @@ void bes2600_queue_iterate_pending_packet(struct bes2600_queue *queue,
 {
 	struct bes2600_queue_item *item = NULL;
 
-	if(list_empty(&queue->pending))
+	if (list_empty(&queue->pending))
 		return;
 
 	list_for_each_entry(item, &queue->pending, head) {
 		iterate_cb(queue->stats->hw_priv, item->skb);
+	}
+}
+
+void bes2600_queue_iterate_record_pending_packet(struct bes2600_common	*hw_priv,
+	void (*iterate_cb)(struct bes2600_common *hw_priv, struct sk_buff *skb))
+{
+	struct bes2600_queue_item *item = NULL;
+	if (list_empty(&hw_priv->tx_loop.pending_record_list)) {
+		return;
+	}
+
+	list_for_each_entry(item, &hw_priv->tx_loop.pending_record_list, head) {
+		iterate_cb(hw_priv, item->skb);
 	}
 }

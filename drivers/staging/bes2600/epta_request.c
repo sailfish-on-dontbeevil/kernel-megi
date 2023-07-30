@@ -105,8 +105,8 @@ typedef enum {
 	BWIFI_BT_STATUS_SHUTDOWN          = 0,
 	BWIFI_BT_STATUS_DISCONNECTED      = 1,
 	BWIFI_BT_STATUS_CONNECTING        = 2,
-	BWIFI_BT_STATUS_CONNECTED_SNIFF   = 3,//
-	BWIFI_BT_STATUS_CONNECTED         = 4,//
+	BWIFI_BT_STATUS_CONNECTED_SNIFF   = 3,
+	BWIFI_BT_STATUS_CONNECTED         = 4,
 } BWIFI_BT_STATUS_T;
 
 typedef enum {
@@ -123,23 +123,23 @@ typedef enum {
 } BWIFI_BT_AUDIO_T;
 
 typedef enum {
-	BWIFI_BT_INQ_STOP                 = 0,//
-	BWIFI_BT_INQ_START                = 1,//
+	BWIFI_BT_INQ_STOP                 = 0,
+	BWIFI_BT_INQ_START                = 1,
 } BWIFI_BT_INQ_T;
 
 typedef enum {
-	BWIFI_LE_SCAN_STOP                = 0,//
-	BWIFI_LE_SCAN_START               = 1,//
+	BWIFI_LE_SCAN_STOP                = 0,
+	BWIFI_LE_SCAN_START               = 1,
 } BWIFI_BT_LE_SCAN_T;
 
 typedef enum {
-	BWIFI_LE_ADV_STOP                 = 0,//
-	BWIFI_LE_ADV_START                = 1,//
+	BWIFI_LE_ADV_STOP                 = 0,
+	BWIFI_LE_ADV_START                = 1,
 } BWIFI_BT_LE_ADV_T;
 
 typedef enum {
-	BWIFI_LE_DISCONNECTED             = 0,//
-	BWIFI_LE_CONNECTED                = 1,//
+	BWIFI_LE_DISCONNECTED             = 0,
+	BWIFI_LE_CONNECTED                = 1,
 } BWIFI_BT_LE_STATUS_T;
 
 enum COEX_BT_OPER_T {
@@ -206,8 +206,8 @@ void coex_calc_wifi_scan_time(uint32_t *min_chan, uint32_t *max_chan)
 	uint32_t time = coex_calc_bt_time();
 
 	if (time == 0) {
-		*min_chan = 90;
-		*max_chan = 90;
+		*min_chan = 100;
+		*max_chan = 100;
 	} else if (time < 40000) {
 		*min_chan = 50;
 		*max_chan = 110;

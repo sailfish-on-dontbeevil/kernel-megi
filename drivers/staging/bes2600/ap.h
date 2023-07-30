@@ -26,7 +26,7 @@ void bes2600_sta_notify(struct ieee80211_hw *dev, struct ieee80211_vif *vif,
 void bes2600_bss_info_changed(struct ieee80211_hw *dev,
 			     struct ieee80211_vif *vif,
 			     struct ieee80211_bss_conf *info,
-			     u32 changed);
+			     u64 changed);
 
 int bes2600_ampdu_action(struct ieee80211_hw *hw,
 			struct ieee80211_vif *vif,
