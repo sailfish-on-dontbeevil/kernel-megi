@@ -828,7 +828,7 @@
 };
 
 &pcie_phy {
-	//status = "okay";
+	status = "okay";
 };
 
 &pcie0 {
@@ -840,7 +840,7 @@
 	vpcie0v9-supply = <&vcca0v9_s3>;
 	vpcie1v8-supply = <&vcca1v8_s3>;
 	vpcie3v3-supply = <&vcc3v3_ssd>;
-	//status = "okay";
+	status = "okay";
 };
 
 &pinctrl {
