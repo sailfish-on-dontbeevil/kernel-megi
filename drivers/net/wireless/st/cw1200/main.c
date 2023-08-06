@@ -519,6 +519,8 @@ u32 cw1200_dpll_from_clk(u16 clk_khz)
 	}
 }
 
+int bes2600_load_firmware(struct cw1200_common *priv);
+
 int cw1200_core_probe(const struct hwbus_ops *hwbus_ops,
 		      struct hwbus_priv *hwbus,
 		      struct device *pdev,
@@ -560,7 +562,10 @@ int cw1200_core_probe(const struct hwbus_ops *hwbus_ops,
 	if (err)
 		goto err1;
 
-	err = cw1200_load_firmware(priv);
+	if (priv->fw_api == CW1200_FW_API_BES2600)
+		err = bes2600_load_firmware(priv);
+	else
+		err = cw1200_load_firmware(priv);
 	if (err)
 		goto err2;
 
