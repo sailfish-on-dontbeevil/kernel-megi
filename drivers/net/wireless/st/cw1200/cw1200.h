@@ -18,6 +18,7 @@
 #include <linux/wait.h>
 #include <linux/mutex.h>
 #include <linux/workqueue.h>
+#include <linux/gpio/consumer.h>
 #include <net/mac80211.h>
 
 #include "queue.h"
@@ -104,6 +105,10 @@ struct cw1200_common {
 	const struct hwbus_ops		*hwbus_ops;
 	struct hwbus_priv		*hwbus_priv;
 
+	/* FW loading for BES2600 */
+	struct completion fw_completion;
+	bool fw_completion_on_irq;
+
 	/* Hardware information */
 	enum {
 		HIF_9000_SILICON_VERSATILE = 0,
@@ -120,6 +125,7 @@ struct cw1200_common {
 	enum cw1200_fw_api {
 		CW1200_FW_API_ORIGINAL = 0,
 		CW1200_FW_API_XRADIO,
+		CW1200_FW_API_BES2600,
 	} fw_api;
 	int                             hw_refclk;
 	bool				hw_have_5ghz;

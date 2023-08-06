@@ -369,7 +369,7 @@ static int wsm_tx_confirm(struct cw1200_common *priv,
 	tx_confirm.media_delay = WSM_GET32(buf);
 	tx_confirm.tx_queue_delay = WSM_GET32(buf);
 
-	if (priv->fw_api == CW1200_FW_API_XRADIO)
+	if (priv->fw_api == CW1200_FW_API_XRADIO || priv->fw_api == CW1200_FW_API_BES2600)
 		link_id = cw1200_queue_get_link_id(tx_confirm.packet_id);
 
 	cw1200_tx_confirm_cb(priv, link_id, &tx_confirm);
@@ -481,6 +481,10 @@ int wsm_set_bss_params(struct cw1200_common *priv,
 	WSM_PUT8(buf, arg->beacon_lost_count);
 	WSM_PUT16(buf, arg->aid);
 	WSM_PUT32(buf, arg->operational_rate_set);
+
+	if (priv->fw_api == CW1200_FW_API_BES2600) {
+		WSM_PUT32(buf, priv->ht_info.ht_cap.mcs.rx_mask[0] << 14);
+	}
 
 	ret = wsm_cmd_send(priv, buf, NULL,
 			   WSM_SET_BSS_PARAMS_REQ_ID, WSM_CMD_TIMEOUT);
@@ -758,12 +762,20 @@ int wsm_map_link(struct cw1200_common *priv, const struct wsm_map_link *arg)
 {
 	int ret;
 	struct wsm_buf *buf = &priv->wsm_cmd_buf;
-	u16 cmd = 0x001C | WSM_TX_LINK_ID(arg->link_id);
+	u16 cmd = 0x001C;
 
 	wsm_cmd_lock(priv);
 
 	WSM_PUT(buf, &arg->mac_addr[0], sizeof(arg->mac_addr));
-	WSM_PUT16(buf, 0);
+
+	if (priv->fw_api == CW1200_FW_API_BES2600) {
+		WSM_PUT8(buf, arg->unmap);
+		WSM_PUT8(buf, arg->link_id);
+	} else {
+		cmd |= WSM_TX_LINK_ID(arg->link_id);
+
+		WSM_PUT16(buf, 0);
+	}
 
 	ret = wsm_cmd_send(priv, buf, NULL, cmd, WSM_CMD_TIMEOUT);
 
