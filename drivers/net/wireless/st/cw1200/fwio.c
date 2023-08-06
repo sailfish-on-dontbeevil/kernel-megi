@@ -55,7 +55,9 @@ static int cw1200_load_bootloader(struct cw1200_common *priv)
 	const char *bl_path;
 	int ret;
 
-	if (priv->fw_api == CW1200_FW_API_XRADIO)
+	if (priv->fw_api == CW1200_FW_API_BES2600)
+		bl_path = BES2600_LOAD_BOOT_NAME;
+	else if (priv->fw_api == CW1200_FW_API_XRADIO)
 		bl_path = BOOTLOADER_XRADIO;
 	else
 		bl_path = BOOTLOADER_CW1X60;
@@ -150,12 +152,16 @@ static int cw1200_load_firmware_cw1200(struct cw1200_common *priv)
 			priv->sdd_path = SDD_FILE_22;
 		break;
 	case CW1X60_HW_REV:
-		if (priv->fw_api == CW1200_FW_API_XRADIO)
+		if (priv->fw_api == CW1200_FW_API_BES2600)
+			fw_path = BES2600_LOAD_FW_NAME;
+		else if (priv->fw_api == CW1200_FW_API_XRADIO)
 			fw_path = FIRMWARE_XRADIO;
 		else
 			fw_path = FIRMWARE_CW1X60;
 		if (!priv->sdd_path) {
-			if (priv->fw_api == CW1200_FW_API_XRADIO)
+			if (priv->fw_api == CW1200_FW_API_BES2600)
+				priv->sdd_path = SDD_FILE_BES2600;
+			else if (priv->fw_api == CW1200_FW_API_XRADIO)
 				priv->sdd_path = SDD_FILE_XRADIO;
 			else
 				priv->sdd_path = SDD_FILE_CW1X60;
