@@ -3,6 +3,8 @@
  * Copyright (c) 2023, Ondrej Jirman <megi@xff.cz>
  */
 
+#define DEBUG
+
 #include <linux/types.h>
 #include <linux/printk.h>
 #include <linux/string.h>
