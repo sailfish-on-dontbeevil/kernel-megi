@@ -95,6 +95,11 @@ void cw1200_irq_handler(struct cw1200_common *priv)
 {
 	pr_debug("[BH] irq.\n");
 
+	if (priv->fw_completion_on_irq) {
+		complete(&priv->fw_completion);
+		return;
+	}
+
 	/* Disable Interrupts! */
 	/* NOTE:  hwbus_ops->lock already held */
 	__cw1200_irq_enable(priv, 0);
