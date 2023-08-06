@@ -29,6 +29,10 @@
 #define SDD_FILE_11		"sdd_11.bin"
 #define SDD_FILE_10		"sdd_10.bin"
 
+#define BES2600_LOAD_BOOT_NAME	"bes2600/best2002_fw_boot_sdio.bin"
+#define BES2600_LOAD_FW_NAME	"bes2600/best2002_fw_sdio.bin"
+#define SDD_FILE_BES2600	"bes2600/sdd.bin"
+
 int cw1200_load_firmware(struct cw1200_common *priv);
 
 /* SDD definitions */
