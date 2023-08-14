@@ -2275,6 +2275,42 @@ static void gc2145_remove(struct i2c_client *client)
 	v4l2_ctrl_handler_free(&sensor->ctrls.handler);
 }
 
+static int gc2145_sensor_suspend(struct device *dev)
+{
+	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct gc2145_dev *sensor = to_gc2145_dev(sd);
+
+	mutex_lock(&sensor->lock);
+	if (sensor->streaming)
+		gc2145_set_stream(sensor, false);
+	mutex_unlock(&sensor->lock);
+
+	return 0;
+}
+
+static int gc2145_sensor_resume(struct device *dev)
+{
+	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct gc2145_dev *sensor = to_gc2145_dev(sd);
+	int ret = 0;
+
+	mutex_lock(&sensor->lock);
+	if (sensor->streaming) {
+		ret = gc2145_set_stream(sensor, true);
+		if (ret) {
+			gc2145_set_stream(sensor, false);
+			sensor->streaming = false;
+		}
+	}
+	mutex_unlock(&sensor->lock);
+
+	return ret;
+}
+
+static const struct dev_pm_ops gc2145_pm_ops = {
+	SET_SYSTEM_SLEEP_PM_OPS(gc2145_sensor_suspend, gc2145_sensor_resume)
+};
+
 static const struct i2c_device_id gc2145_id[] = {
 	{"gc2145", 0},
 	{},
@@ -2291,6 +2327,7 @@ static struct i2c_driver gc2145_i2c_driver = {
 	.driver = {
 		.name  = "gc2145",
 		.of_match_table	= gc2145_dt_ids,
+		.pm = &gc2145_pm_ops,
 	},
 	.id_table = gc2145_id,
 	.probe    = gc2145_probe,
