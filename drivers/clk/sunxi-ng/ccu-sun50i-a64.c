@@ -938,6 +938,17 @@ static struct ccu_mux_nb sun50i_a64_cpu_nb = {
 	.bypass_index	= 1, /* index of 24 MHz oscillator */
 };
 
+/*
+ * Since PLL-Video0 is an ancestor of both tcon0 and HDMI PYH, tcon0 clock will
+ * conflict with HDMI PHY clock which is on another display pipeline.
+ *
+ * Therefore, a notifier is required to restore the rate of TCON0 when the rate
+ * of PLL-Video0 changed.
+ */
+static struct ccu_rate_reset_nb sun50i_a64_pll_video0_reset_tcon0_nb = {
+	.common		= &pll_video0_clk.common,
+};
+
 static int sun50i_a64_ccu_probe(struct platform_device *pdev)
 {
 	void __iomem *reg;
@@ -972,6 +983,10 @@ static int sun50i_a64_ccu_probe(struct platform_device *pdev)
 	/* Reparent CPU during PLL CPU rate changes */
 	ccu_mux_notifier_register(pll_cpux_clk.common.hw.clk,
 				  &sun50i_a64_cpu_nb);
+
+	/* Reset the rate of TCON0 clock when PLL-VIDEO0 is changed */
+	sun50i_a64_pll_video0_reset_tcon0_nb.target_clk = tcon0_clk.common.hw.clk;
+	ccu_rate_reset_notifier_register(&sun50i_a64_pll_video0_reset_tcon0_nb);
 
 	return 0;
 }
