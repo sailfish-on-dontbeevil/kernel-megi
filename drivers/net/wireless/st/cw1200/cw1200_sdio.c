@@ -285,7 +285,7 @@ static const struct of_device_id xradio_sdio_of_match_table[] = {
 	{ }
 };
 
-static int cw1200_probe_of(struct sdio_func *func)
+static int cw1200_probe_of(struct sdio_func *func, struct hwbus_priv *self)
 {
 	struct device *dev = &func->dev;
 	struct device_node *np = dev->of_node;
@@ -294,12 +294,14 @@ static int cw1200_probe_of(struct sdio_func *func)
 	int irq;
 
 	of_id = of_match_node(xradio_sdio_of_match_table, np);
-	if (!of_id)
+	if (!of_id) {
+		dev_warn(dev, "OF device match failed\n");
 		return -ENODEV;
+	}
 
 	irq = irq_of_parse_and_map(np, 0);
 	if (!irq) {
-		pr_warn("SDIO: No irq in platform data\n");
+		dev_warn(dev, "No irq in platform data\n");
 	} else {
 		global_plat_data->irq = irq;
 	}
@@ -308,9 +310,10 @@ static int cw1200_probe_of(struct sdio_func *func)
 	if (!macaddr)
 		return -ENOMEM;
 
-	if (!of_get_mac_address(np, macaddr))
+	if (!of_get_mac_address(np, macaddr)) {
+		dev_warn(dev, "Found MAC address in OF: %pM\n", macaddr);
 		global_plat_data->macaddr = macaddr;
-	else
+	} else
 		kfree(macaddr);
 
 	return 0;
@@ -330,13 +333,13 @@ static int cw1200_sdio_probe(struct sdio_func *func,
 	if (func->num != 0x01)
 		return -ENODEV;
 
-	cw1200_probe_of(func);
-
 	self = devm_kzalloc(dev, sizeof(*self), GFP_KERNEL);
 	if (!self) {
 		pr_err("Can't allocate SDIO hwbus_priv.\n");
 		return -ENOMEM;
 	}
+
+	cw1200_probe_of(func, self);
 
 	func->card->quirks |= MMC_QUIRK_LENIENT_FN0;
 	func->card->quirks |= MMC_QUIRK_BROKEN_BYTE_MODE_512;
@@ -348,11 +351,14 @@ static int cw1200_sdio_probe(struct sdio_func *func,
 
 	self->wakeup_device_gpio = devm_gpiod_get_optional(dev, "device-wakeup", GPIOD_OUT_LOW);
 	if (IS_ERR(self->wakeup_device_gpio))
-		return dev_err_probe(dev, PTR_ERR(self->wakeup_device_gpio), "can't get wakeup gpio");
+		return dev_err_probe(dev, PTR_ERR(self->wakeup_device_gpio),
+				     "can't get device-wakeup gpio\n");
 
 	if (self->wakeup_device_gpio) {
 		gpiod_direction_output(self->wakeup_device_gpio, 1);
 		msleep(10);
+	} else {
+		dev_warn(dev, "device-wakeup GPIO not found\n");
 	}
 
 	self->pdata = global_plat_data; /* FIXME */
