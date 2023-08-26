@@ -40,7 +40,11 @@ typedef __kernel_uid16_t        uid16_t;
 typedef __kernel_gid16_t        gid16_t;
 
 typedef unsigned long		uintptr_t;
+#if __SIZEOF_POINTER__ == __SIZEOF_INT__
+typedef int			intptr_t;
+#else
 typedef long			intptr_t;
+#endif
 
 #ifdef CONFIG_HAVE_UID16
 /* This is defined by include/asm-{arch}/posix_types.h */
