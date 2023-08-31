@@ -2458,7 +2458,13 @@ static enum drm_connector_status dw_hdmi_detect(struct dw_hdmi *hdmi)
 	enum drm_connector_status result;
 
 	result = hdmi->phy.ops->read_hpd(hdmi, hdmi->phy.data);
-	hdmi->last_connector_result = result;
+
+	if (result != hdmi->last_connector_result) {
+		dev_info(hdmi->dev, "read_hpd result: %d", result);
+		handle_plugged_change(hdmi,
+				      result == connector_status_connected);
+		hdmi->last_connector_result = result;
+	}
 
 	return result;
 }
@@ -3141,7 +3147,7 @@ static irqreturn_t dw_hdmi_irq(int irq, void *dev_id)
 	}
 
 	if (status != connector_status_unknown && !hdmi->extcon) {
-		dev_dbg(hdmi->dev, "EVENT=%s\n",
+		dev_info(hdmi->dev, "EVENT=%s\n",
 			status == connector_status_connected ?
 			"plugin" : "plugout");
 
