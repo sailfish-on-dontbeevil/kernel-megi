@@ -15,6 +15,9 @@
 #include <linux/mmc/card.h>
 #include <linux/mmc/sdio.h>
 #include <linux/mmc/sdio_ids.h>
+#include <linux/of.h>
+#include <linux/of_irq.h>
+#include <linux/of_net.h>
 #include <net/mac80211.h>
 
 #include "cw1200.h"
@@ -30,9 +33,7 @@ MODULE_LICENSE("GPL");
 
 /* Default platform data for Sagrad modules */
 static struct cw1200_platform_data_sdio sagrad_109x_evk_platform_data = {
-	.ref_clk = 38400,
-	.have_5ghz = false,
-	.sdd_file = "sdd_sagrad_1091_1098.bin",
+	.ref_clk = 24000,
 };
 
 /* Allow platform data to be overridden */
@@ -46,14 +47,26 @@ void __init cw1200_sdio_set_platform_data(struct cw1200_platform_data_sdio *pdat
 struct hwbus_priv {
 	struct sdio_func	*func;
 	struct cw1200_common	*core;
+	struct gpio_desc	*wakeup_device_gpio;
 	const struct cw1200_platform_data_sdio *pdata;
 };
 
 static const struct sdio_device_id cw1200_sdio_ids[] = {
-	{ SDIO_DEVICE(SDIO_VENDOR_ID_STE, SDIO_DEVICE_ID_STE_CW1200) },
-	{ /* end: all zeroes */			},
+	{
+		SDIO_DEVICE(SDIO_VENDOR_ID_STE, SDIO_DEVICE_ID_STE_CW1200),
+		.driver_data = CW1200_FW_API_ORIGINAL
+	},
+	{
+		SDIO_DEVICE(SDIO_VENDOR_ID_STE, 0x2281),
+		.driver_data = CW1200_FW_API_XRADIO
+	},
+	{
+		SDIO_DEVICE(0xbe57, 0x2002),
+		.driver_data = CW1200_FW_API_BES2600,
+	},
+	{ /* end: all zeroes */ },
 };
-MODULE_DEVICE_TABLE(sdio, cw1200_sdio_ids);
+//MODULE_DEVICE_TABLE(sdio, cw1200_sdio_ids);
 
 /* hwbus_ops implemetation */
 
@@ -266,10 +279,51 @@ static const struct hwbus_ops cw1200_sdio_hwbus_ops = {
 	.power_mgmt		= cw1200_sdio_pm,
 };
 
+static const struct of_device_id xradio_sdio_of_match_table[] = {
+	{ .compatible = "xradio,xr819" },
+	{ .compatible = "bestechnic,bes2600" },
+	{ }
+};
+
+static int cw1200_probe_of(struct sdio_func *func, struct hwbus_priv *self)
+{
+	struct device *dev = &func->dev;
+	struct device_node *np = dev->of_node;
+	const struct of_device_id *of_id;
+	u8 *macaddr;
+	int irq;
+
+	of_id = of_match_node(xradio_sdio_of_match_table, np);
+	if (!of_id) {
+		dev_warn(dev, "OF device match failed\n");
+		return -ENODEV;
+	}
+
+	irq = irq_of_parse_and_map(np, 0);
+	if (!irq) {
+		dev_warn(dev, "No irq in platform data\n");
+	} else {
+		global_plat_data->irq = irq;
+	}
+
+	macaddr = devm_kmalloc(dev, ETH_ALEN, GFP_KERNEL);
+	if (!macaddr)
+		return -ENOMEM;
+
+	if (!of_get_mac_address(np, macaddr)) {
+		dev_warn(dev, "Found MAC address in OF: %pM\n", macaddr);
+		global_plat_data->macaddr = macaddr;
+	} else
+		kfree(macaddr);
+
+	return 0;
+}
+
 /* Probe Function to be called by SDIO stack when device is discovered */
 static int cw1200_sdio_probe(struct sdio_func *func,
 			     const struct sdio_device_id *id)
 {
+	struct device *dev = &func->dev;
 	struct hwbus_priv *self;
 	int status;
 
@@ -279,13 +333,33 @@ static int cw1200_sdio_probe(struct sdio_func *func,
 	if (func->num != 0x01)
 		return -ENODEV;
 
-	self = kzalloc(sizeof(*self), GFP_KERNEL);
+	self = devm_kzalloc(dev, sizeof(*self), GFP_KERNEL);
 	if (!self) {
 		pr_err("Can't allocate SDIO hwbus_priv.\n");
 		return -ENOMEM;
 	}
 
+	cw1200_probe_of(func, self);
+
 	func->card->quirks |= MMC_QUIRK_LENIENT_FN0;
+	func->card->quirks |= MMC_QUIRK_BROKEN_BYTE_MODE_512;
+
+	if (id->driver_data == CW1200_FW_API_BES2600) {
+		global_plat_data->have_5ghz = true;
+		global_plat_data->ref_clk = 32768;
+	}
+
+	self->wakeup_device_gpio = devm_gpiod_get_optional(dev, "device-wakeup", GPIOD_OUT_LOW);
+	if (IS_ERR(self->wakeup_device_gpio))
+		return dev_err_probe(dev, PTR_ERR(self->wakeup_device_gpio),
+				     "can't get device-wakeup gpio\n");
+
+	if (self->wakeup_device_gpio) {
+		gpiod_direction_output(self->wakeup_device_gpio, 1);
+		msleep(10);
+	} else {
+		dev_warn(dev, "device-wakeup GPIO not found\n");
+	}
 
 	self->pdata = global_plat_data; /* FIXME */
 	self->func = func;
@@ -301,14 +375,15 @@ static int cw1200_sdio_probe(struct sdio_func *func,
 				   self->pdata->ref_clk,
 				   self->pdata->macaddr,
 				   self->pdata->sdd_file,
-				   self->pdata->have_5ghz);
+				   self->pdata->have_5ghz,
+				   id->driver_data);
 	if (status) {
 		cw1200_sdio_irq_unsubscribe(self);
 		sdio_claim_host(func);
 		sdio_disable_func(func);
 		sdio_release_host(func);
 		sdio_set_drvdata(func, NULL);
-		kfree(self);
+		gpiod_direction_output(self->wakeup_device_gpio, 0);
 	}
 
 	return status;
@@ -331,7 +406,7 @@ static void cw1200_sdio_disconnect(struct sdio_func *func)
 		sdio_disable_func(func);
 		sdio_release_host(func);
 		sdio_set_drvdata(func, NULL);
-		kfree(self);
+		gpiod_direction_output(self->wakeup_device_gpio, 0);
 	}
 }
 
