@@ -53,6 +53,7 @@ struct rk817_charger {
 	struct power_supply *chg_ps;
 	bool plugged_in;
 	bool battery_present;
+	bool apply_ilim;
 
 	/*
 	 * voltage_k and voltage_b values are used to calibrate the ADC
@@ -677,6 +678,38 @@ static int rk817_chg_set_prop(struct power_supply *ps,
 
 }
 
+/* Sync the input-current-limit with our parent supply (if we have one) */
+static void rk817_usb_power_external_power_changed(struct power_supply *psy)
+{
+        struct rk817_charger *charger = power_supply_get_drvdata(psy);
+	union power_supply_propval val;
+	int ret;
+
+	ret = power_supply_get_property_from_supplier(charger->chg_ps,
+						      POWER_SUPPLY_PROP_CURRENT_MAX,
+						      &val);
+	if (ret)
+		return;
+
+	/*
+	 * We only want to start applying input current limit after we get first
+	 * non-0 value from the supplier. Until then, we keep the limit applied
+	 * by the bootloader. If we lower the limit before the charger is properly
+	 * detected, we risk boot failure due to insufficient power.
+	 */
+	if (!charger->apply_ilim) {
+		if (!val.intval)
+			return;
+
+		charger->apply_ilim = true;
+	}
+
+	if (val.intval < 500000)
+		val.intval = 500000;
+
+	rk817_chg_set_prop(charger->chg_ps, POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT, &val);
+}
+
 static irqreturn_t rk817_plug_in_isr(int irq, void *cg)
 {
 	struct rk817_charger *charger;
@@ -784,6 +817,7 @@ static const struct power_supply_desc rk817_chg_desc = {
 	.property_is_writeable	= rk817_charger_prop_writeable,
 	.get_property = rk817_chg_get_prop,
 	.set_property = rk817_chg_set_prop,
+	.external_power_changed	= rk817_usb_power_external_power_changed,
 };
 
 static int rk817_read_battery_nvram_values(struct rk817_charger *charger)
@@ -1289,6 +1323,8 @@ static int rk817_charger_probe(struct platform_device *pdev)
 
 	/* Force the first update immediately. */
 	mod_delayed_work(system_wq, &charger->work, 0);
+
+	rk817_usb_power_external_power_changed(charger->chg_ps);
 
 	return 0;
 }
