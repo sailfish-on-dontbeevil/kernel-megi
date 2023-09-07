@@ -685,14 +685,12 @@ ecm_bind(struct usb_configuration *c, struct usb_function *f)
 	ecm_opts = container_of(f->fi, struct f_ecm_opts, func_inst);
 
 	mutex_lock(&ecm_opts->lock);
-
 	gether_set_gadget(ecm_opts->net, cdev->gadget);
-
 	if (!ecm_opts->bound) {
 		status = gether_register_netdev(ecm_opts->net);
-		ecm_opts->bound = true;
+		if (!status)
+			ecm_opts->bound = true;
 	}
-
 	mutex_unlock(&ecm_opts->lock);
 	if (status)
 		return status;
@@ -907,7 +905,9 @@ static void ecm_free(struct usb_function *f)
 
 static void ecm_unbind(struct usb_configuration *c, struct usb_function *f)
 {
-	struct f_ecm		*ecm = func_to_ecm(f);
+	struct f_ecm *ecm = func_to_ecm(f);
+	struct f_ecm_opts *opts = container_of(f->fi, struct f_ecm_opts,
+					       func_inst);
 
 	DBG(c->cdev, "ecm unbind\n");
 
@@ -920,6 +920,8 @@ static void ecm_unbind(struct usb_configuration *c, struct usb_function *f)
 
 	kfree(ecm->notify_req->buf);
 	usb_ep_free_request(ecm->notify, ecm->notify_req);
+
+	gether_set_gadget(opts->net, NULL);
 }
 
 static struct usb_function *ecm_alloc(struct usb_function_instance *fi)
