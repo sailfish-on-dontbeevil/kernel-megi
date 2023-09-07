@@ -421,6 +421,10 @@
 		vin-supply = <&vcc_sys>;
 	};
 
+	// XXX: modem codec supplies:
+	// - vcc1v8_codec
+	// - vcca3v0_codec
+
 	vcc1v8_codec: vcc1v8-codec-regulator {
 		compatible = "regulator-fixed";
 		enable-active-high;
@@ -973,6 +977,7 @@
 	wcam_lens: camera-lens@c {
 		compatible = "dongwoon,dw9714";
 		reg = <0x0c>;
+		/*XXX: also depends on vcca1v8_codec for I2C bus power */
 		vcc-supply = <&vcc1v8_dvp>;
 	};
 
@@ -1008,14 +1013,6 @@
 		};
 	};
 
-	// XXX: modem codec supplies:
-	// - vcc1v8_codec
-	// - vcca3v0_codec
-
-	// supplies: (always on currently)
-	// - vcca3v0_codec
-	// - vcca1v8_codec
-	// - vcc5v0_sys - spk_vcc
 	rt5640: rt5640@1c {
 		compatible = "realtek,rt5640";
 		reg = <0x1c>;
@@ -1023,6 +1020,10 @@
 		clock-names = "mclk";
 		assigned-clocks = <&cru SCLK_I2S0_8CH>;
 		assigned-clock-rates = <11289599>;
+		avdd-supply = <&vcca3v0_codec>;
+		cpvdd-supply = <&vcca3v0_codec>;
+		spkvdd-supply = <&vcc5v0_sys>;
+		dbvdd-supply = <&vcca1v8_codec>;
 		realtek,dmic1-data-pin = <1>;
 		realtek,in3-differential;
 		realtek,lout-differential;
