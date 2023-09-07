@@ -595,6 +595,7 @@
 			rockchip,resistor-sense-micro-ohms = <10000>;
 			rockchip,sleep-enter-current-microamp = <300000>;
 			rockchip,sleep-filter-current-microamp = <100000>;
+			power-supplies = <&usbc0>;
 		};
 	};
 };
