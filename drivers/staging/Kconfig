@@ -44,6 +44,8 @@ source "drivers/staging/vt6655/Kconfig"
 
 source "drivers/staging/vt6656/Kconfig"
 
+source "drivers/staging/bes2600/Kconfig"
+
 source "drivers/staging/iio/Kconfig"
 
 source "drivers/staging/sm750fb/Kconfig"

@@ -1264,6 +1264,7 @@ struct wsm_map_link {
 	/* MAC address of the remote device */
 	/* [in] */ u8 mac_addr[6];
 	/* [in] */ u8 link_id;
+	/* [in] */ u8 unmap;
 };
 
 int wsm_map_link(struct cw1200_common *priv, const struct wsm_map_link *arg);
