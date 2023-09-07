@@ -288,6 +288,7 @@
 &cru {
 	assigned-clocks = <&cru PLL_GPLL>, <&pmucru PLL_PPLL>, <&cru PLL_VPLL>;
 	assigned-clock-rates = <1200000000>, <200000000>, <500000000>;
+	/delete-property/ assigned-clock-parents;
 };
 
 &csi_dphy {
@@ -972,11 +973,8 @@
 	status = "okay";
 
 	port {
-		#address-cells = <1>;
-		#size-cells = <0>;
-		usb_host0_xhci_role_switch: endpoint@0 {
-			reg = <0>;
-			remote-endpoint = <&usbc0_role_sw>;
+		usb_host0_xhci_typec_hs: endpoint {
+			remote-endpoint = <&typec_hs_usb_host0_xhci>;
 		};
 	};
 };
@@ -1041,20 +1039,9 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&usbcc_int_l>;
 		vbus-supply = <&vbus>;
+		usb-role-switch = <&usb_host0_xhci>;
 
-		ports {
-			#address-cells = <1>;
-			#size-cells = <0>;
-
-			port@0 {
-				reg = <0>;
-				usbc0_role_sw: endpoint {
-					remote-endpoint = <&usb_host0_xhci_role_switch>;
-				};
-			};
-		};
-
-		usb_con: connector {
+		connector {
 			compatible = "usb-c-connector";
 			label = "USB-C";
 			data-role = "dual";
@@ -1067,6 +1054,14 @@
 			ports {
 				#address-cells = <1>;
 				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+
+					typec_hs_usb_host0_xhci: endpoint {
+						remote-endpoint = <&usb_host0_xhci_typec_hs>;
+					};
+				};
 			};
 		};
 	};
