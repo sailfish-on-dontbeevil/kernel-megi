@@ -658,7 +658,7 @@ rndis_bind(struct usb_configuration *c, struct usb_function *f)
 	struct usb_composite_dev *cdev = c->cdev;
 	struct f_rndis		*rndis = func_to_rndis(f);
 	struct usb_string	*us;
-	int			status;
+	int			status = 0;
 	struct usb_ep		*ep;
 
 	struct f_rndis_opts *rndis_opts;
@@ -681,20 +681,16 @@ rndis_bind(struct usb_configuration *c, struct usb_function *f)
 	rndis_iad_descriptor.bFunctionSubClass = rndis_opts->subclass;
 	rndis_iad_descriptor.bFunctionProtocol = rndis_opts->protocol;
 
-	/*
-	 * in drivers/usb/gadget/configfs.c:configfs_composite_bind()
-	 * configurations are bound in sequence with list_for_each_entry,
-	 * in each configuration its functions are bound in sequence
-	 * with list_for_each_entry, so we assume no race condition
-	 * with regard to rndis_opts->bound access
-	 */
+	mutex_lock(&rndis_opts->lock);
+	gether_set_gadget(rndis_opts->net, cdev->gadget);
 	if (!rndis_opts->bound) {
-		gether_set_gadget(rndis_opts->net, cdev->gadget);
 		status = gether_register_netdev(rndis_opts->net);
-		if (status)
-			goto fail;
-		rndis_opts->bound = true;
+		if (!status)
+			rndis_opts->bound = true;
 	}
+	mutex_unlock(&rndis_opts->lock);
+	if (status)
+		goto fail;
 
 	us = usb_gstrings_attach(cdev, rndis_strings,
 				 ARRAY_SIZE(rndis_string_defs));
@@ -954,7 +950,9 @@ static void rndis_free(struct usb_function *f)
 
 static void rndis_unbind(struct usb_configuration *c, struct usb_function *f)
 {
-	struct f_rndis		*rndis = func_to_rndis(f);
+	struct f_rndis *rndis = func_to_rndis(f);
+	struct f_rndis_opts *opts = container_of(f->fi, struct f_rndis_opts,
+						 func_inst);
 
 	kfree(f->os_desc_table);
 	f->os_desc_n = 0;
@@ -962,6 +960,8 @@ static void rndis_unbind(struct usb_configuration *c, struct usb_function *f)
 
 	kfree(rndis->notify_req->buf);
 	usb_ep_free_request(rndis->notify, rndis->notify_req);
+
+	gether_set_gadget(opts->net, NULL);
 }
 
 static struct usb_function *rndis_alloc(struct usb_function_instance *fi)
