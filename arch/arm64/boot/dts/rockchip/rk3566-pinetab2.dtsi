@@ -967,6 +967,14 @@
 	status = "okay";
 };
 
+&usb_host1_ehci {
+	status = "okay";
+};
+
+&usb_host1_ohci {
+	status = "okay";
+};
+
 /* OTG port controller */
 &usb_host0_xhci {
 	usb-role-switch;
@@ -1040,6 +1048,7 @@
 		pinctrl-0 = <&usbcc_int_l>;
 		vbus-supply = <&vbus>;
 		usb-role-switch = <&usb_host0_xhci>;
+		extcon = <&usb2phy0>;
 
 		connector {
 			compatible = "usb-c-connector";
