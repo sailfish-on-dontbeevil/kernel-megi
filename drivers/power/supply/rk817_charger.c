@@ -1250,13 +1250,13 @@ static int rk817_charger_probe(struct platform_device *pdev)
 	charger->bat_ps = devm_power_supply_register(&pdev->dev,
 						     &rk817_bat_desc, &pscfg);
 	if (IS_ERR(charger->bat_ps))
-		return dev_err_probe(dev, -EINVAL,
+		return dev_err_probe(dev, PTR_ERR(charger->bat_ps),
 				     "Battery failed to probe\n");
 
 	charger->chg_ps = devm_power_supply_register(&pdev->dev,
 						     &rk817_chg_desc, &pscfg);
 	if (IS_ERR(charger->chg_ps))
-		return dev_err_probe(dev, -EINVAL,
+		return dev_err_probe(dev, PTR_ERR(charger->chg_ps),
 				     "Charger failed to probe\n");
 
 	ret = power_supply_get_battery_info(charger->bat_ps,
