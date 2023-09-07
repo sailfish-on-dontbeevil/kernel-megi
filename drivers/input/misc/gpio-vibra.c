@@ -39,7 +39,7 @@ static int gpio_vibrator_start(struct gpio_vibrator *vibrator)
 	struct device *pdev = vibrator->input->dev.parent;
 	int err;
 
-	if (!vibrator->vcc_on) {
+	if (vibrator->vcc && !vibrator->vcc_on) {
 		err = regulator_enable(vibrator->vcc);
 		if (err) {
 			dev_err(pdev, "failed to enable regulator: %d\n", err);
@@ -57,7 +57,7 @@ static void gpio_vibrator_stop(struct gpio_vibrator *vibrator)
 {
 	gpiod_set_value_cansleep(vibrator->gpio, 0);
 
-	if (vibrator->vcc_on) {
+	if (vibrator->vcc && vibrator->vcc_on) {
 		regulator_disable(vibrator->vcc);
 		vibrator->vcc_on = false;
 	}
@@ -112,15 +112,26 @@ static int gpio_vibrator_probe(struct platform_device *pdev)
 	if (!vibrator->input)
 		return -ENOMEM;
 
-	vibrator->vcc = devm_regulator_get(&pdev->dev, "vcc");
-	if (IS_ERR(vibrator->vcc))
-		return dev_err_probe(&pdev->dev, PTR_ERR(vibrator->vcc),
+	vibrator->vcc = devm_regulator_get_optional(&pdev->dev, "vcc");
+	err = PTR_ERR_OR_ZERO(vibrator->vcc);
+	if (err == -ENODEV) {
+		vibrator->vcc = NULL;
+	} else if (err) {
+		return dev_err_probe(&pdev->dev, err,
 				     "Failed to request regulator\n");
+	}
 
-	vibrator->gpio = devm_gpiod_get(&pdev->dev, "enable", GPIOD_OUT_LOW);
-	if (IS_ERR(vibrator->gpio))
+	vibrator->gpio = devm_gpiod_get_optional(&pdev->dev, "enable",
+						 GPIOD_OUT_LOW);
+	err = PTR_ERR_OR_ZERO(vibrator->gpio);
+	if (err)
 		return dev_err_probe(&pdev->dev, PTR_ERR(vibrator->gpio),
 				     "Failed to request main gpio\n");
+
+	if (!vibrator->vcc && !vibrator->gpio) {
+		dev_err(&pdev->dev, "Neither gpio nor regulator provided\n");
+		return -EINVAL;
+	}
 
 	INIT_WORK(&vibrator->play_work, gpio_vibrator_play_work);
 
