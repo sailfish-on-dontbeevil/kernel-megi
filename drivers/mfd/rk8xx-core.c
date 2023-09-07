@@ -118,6 +118,8 @@ static const struct mfd_cell rk817s[] = {
 static const struct mfd_cell rk818s[] = {
 	{ .name = "rk808-clkout", .id = PLATFORM_DEVID_NONE, },
 	{ .name = "rk808-regulator", .id = PLATFORM_DEVID_NONE, },
+	{ .name = "rk818-battery", .of_compatible = "rockchip,rk818-battery", },
+	{ .name = "rk818-charger", .of_compatible = "rockchip,rk818-charger", },
 	{
 		.name = "rk808-rtc",
 		.num_resources = ARRAY_SIZE(rtc_resources),
@@ -258,6 +260,7 @@ static const struct rk808_reg_data rk818_pre_init_reg[] = {
 	{ RK818_H5V_EN_REG,	  BIT(0),	    RK818_H5V_EN },
 	{ RK808_VB_MON_REG,	  MASK_ALL,	    VB_LO_ACT |
 						    VB_LO_SEL_3500MV },
+	{ RK808_CLK32OUT_REG, CLK32KOUT2_FUNC_MASK, CLK32KOUT2_FUNC },
 };
 
 static const struct regmap_irq rk805_irqs[] = {
@@ -525,6 +528,12 @@ static int rk808_power_off(struct sys_off_data *data)
 		reg = RK805_DEV_CTRL_REG;
 		bit = DEV_OFF;
 		break;
+	case RK806_ID:
+		ret = regmap_write(rk808->regmap, RK806_SYS_CFG3, RK806_DEV_OFF);
+		if (ret)
+			dev_err(rk808->dev, "Failed to shutdown device!\n");
+
+		return NOTIFY_DONE;
 	case RK808_ID:
 		reg = RK808_DEVCTRL_REG,
 		bit = DEV_OFF_RST;
