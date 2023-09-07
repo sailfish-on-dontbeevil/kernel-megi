@@ -6,6 +6,7 @@
  */
 
 #include <linux/delay.h>
+#include <linux/extcon.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/i2c.h>
@@ -39,6 +40,8 @@ struct tcpci {
 
 	struct tcpc_dev tcpc;
 	struct tcpci_data *data;
+
+	struct extcon_dev *extcon;
 };
 
 struct tcpci_chip {
@@ -763,6 +766,47 @@ static int tcpci_parse_config(struct tcpci *tcpci)
 	return 0;
 }
 
+static int tcpci_get_current_limit(struct tcpc_dev *dev)
+{
+	struct tcpci *tcpci = tcpc_to_tcpci(dev);
+	int current_limit = 0;
+	unsigned long timeout;
+
+	/*
+	 * To avoid cycles in OF dependencies, we get extcon when necessary
+	 * outside of probe function.
+	 */
+	if (of_property_read_bool(tcpci->dev->of_node, "extcon") && !tcpci->extcon) {
+		tcpci->extcon = extcon_get_edev_by_phandle(tcpci->dev, 0);
+		if (IS_ERR(tcpci->extcon))
+			tcpci->extcon = NULL;
+	}
+
+	if (!tcpci->extcon)
+		return 0;
+
+	/*
+	 * USB2 Charger detection may still be in progress when we get here,
+	 * this can take upto 600ms, wait 1000ms max.
+	 */
+	timeout = jiffies + msecs_to_jiffies(1000);
+	do {
+		if (extcon_get_state(tcpci->extcon, EXTCON_CHG_USB_SDP) == 1)
+			current_limit = 500;
+
+		if (extcon_get_state(tcpci->extcon, EXTCON_CHG_USB_CDP) == 1 ||
+		    extcon_get_state(tcpci->extcon, EXTCON_CHG_USB_ACA) == 1)
+			current_limit = 1500;
+
+		if (extcon_get_state(tcpci->extcon, EXTCON_CHG_USB_DCP) == 1)
+			current_limit = 2000;
+
+		msleep(50);
+	} while (current_limit == 0 && time_before(jiffies, timeout));
+
+	return current_limit;
+}
+
 struct tcpci *tcpci_register_port(struct device *dev, struct tcpci_data *data)
 {
 	struct tcpci *tcpci;
@@ -793,6 +837,7 @@ struct tcpci *tcpci_register_port(struct device *dev, struct tcpci_data *data)
 	tcpci->tcpc.enable_frs = tcpci_enable_frs;
 	tcpci->tcpc.frs_sourcing_vbus = tcpci_frs_sourcing_vbus;
 	tcpci->tcpc.set_partner_usb_comm_capable = tcpci_set_partner_usb_comm_capable;
+	tcpci->tcpc.get_current_limit = tcpci_get_current_limit;
 
 	if (tcpci->data->check_contaminant)
 		tcpci->tcpc.check_contaminant = tcpci_check_contaminant;
