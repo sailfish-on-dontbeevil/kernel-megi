@@ -18,6 +18,7 @@
 #include <linux/of.h>
 #include <linux/of_gpio.h>
 #include <linux/platform_device.h>
+#include <linux/regulator/consumer.h>
 #include <linux/spi/spi.h>
 #include <linux/acpi.h>
 #include <sound/core.h>
@@ -38,6 +39,13 @@
 #define RT5640_PR_SPACING 0x100
 
 #define RT5640_PR_BASE (RT5640_PR_RANGE_BASE + (0 * RT5640_PR_SPACING))
+
+static const char *const rt5640_supply_names[] = {
+	"avdd",
+	"cpvdd",
+	"dbvdd",
+	"spkvdd",
+};
 
 static const struct regmap_range_cfg rt5640_ranges[] = {
 	{ .name = "PR", .range_min = RT5640_PR_BASE,
@@ -3045,6 +3053,14 @@ static int rt5640_i2c_probe(struct i2c_client *i2c)
 			return ret;
 	} else
 		rt5640->ldo1_en = -EINVAL;
+
+	ret = devm_regulator_bulk_get_enable(&i2c->dev,
+					     ARRAY_SIZE(rt5640_supply_names),
+					     rt5640_supply_names);
+	if (ret) {
+		dev_err(&i2c->dev, "Failed to request supplies: %d\n", ret);
+		return ret;
+	}
 
 	rt5640->regmap = devm_regmap_init_i2c(i2c, &rt5640_regmap);
 	if (IS_ERR(rt5640->regmap)) {
