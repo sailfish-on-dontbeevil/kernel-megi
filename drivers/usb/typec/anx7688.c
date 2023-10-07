@@ -160,9 +160,7 @@ static const char * const anx7688_supply_names[] = {
         "dvdd18",
         "avdd10",
         "dvdd10",
-	//XXX: this would block I2C power supply from being disabled during suspend
-	//by other drivers, so let's not enable I2C power in this driver.
-	//"i2c",
+	"i2c",
         "hdmi_vt",
 
         "vconn", // power for VCONN1/VCONN2 switches
@@ -2181,8 +2179,7 @@ static int __maybe_unused anx7688_suspend(struct device *dev)
 	del_timer_sync(&anx7688->work_timer);
 	cancel_delayed_work_sync(&anx7688->work);
 
-	if (test_bit(ANX7688_F_POWERED, anx7688->flags))
-		regulator_disable(anx7688->supplies[ANX7688_I2C_INDEX].consumer);
+	regulator_disable(anx7688->supplies[ANX7688_I2C_INDEX].consumer);
 
 	return 0;
 }
@@ -2192,12 +2189,10 @@ static int __maybe_unused anx7688_resume(struct device *dev)
 	struct anx7688 *anx7688 = i2c_get_clientdata(to_i2c_client(dev));
 	int ret;
 
-	if (test_bit(ANX7688_F_POWERED, anx7688->flags)) {
-		ret = regulator_enable(anx7688->supplies[ANX7688_I2C_INDEX].consumer);
-		if (ret)
-			dev_warn(anx7688->dev,
-				 "failed to enable I2C regulator (%d)\n", ret);
-	}
+	ret = regulator_enable(anx7688->supplies[ANX7688_I2C_INDEX].consumer);
+	if (ret)
+		dev_warn(anx7688->dev,
+			 "failed to enable I2C regulator (%d)\n", ret);
 
 	// check status right after resume, since it could have changed during
 	// sleep
