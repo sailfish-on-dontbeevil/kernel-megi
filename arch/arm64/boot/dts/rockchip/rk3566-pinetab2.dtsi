@@ -239,6 +239,13 @@
 		regulator-max-microvolt = <1200000>;
 		vin-supply = <&vcc_3v3>;
 	};
+
+	typec_extcon_bridge: typec-extcon {
+		compatible = "linux,typec-extcon-bridge";
+		usb-role-switch;
+		orientation-switch;
+		mode-switch;
+	};
 };
 
 &combphy1 {
@@ -886,6 +893,18 @@
 	status = "okay";
 };
 
+&usb2phy0 {
+	status = "okay";
+	extcon = <&typec_extcon_bridge>;
+	extcon,ignore-usb;
+};
+
+&usb2phy1 {
+	status = "okay";
+};
+
+/* POGO USB host port */
+
 &usb_host0_ehci {
 	status = "okay";
 };
@@ -894,31 +913,14 @@
 	status = "okay";
 };
 
-&usb_host1_ehci {
+&usb2phy1_otg {
+	phy-supply = <&vcc5v0_usb_host2>;
 	status = "okay";
 };
 
-&usb_host1_ohci {
-	status = "okay";
-};
-
-/* OTG port controller */
-&usb_host0_xhci {
-	usb-role-switch;
-	status = "okay";
-
-	port {
-		usb_host0_xhci_typec_hs: endpoint {
-			remote-endpoint = <&typec_hs_usb_host0_xhci>;
-		};
-	};
-};
+/* Top USB3.0 host only port */
 
 &usb_host1_xhci {
-	status = "okay";
-};
-
-&usb2phy0 {
 	status = "okay";
 };
 
@@ -927,17 +929,20 @@
 	status = "okay";
 };
 
-/* OTG port phy */
+/* Bottom USB2.0 only OTG port */
+
+&usb_host0_xhci {
+	status = "okay";
+	extcon = <&typec_extcon_bridge>;
+
+	port {
+		usb_host0_xhci_typec_hs: endpoint {
+			remote-endpoint = <&typec_hs_usb_host0_xhci>;
+		};
+	};
+};
+
 &usb2phy0_otg {
-	status = "okay";
-};
-
-&usb2phy1 {
-	status = "okay";
-};
-
-&usb2phy1_otg {
-	phy-supply = <&vcc5v0_usb_host2>;
 	status = "okay";
 };
 
@@ -974,8 +979,8 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&usbcc_int_l>;
 		vbus-supply = <&vbus>;
-		usb-role-switch = <&usb_host0_xhci>;
-		extcon = <&usb2phy0>;
+		extcon = <&typec_extcon_bridge>;
+		usb-role-switch = <&typec_extcon_bridge>;
 
 		connector {
 			compatible = "usb-c-connector";
@@ -986,6 +991,8 @@
 			op-sink-microwatt = <2500000>;
 			sink-pdos = <PDO_FIXED(5000, 3000, PDO_FIXED_USB_COMM)>;
 			source-pdos = <PDO_FIXED(5000, 500, PDO_FIXED_USB_COMM)>;
+			mode-switch = <&typec_extcon_bridge>;
+			orientation-switch = <&typec_extcon_bridge>;
 
 			ports {
 				#address-cells = <1>;
