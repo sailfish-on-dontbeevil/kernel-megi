@@ -456,6 +456,7 @@
 		pinctrl-0 = <&pmic_pins>, <&rk806_dvs1_null>,
 			    <&rk806_dvs2_null>, <&rk806_dvs3_null>;
 		pinctrl-names = "default";
+		system-power-controller;
 		spi-max-frequency = <1000000>;
 
 		vcc1-supply = <&vcc4v0_sys>;
