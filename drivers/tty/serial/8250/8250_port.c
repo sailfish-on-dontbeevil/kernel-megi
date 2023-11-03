@@ -796,6 +796,9 @@ static int size_fifo(struct uart_8250_port *up)
 	u32 old_dl;
 	int count;
 
+	if (up->port.fifosize)
+		return up->port.fifosize;
+
 	old_lcr = serial_in(up, UART_LCR);
 	serial_out(up, UART_LCR, 0);
 	old_fcr = serial_in(up, UART_FCR);
