@@ -1998,6 +1998,7 @@ int spi_nor_sr2_bit7_quad_enable(struct spi_nor *nor)
 }
 
 static const struct spi_nor_manufacturer *manufacturers[] = {
+	&spi_nor_alliance,
 	&spi_nor_atmel,
 	&spi_nor_catalyst,
 	&spi_nor_eon,
