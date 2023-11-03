@@ -1,0 +1,10 @@
+config BES2600
+	tristate "Bestechnic BES2600 SDIO Wireless LAN NIC driver"
+	depends on WLAN && MMC && CFG80211
+	select CFG80211_WEXT
+	select CRYPTO
+	select CRYPTO_LIB_ARC4
+	select CONFIG_FW_LOADER
+	default n
+	help
+	This option enables support for BES2600 SDIO wifi.
