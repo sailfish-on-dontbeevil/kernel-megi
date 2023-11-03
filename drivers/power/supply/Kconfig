@@ -952,4 +952,12 @@ config CHARGER_QCOM_SMB2
 	  adds support for the SMB2 switch mode battery charger found
 	  in PMI8998 and related PMICs.
 
+config CHARGER_RK818
+	bool "RK818 Charger driver"
+	depends on MFD_RK8XX
+	default n
+	help
+	  If you say yes here you will get support for the charger of RK818 PMIC.
+	  This driver can give support for Rk818 Charger Interface.
+
 endif # POWER_SUPPLY
