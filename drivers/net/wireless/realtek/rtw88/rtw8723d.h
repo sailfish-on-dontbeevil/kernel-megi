@@ -303,4 +303,13 @@ static inline s32 iqk_mult(s32 x, s32 y, s32 *ext)
 #define BIT_MASK_OFDM_LCRC_ERR		GENMASK(31, 16)
 #define REG_HT_CRC32_CNT_11N_AGG	0x0fb8
 
+/* TODO: These are identical to what 8703b needs. Should probably be
+ * moved to a shared support module. */
+int rtw8723d_read_efuse(struct rtw_dev *rtwdev, u8 *log_map);
+void rtw8723d_cfg_ldo25(struct rtw_dev *rtwdev, bool enable);
+extern const struct rtw_ltecoex_addr rtw8723d_ltecoex_addr;
+extern const struct rtw_rf_sipi_addr rtw8723d_rf_sipi_addr[];
+extern const struct rtw_hw_reg rtw8723d_dig[];
+extern const struct rtw_hw_reg rtw8723d_dig_cck[];
+
 #endif

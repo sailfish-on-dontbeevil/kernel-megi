@@ -222,7 +222,7 @@ static void rtw8723ds_efuse_parsing(struct rtw_efuse *efuse,
 	ether_addr_copy(efuse->addr, map->s.mac_addr);
 }
 
-static int rtw8723d_read_efuse(struct rtw_dev *rtwdev, u8 *log_map)
+int rtw8723d_read_efuse(struct rtw_dev *rtwdev, u8 *log_map)
 {
 	struct rtw_efuse *efuse = &rtwdev->efuse;
 	struct rtw8723d_efuse *map;
@@ -574,7 +574,7 @@ static void rtw8723d_shutdown(struct rtw_dev *rtwdev)
 	rtw_write16_set(rtwdev, REG_HCI_OPT_CTRL, BIT_USB_SUS_DIS);
 }
 
-static void rtw8723d_cfg_ldo25(struct rtw_dev *rtwdev, bool enable)
+void rtw8723d_cfg_ldo25(struct rtw_dev *rtwdev, bool enable)
 {
 	u8 ldo_pwr;
 
@@ -2628,23 +2628,23 @@ static const struct rtw_intf_phy_para_table phy_para_table_8723d = {
 	.n_gen1_para	= ARRAY_SIZE(pcie_gen1_param_8723d),
 };
 
-static const struct rtw_hw_reg rtw8723d_dig[] = {
+const struct rtw_hw_reg rtw8723d_dig[] = {
 	[0] = { .addr = 0xc50, .mask = 0x7f },
 	[1] = { .addr = 0xc50, .mask = 0x7f },
 };
 
-static const struct rtw_hw_reg rtw8723d_dig_cck[] = {
+const struct rtw_hw_reg rtw8723d_dig_cck[] = {
 	[0] = { .addr = 0xa0c, .mask = 0x3f00 },
 };
 
-static const struct rtw_rf_sipi_addr rtw8723d_rf_sipi_addr[] = {
+const struct rtw_rf_sipi_addr rtw8723d_rf_sipi_addr[] = {
 	[RF_PATH_A] = { .hssi_1 = 0x820, .lssi_read    = 0x8a0,
 			.hssi_2 = 0x824, .lssi_read_pi = 0x8b8},
 	[RF_PATH_B] = { .hssi_1 = 0x828, .lssi_read    = 0x8a4,
 			.hssi_2 = 0x82c, .lssi_read_pi = 0x8bc},
 };
 
-static const struct rtw_ltecoex_addr rtw8723d_ltecoex_addr = {
+const struct rtw_ltecoex_addr rtw8723d_ltecoex_addr = {
 	.ctrl = REG_LTECOEX_CTRL,
 	.wdata = REG_LTECOEX_WRITE_DATA,
 	.rdata = REG_LTECOEX_READ_DATA,
