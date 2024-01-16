@@ -453,8 +453,74 @@ static int rtw8703b_mac_init(struct rtw_dev *rtwdev)
 {
 	/* Looks like we can reuse rtw8723d_mac_init, too, but for now
 	 * stop here before we get a NULL pointer dereference. */
-	rtw_warn(rtwdev, "got to mac_init, not implemented yet\n");
+	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
 	return -ENOTSUPP;
+}
+
+void rtw8703b_set_channel(struct rtw_dev *rtwdev, u8 channel,
+			  u8 bandwidth, u8 primary_chan_idx)
+{
+	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
+}
+
+void rtw8703b_query_rx_desc(struct rtw_dev *rtwdev, u8 *rx_desc,
+		      struct rtw_rx_pkt_stat *pkt_stat,
+		      struct ieee80211_rx_status *rx_status)
+{
+	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
+}
+
+void rtw8703b_false_alarm_statistics(struct rtw_dev *rtwdev)
+{
+	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
+}
+
+void rtw8703b_phy_calibration(struct rtw_dev *rtwdev)
+{
+	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
+}
+
+void rtw8703b_pwr_track(struct rtw_dev *rtwdev)
+{
+	/* maybe helpful: hal/phydm/rtl8703b/halhwimg8703b_rf.c */
+	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
+}
+
+void rtw8703b_fill_txdesc_checksum(struct rtw_dev *rtwdev,
+			     struct rtw_tx_pkt_info *pkt_info,
+			     u8 *txdesc)
+{
+	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
+}
+
+void rtw8703b_coex_set_init(struct rtw_dev *rtwdev)
+{
+	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
+}
+
+void rtw8703b_coex_set_gnt_fix(struct rtw_dev *rtwdev)
+{
+	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
+}
+
+void rtw8703b_coex_set_gnt_debug(struct rtw_dev *rtwdev)
+{
+	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
+}
+
+void rtw8703b_coex_set_rfe_type(struct rtw_dev *rtwdev)
+{
+	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
+}
+
+void rtw8703b_coex_set_wl_tx_power(struct rtw_dev *rtwdev, u8 wl_pwr)
+{
+	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
+}
+
+void rtw8703b_coex_set_wl_rx_gain(struct rtw_dev *rtwdev, bool low_gain)
+{
+	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
 }
 
 static const u8 rtw8703b_pwrtrk_2gb_n[] = {
@@ -526,8 +592,8 @@ static struct rtw_chip_ops rtw8703b_ops = {
 	.shutdown		= NULL,
 	.read_efuse		= rtw8703b_read_efuse,
 	.phy_set_param		= rtw8703b_phy_set_param,
-	.set_channel		= NULL, // required
-	.query_rx_desc		= NULL, // required
+	.set_channel		= rtw8703b_set_channel,
+	.query_rx_desc		= rtw8703b_query_rx_desc,
 	.read_rf		= rtw_phy_read_rf_sipi,
 	.write_rf		= rtw_phy_write_rf_reg_sipi,
 	// the settings are exactly the same
@@ -535,8 +601,8 @@ static struct rtw_chip_ops rtw8703b_ops = {
 	.set_antenna		= NULL,
 	.cfg_ldo25		= rtw8723d_cfg_ldo25,
 	.efuse_grant		= rtw8723d_efuse_grant,
-	.false_alarm_statistics	= NULL, // required
-	.phy_calibration	= NULL, // required
+	.false_alarm_statistics	= rtw8703b_false_alarm_statistics,
+	.phy_calibration	= rtw8703b_phy_calibration,
 	.dpk_track		= NULL,
 	/* 8723d uses REG_CSRATIO to set dm_info.cck_pd_default, which
 	 * is used in its cck_pd_set function. According to comments
@@ -544,8 +610,7 @@ static struct rtw_chip_ops rtw8703b_ops = {
 	 * generation, only 0xa0a ("ODM_CCK_PD_THRESH", which is only
 	 * *written* to). */
 	.cck_pd_set		= NULL,
-	// maybe helpful: hal/phydm/rtl8703b/halhwimg8703b_rf.c
-	.pwr_track		= NULL, // required
+	.pwr_track		= rtw8703b_pwr_track,
 	.config_bfee		= NULL,
 	.set_gid_table		= NULL,
 	.cfg_csi_rate		= NULL,
@@ -555,16 +620,16 @@ static struct rtw_chip_ops rtw8703b_ops = {
 	.cfo_track		= NULL,
 	.config_tx_path		= NULL,
 	.config_txrx_mode	= NULL,
-	.fill_txdesc_checksum	= NULL, // required
+	.fill_txdesc_checksum	= rtw8703b_fill_txdesc_checksum,
 
 	/* for coex */
-	.coex_set_init		= NULL, // required
+	.coex_set_init		= rtw8703b_coex_set_init,
 	.coex_set_ant_switch	= NULL,
-	.coex_set_gnt_fix	= NULL, // required
-	.coex_set_gnt_debug	= NULL, // required
-	.coex_set_rfe_type	= NULL, // required
-	.coex_set_wl_tx_power	= NULL, // required
-	.coex_set_wl_rx_gain	= NULL, // required
+	.coex_set_gnt_fix	= rtw8703b_coex_set_gnt_fix,
+	.coex_set_gnt_debug	= rtw8703b_coex_set_gnt_debug,
+	.coex_set_rfe_type	= rtw8703b_coex_set_rfe_type,
+	.coex_set_wl_tx_power	= rtw8703b_coex_set_wl_tx_power,
+	.coex_set_wl_rx_gain	= rtw8703b_coex_set_wl_rx_gain,
 };
 
 const struct rtw_chip_info rtw8703b_hw_spec = {
