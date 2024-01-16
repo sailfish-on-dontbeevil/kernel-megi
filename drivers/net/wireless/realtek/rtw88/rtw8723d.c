@@ -550,7 +550,7 @@ static void rtw8723d_set_channel(struct rtw_dev *rtwdev, u8 channel, u8 bw,
 #define WLAN_RX_FILTER2		0xFFFF
 #define WLAN_RCR_CFG		0x700060CE
 
-static int rtw8723d_mac_init(struct rtw_dev *rtwdev)
+int rtw8723d_mac_init(struct rtw_dev *rtwdev)
 {
 	rtw_write8(rtwdev, REG_FWHW_TXQ_CTRL + 1, WLAN_TXQ_RPT_EN);
 	rtw_write32(rtwdev, REG_TCR, BIT_TCR_CFG);

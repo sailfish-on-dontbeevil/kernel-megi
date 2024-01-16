@@ -449,14 +449,6 @@ static void rtw8703b_phy_set_param(struct rtw_dev *rtwdev)
 	rtw8703b_pwrtrack_init(rtwdev);
 }
 
-static int rtw8703b_mac_init(struct rtw_dev *rtwdev)
-{
-	/* Looks like we can reuse rtw8723d_mac_init, too, but for now
-	 * stop here before we get a NULL pointer dereference. */
-	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
-	return -ENOTSUPP;
-}
-
 void rtw8703b_set_channel(struct rtw_dev *rtwdev, u8 channel,
 			  u8 bandwidth, u8 primary_chan_idx)
 {
@@ -467,6 +459,10 @@ void rtw8703b_query_rx_desc(struct rtw_dev *rtwdev, u8 *rx_desc,
 		      struct rtw_rx_pkt_stat *pkt_stat,
 		      struct ieee80211_rx_status *rx_status)
 {
+	/* Priority: causes WARN in mac80211 because of invalid rate
+	 * information. Memset is to avoid a crash because of invalid
+	 * pointers in uninitialized memory. */
+	memset(pkt_stat, 0, sizeof(*pkt_stat));
 	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
 }
 
@@ -587,7 +583,7 @@ static const struct rtw_pwr_track_tbl rtw8703b_rtw_pwr_track_tbl = {
 };
 
 static struct rtw_chip_ops rtw8703b_ops = {
-	.mac_init		= rtw8703b_mac_init,
+	.mac_init		= rtw8723d_mac_init,
 	.dump_fw_crash		= NULL,
 	.shutdown		= NULL,
 	.read_efuse		= rtw8703b_read_efuse,
