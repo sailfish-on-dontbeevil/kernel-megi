@@ -433,6 +433,69 @@ static int rtw8703b_mac_init(struct rtw_dev *rtwdev)
 	return -ENOTSUPP;
 }
 
+static const u8 rtw8703b_pwrtrk_2gb_n[] = {
+	0, 0, 1, 2, 2, 3, 3, 4, 4, 4, 4, 5, 5, 6, 6,
+	7, 7, 7, 7, 8, 8, 9, 9, 10, 10, 10, 11, 11, 11, 11
+};
+
+static const u8 rtw8703b_pwrtrk_2gb_p[] = {
+	0, 1, 2, 3, 3, 4, 4, 4, 4, 5, 5, 6, 7, 7, 7,
+	8, 8, 9, 9, 10, 10, 11, 11, 12, 13, 13, 14, 14, 15, 15
+};
+
+static const u8 rtw8703b_pwrtrk_2ga_n[] = {
+	0, 0, 1, 2, 2, 3, 3, 4, 4, 4, 4, 5, 5, 6, 6,
+	7, 7, 7, 7, 8, 8, 9, 9, 10, 10, 10, 11, 11, 11, 11
+};
+
+static const u8 rtw8703b_pwrtrk_2ga_p[] = {
+	0, 1, 2, 3, 3, 4, 4, 4, 4, 5, 5, 6, 7, 7, 7,
+	8, 8, 9, 9, 10, 10, 11, 11, 12, 13, 13, 14, 14, 15, 15
+};
+
+static const u8 rtw8703b_pwrtrk_2g_cck_b_n[] = {
+	0, 0, 1, 2, 2, 3, 3, 4, 4, 4, 4, 5, 5, 6, 6,
+	7, 7, 7, 7, 8, 8, 9, 9, 10, 10, 10, 11, 11, 11, 11
+};
+
+static const u8 rtw8703b_pwrtrk_2g_cck_b_p[] = {
+	0, 0, 1, 1, 2, 3, 3, 3, 4, 4, 4, 5, 6, 6, 6,
+	7, 7, 8, 8, 8, 9, 10, 10, 10, 11, 11, 12, 12, 13, 13
+};
+
+static const u8 rtw8703b_pwrtrk_2g_cck_a_n[] = {
+	0, 0, 1, 2, 2, 3, 3, 4, 4, 4, 4, 5, 5, 6, 6,
+	7, 7, 7, 7, 8, 8, 9, 9, 10, 10, 10, 11, 11, 11, 11
+};
+
+static const u8 rtw8703b_pwrtrk_2g_cck_a_p[] = {
+	0, 0, 1, 1, 2, 3, 3, 3, 4, 4, 4, 5, 6, 6, 6,
+	7, 7, 8, 8, 8, 9, 10, 10, 10, 11, 11, 12, 12, 13, 13
+};
+
+static const s8 rtw8703b_pwrtrk_xtal_n[] = {
+	0, 0, 0, -1, -1, -1, -1, -2, -2, -2, -3, -3, -3, -3, -3,
+	-4, -2, -2, -1, -1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1
+};
+
+static const s8 rtw8703b_pwrtrk_xtal_p[] = {
+	0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 1, 0, -1, -1, -1,
+	-2, -3, -7, -9, -10, -11, -14, -16, -18, -20, -22, -24, -26, -28, -30
+};
+
+static const struct rtw_pwr_track_tbl rtw8703b_rtw_pwr_track_tbl = {
+	.pwrtrk_2gb_n = rtw8703b_pwrtrk_2gb_n,
+	.pwrtrk_2gb_p = rtw8703b_pwrtrk_2gb_p,
+	.pwrtrk_2ga_n = rtw8703b_pwrtrk_2ga_n,
+	.pwrtrk_2ga_p = rtw8703b_pwrtrk_2ga_p,
+	.pwrtrk_2g_cckb_n = rtw8703b_pwrtrk_2g_cck_b_n,
+	.pwrtrk_2g_cckb_p = rtw8703b_pwrtrk_2g_cck_b_p,
+	.pwrtrk_2g_ccka_n = rtw8703b_pwrtrk_2g_cck_a_n,
+	.pwrtrk_2g_ccka_p = rtw8703b_pwrtrk_2g_cck_a_p,
+	.pwrtrk_xtal_n = rtw8703b_pwrtrk_xtal_n,
+	.pwrtrk_xtal_p = rtw8703b_pwrtrk_xtal_p,
+};
+
 static struct rtw_chip_ops rtw8703b_ops = {
 	.mac_init		= rtw8703b_mac_init,
 	.dump_fw_crash		= NULL,
@@ -542,20 +605,16 @@ const struct rtw_chip_info rtw8703b_hw_spec = {
 	.fix_rf_phy_num = 2,
 	.ltecoex_addr = &rtw8723d_ltecoex_addr,
 
-	// hal/phydm/rtl8703b/halhwimg8703b_mac.c
 	.mac_tbl = &rtw8703b_mac_tbl,
-	// agc & bb: hal/phydm/rtl8703b/halhwimg8703b_bb.c
 	.agc_tbl = &rtw8703b_agc_tbl,
 	.bb_tbl = &rtw8703b_bb_tbl,
-	// hal/phydm/rtl8703b/halhwimg8703b_rf.c
 	.rf_tbl = {&rtw8703b_rf_a_tbl},
 
 	.rfe_defs = rtw8703b_rfe_defs,
 	.rfe_defs_size = ARRAY_SIZE(rtw8703b_rfe_defs),
 
 	.iqk_threshold = 8,
-	// also in rf table file
-	.pwr_track_tbl = NULL,
+	.pwr_track_tbl = &rtw8703b_rtw_pwr_track_tbl,
 
 	/* leaving this commented because I don't want any part of the
 	   stack to assume wowlan is supported yet */
@@ -598,7 +657,8 @@ const struct rtw_chip_info rtw8703b_hw_spec = {
 	// The REG_BTG_SEL doesn't seem to have a counterpart in the
 	// vendor driver either. Maybe not supported?
 	.btg_reg = NULL,
-	/* Whatever this is seems to be only informational? */
+	/* Whatever this is seems to be only informational? At least
+	 * its use in coex.c handles the count of 0. */
 	.coex_info_hw_regs_num = 0,
 	.coex_info_hw_regs = NULL,
 };
