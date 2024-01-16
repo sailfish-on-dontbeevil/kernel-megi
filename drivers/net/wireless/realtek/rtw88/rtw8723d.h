@@ -305,11 +305,15 @@ static inline s32 iqk_mult(s32 x, s32 y, s32 *ext)
 
 /* TODO: These are identical to what 8703b needs. Should probably be
  * moved to a shared support module. */
-int rtw8723d_read_efuse(struct rtw_dev *rtwdev, u8 *log_map);
 void rtw8723d_cfg_ldo25(struct rtw_dev *rtwdev, bool enable);
+void rtw8723d_efuse_grant(struct rtw_dev *rtwdev, bool on);
+void rtw8723d_lck(struct rtw_dev *rtwdev);
+int rtw8723d_read_efuse(struct rtw_dev *rtwdev, u8 *log_map);
+void rtw8723d_set_tx_power_index(struct rtw_dev *rtwdev);
 extern const struct rtw_ltecoex_addr rtw8723d_ltecoex_addr;
 extern const struct rtw_rf_sipi_addr rtw8723d_rf_sipi_addr[];
 extern const struct rtw_hw_reg rtw8723d_dig[];
 extern const struct rtw_hw_reg rtw8723d_dig_cck[];
+extern const struct rtw_prioq_addrs prioq_addrs_8723d;
 
 #endif

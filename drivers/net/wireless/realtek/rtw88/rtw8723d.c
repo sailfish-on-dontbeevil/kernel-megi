@@ -65,7 +65,7 @@ static const struct rtw_hw_reg rtw8723d_txagc[] = {
 #define WLAN_LTR_CTRL1		0xCB004010
 #define WLAN_LTR_CTRL2		0x01233425
 
-static void rtw8723d_lck(struct rtw_dev *rtwdev)
+void rtw8723d_lck(struct rtw_dev *rtwdev)
 {
 	u32 lc_cal;
 	u8 val_ctx, rf_val;
@@ -614,7 +614,7 @@ rtw8723d_set_tx_power_index_by_rate(struct rtw_dev *rtwdev, u8 path, u8 rs)
 	}
 }
 
-static void rtw8723d_set_tx_power_index(struct rtw_dev *rtwdev)
+void rtw8723d_set_tx_power_index(struct rtw_dev *rtwdev)
 {
 	struct rtw_hal *hal = &rtwdev->hal;
 	int rs, path;
@@ -625,7 +625,7 @@ static void rtw8723d_set_tx_power_index(struct rtw_dev *rtwdev)
 	}
 }
 
-static void rtw8723d_efuse_grant(struct rtw_dev *rtwdev, bool on)
+void rtw8723d_efuse_grant(struct rtw_dev *rtwdev, bool on)
 {
 	if (on) {
 		rtw_write8(rtwdev, REG_EFUSE_ACCESS, EFUSE_ACCESS_ON);
@@ -2592,7 +2592,7 @@ static const struct rtw_rqpn rqpn_table_8723d[] = {
 	 RTW_DMA_MAPPING_EXTRA, RTW_DMA_MAPPING_HIGH},
 };
 
-static const struct rtw_prioq_addrs prioq_addrs_8723d = {
+const struct rtw_prioq_addrs prioq_addrs_8723d = {
 	.prio[RTW_DMA_MAPPING_EXTRA] = {
 		.rsvd = REG_RQPN_NPQ + 2, .avail = REG_RQPN_NPQ + 3,
 	},
