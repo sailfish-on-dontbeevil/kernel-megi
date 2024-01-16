@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /* Copyright Fiona Klute <fiona.klute@gmx.de> */
 
 #include <linux/device.h>
@@ -707,5 +707,5 @@ EXPORT_SYMBOL(rtw8703b_hw_spec);
 MODULE_FIRMWARE("rtw88/rtw8703b_fw_nic.bin");
 
 MODULE_AUTHOR("Fiona Klute <fiona.klute@gmx.de>");
-MODULE_DESCRIPTION("Realtek 802.11n wireless 8723cs driver");
-MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("Realtek 802.11n wireless 8703b driver");
+MODULE_LICENSE("Dual BSD/GPL");
