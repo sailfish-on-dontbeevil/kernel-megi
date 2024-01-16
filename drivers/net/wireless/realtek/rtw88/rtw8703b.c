@@ -45,7 +45,31 @@
 		RTW_PWR_CMD_END, 0, 0}
 
 
+/* rssi in percentage % (dbm = % - 100) */
+/* These are used to select simple signal quality levels, might need
+ * tweaking. Same for rf_para tables below. */
+static const u8 wl_rssi_step_8703b[] = {60, 50, 44, 30};
+static const u8 bt_rssi_step_8703b[] = {30, 30, 30, 30};
 static const struct coex_5g_afh_map afh_5g_8703b[] = { {0, 0, 0} };
+
+/* wl_tx_dec_power, bt_tx_dec_power, wl_rx_gain, bt_rx_lna_constrain */
+static const struct coex_rf_para rf_para_tx_8703b[] = {
+	{0, 0, false, 7},  /* for normal */
+	{0, 10, false, 7}, /* for WL-CPT */
+	{1, 0, true, 4},
+	{1, 2, true, 4},
+	{1, 10, true, 4},
+	{1, 15, true, 4}
+};
+
+static const struct coex_rf_para rf_para_rx_8703b[] = {
+	{0, 0, false, 7},  /* for normal */
+	{0, 10, false, 7}, /* for WL-CPT */
+	{1, 0, true, 5},
+	{1, 2, true, 5},
+	{1, 10, true, 5},
+	{1, 15, true, 5}
+};
 
 static const struct rtw_pwr_seq_cmd trans_carddis_to_cardemu_8703b[] = {
 	{0x0005,
@@ -634,20 +658,36 @@ const struct rtw_chip_info rtw8703b_hw_spec = {
 	.bt_rssi_type = COEX_BTRSSI_RATIO,
 	.ant_isolation = 15,
 	.rssi_tolerance = 2,
-	/* TODO: whatever this is */
-	.bt_rssi_step = NULL,
-	.wl_rssi_step = NULL,
+	.bt_rssi_step = bt_rssi_step_8703b,
+	.wl_rssi_step = wl_rssi_step_8703b,
+	/*
+	 * sant -> shared antenna, nsant -> non-shared antenna
+	 *
+	 * TODO: Used for coex, but at least nothing should crash with
+	 * these unset.
+	 *
+	 * btc_chip_para defined in hal/btc/halbtcoutsrc.h loks very
+	 * similar, also regarding rssi_step above, but doesn't seem
+	 * to be assigned anywhere.
+	 *
+	 * halbtc8703b1ant_set_coex_table in
+	 * hal/btc/halbtc8703b1ant.c? Generally lots of magic numbers
+	 * in that file.
+	 */
 	.table_sant_num = 0,
 	.table_sant = NULL,
 	.table_nsant_num = 0,
 	.table_nsant = NULL,
+	/* halbtc8703b1ant_ps_tdma in hal/btc/halbtc8703b1ant.c seems
+	 * to have similar data to tdma_sant_8723d in a massive
+	 * switch/case. */
 	.tdma_sant_num = 0,
 	.tdma_sant = NULL,
 	.tdma_nsant_num = 0,
 	.tdma_nsant = NULL,
-	.wl_rf_para_num = 0,
-	.wl_rf_para_tx = NULL,
-	.wl_rf_para_rx = NULL,
+	.wl_rf_para_num = ARRAY_SIZE(rf_para_tx_8703b),
+	.wl_rf_para_tx = rf_para_tx_8703b,
+	.wl_rf_para_rx = rf_para_rx_8703b,
 	.bt_afh_span_bw20 = 0x20,
 	.bt_afh_span_bw40 = 0x30,
 	.afh_5g_num = ARRAY_SIZE(afh_5g_8703b),
