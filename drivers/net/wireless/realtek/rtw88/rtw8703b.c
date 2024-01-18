@@ -9,6 +9,7 @@
 #include "debug.h"
 #include "phy.h"
 #include "reg.h"
+#include "rx.h"
 #include "rtw8703b.h"
 #include "rtw8703b_tables.h"
 /* 8703b and 8723d have a lot of similarities, so I can reuse
@@ -35,6 +36,8 @@
 /* slightly different from 8723d in vendor driver */
 #define RTW_DEF_OFDM_SWING_INDEX_8703B	30
 
+/* raw pkt_stat->drv_info_sz is in unit of 8-bytes */
+#define RX_DRV_INFO_SZ_UNIT_8703B 8
 
 #define TRANS_SEQ_END \
 	{ \
@@ -459,11 +462,53 @@ void rtw8703b_query_rx_desc(struct rtw_dev *rtwdev, u8 *rx_desc,
 		      struct rtw_rx_pkt_stat *pkt_stat,
 		      struct ieee80211_rx_status *rx_status)
 {
-	/* Priority: causes WARN in mac80211 because of invalid rate
-	 * information. Memset is to avoid a crash because of invalid
-	 * pointers in uninitialized memory. */
+	/* References in vendor driver: hal/rtl8703b/rtl8703b_rxdesc.c
+	 * does similar parsing except phy_status, and
+	 * include/rtl8703b_xmit.h has matching macro definitions
+	 * (also for TX). Note that offsets there are in bytes, while
+	 * the rtw88 rx.h macros convert the pointer to __le32 first,
+	 * so offset is in units of 4 bytes. */
+	struct ieee80211_hdr *hdr;
+	u32 desc_sz = rtwdev->chip->rx_pkt_desc_sz;
+	u8 *phy_status = NULL;
+
 	memset(pkt_stat, 0, sizeof(*pkt_stat));
-	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
+
+	pkt_stat->phy_status = GET_RX_DESC_PHYST(rx_desc);
+	pkt_stat->icv_err = GET_RX_DESC_ICV_ERR(rx_desc);
+	pkt_stat->crc_err = GET_RX_DESC_CRC32(rx_desc);
+	pkt_stat->decrypted = !GET_RX_DESC_SWDEC(rx_desc) &&
+			      GET_RX_DESC_ENC_TYPE(rx_desc) != RX_DESC_ENC_NONE;
+	pkt_stat->is_c2h = GET_RX_DESC_C2H(rx_desc);
+	pkt_stat->pkt_len = GET_RX_DESC_PKT_LEN(rx_desc);
+	pkt_stat->drv_info_sz = GET_RX_DESC_DRV_INFO_SIZE(rx_desc);
+	pkt_stat->shift = GET_RX_DESC_SHIFT(rx_desc);
+	pkt_stat->rate = GET_RX_DESC_RX_RATE(rx_desc);
+	pkt_stat->cam_id = GET_RX_DESC_MACID(rx_desc);
+	pkt_stat->ppdu_cnt = 0;
+	pkt_stat->tsf_low = GET_RX_DESC_TSFL(rx_desc);
+
+	/* functionally the same as for 8723D (just macro instead of
+	 * literal 8) */
+	pkt_stat->drv_info_sz *= RX_DRV_INFO_SZ_UNIT_8703B;
+
+	/* c2h cmd pkt's rx/phy status is not interesting */
+	if (pkt_stat->is_c2h)
+		return;
+
+	hdr = (struct ieee80211_hdr *)(rx_desc + desc_sz + pkt_stat->shift +
+				       pkt_stat->drv_info_sz);
+	if (pkt_stat->phy_status) {
+		// Vendor driver adds a fixed offset RXDESC_SIZE (24)
+		rtw_dbg(rtwdev, RTW_DBG_RFK, "%s: phy_status offset is %u\n",
+			 __func__, desc_sz + pkt_stat->shift);
+		phy_status = rx_desc + desc_sz + pkt_stat->shift;
+		rtw_warn(rtwdev, "%s: retrieving phy_status not implemented\n",
+			 __func__);
+		// TODO
+	}
+
+	rtw_rx_fill_rx_status(rtwdev, pkt_stat, hdr, rx_status, phy_status);
 }
 
 void rtw8703b_false_alarm_statistics(struct rtw_dev *rtwdev)
