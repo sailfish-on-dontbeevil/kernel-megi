@@ -632,7 +632,7 @@ const struct rtw_chip_info rtw8703b_hw_spec = {
 	.ops = &rtw8703b_ops,
 	.id = RTW_CHIP_TYPE_8703B,
 
-	.fw_name = "rtw88/rtw8703b_fw_nic.bin",
+	.fw_name = "rtw88/rtw8703b_fw.bin",
 	.wlan_cpu = RTW_WCPU_11N,
 	.tx_pkt_desc_sz = 40,
 	.tx_buf_desc_sz = 16,
@@ -703,7 +703,7 @@ const struct rtw_chip_info rtw8703b_hw_spec = {
 
 	/* leaving this commented because I don't want any part of the
 	   stack to assume wowlan is supported yet */
-	// .wow_fw_name = "rtw88/rtw8703b_fw_wowlan.bin",
+	.wow_fw_name = "rtw88/rtw8703b_wow_fw.bin",
 	// .wowlan_stub = NULL,
 	.max_scan_ie_len = IEEE80211_MAX_DATA_LEN,
 
@@ -765,7 +765,7 @@ const struct rtw_chip_info rtw8703b_hw_spec = {
 };
 EXPORT_SYMBOL(rtw8703b_hw_spec);
 
-MODULE_FIRMWARE("rtw88/rtw8703b_fw_nic.bin");
+MODULE_FIRMWARE("rtw88/rtw8703b_fw.bin");
 
 MODULE_AUTHOR("Fiona Klute <fiona.klute@gmx.de>");
 MODULE_DESCRIPTION("Realtek 802.11n wireless 8703b driver");
