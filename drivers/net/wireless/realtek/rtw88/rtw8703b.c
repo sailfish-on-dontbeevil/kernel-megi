@@ -4,6 +4,7 @@
 #include <linux/device.h>
 #include <linux/of.h>
 #include <linux/module.h>
+#include <net/mac80211.h>
 #include "main.h"
 #include "coex.h"
 #include "debug.h"
@@ -16,6 +17,43 @@
  * code. The shared code should be moved to a support module or
  * similar, though. */
 #include "rtw8723d.h"
+
+/*
+ * BIT(11) should be 1 for 8703B *and* 8723D, which means LNA uses 4
+ * bit for CCK rates in report, not 3. Vendor driver logs a warning if
+ * it's 0, but handles the case.
+ *
+ * Purpose of other parts of this register is unknown, 8723cs driver
+ * code indicates some other chips use certain bits for antenna
+ * diversity.
+ */
+#define REG_BB_AMP 0x0950
+#define BIT_MASK_RX_LNA (BIT(11))
+
+#define GET_PHY_STAT_AGC_GAIN_A(phy_stat)                                   \
+	(le32_get_bits(*((__le32 *)(phy_stat) + 0x00), GENMASK(6, 0)))
+
+#define GET_PHY_STAT_PWDB(phy_stat)                                         \
+	le32_get_bits(*((__le32 *)(phy_stat) + 0x01), GENMASK(7, 0))
+#define GET_PHY_STAT_VGA(phy_stat)                                          \
+	le32_get_bits(*((__le32 *)(phy_stat) + 0x01), GENMASK(12, 8))
+#define GET_PHY_STAT_LNA_L(phy_stat)                                        \
+	le32_get_bits(*((__le32 *)(phy_stat) + 0x01), GENMASK(15, 13))
+/* the high LNA stat bit if 4 bit format is used */
+#define GET_PHY_STAT_LNA_H(phy_stat)                                        \
+	le32_get_bits(*((__le32 *)(phy_stat) + 0x01), BIT(23))
+#define BIT_LNA_H_MASK BIT(3)
+#define BIT_LNA_L_MASK GENMASK(2, 0)
+
+#define GET_PHY_STAT_CFO_TAIL_A(phy_stat)                                   \
+	(le32_get_bits(*((__le32 *)(phy_stat) + 0x02), GENMASK(15, 8)))
+#define GET_PHY_STAT_RXEVM_A(phy_stat)					    \
+	(le32_get_bits(*((__le32 *)(phy_stat) + 0x02), GENMASK(31, 24)))
+#define GET_PHY_STAT_RXSNR_A(phy_stat)                                      \
+	(le32_get_bits(*((__le32 *)(phy_stat) + 0x03), GENMASK(31, 24)))
+
+#define GET_RX_DESC_BW(rxdesc)                                              \
+	(le32_get_bits(*((__le32 *)(rxdesc) + 0x04), GENMASK(31, 24)))
 
 #define BIT_MASK_TXQ_INIT (BIT(7))
 #define WLAN_RL_VAL 0x3030
@@ -360,7 +398,6 @@ static void rtw8703b_pwrtrack_init(struct rtw_dev *rtwdev)
 	dm_info->txagc_remnant_ofdm = 0;
 }
 
-/* runs after mac_init, not tested yet */
 static void rtw8703b_phy_set_param(struct rtw_dev *rtwdev)
 {
 	/* power on BB/RF domain */
@@ -431,10 +468,15 @@ static void rtw8703b_phy_set_param(struct rtw_dev *rtwdev)
 	rtw_write8(rtwdev, REG_RX_PKT_LIMIT, WLAN_RX_PKT_LIMIT);
 	rtw_write8(rtwdev, REG_MAX_AGGR_NUM, WLAN_MAX_AGG_NR);
 	rtw_write8(rtwdev, REG_AMPDU_MAX_TIME, WLAN_AMPDU_MAX_TIME);
-	// vendor driver has a write to REG_LEDCFG2, but only inside #if 0
-	//rtw_write8(rtwdev, REG_LEDCFG2, WLAN_ANT_SEL);
 
 	rtw_phy_init(rtwdev);
+
+	if (rtw_read32_mask(rtwdev, REG_BB_AMP, BIT_MASK_RX_LNA) != 0)
+		rtwdev->dm_info.rx_cck_agc_report_type = 1;
+	else {
+		rtwdev->dm_info.rx_cck_agc_report_type = 0;
+		rtw_warn(rtwdev, "unexpected cck agc report type");
+	}
 
 	/* We can reuse rtw8723d_lck, equivalent is
 	 * _phy_lc_calibrate_8703b in
@@ -458,16 +500,89 @@ void rtw8703b_set_channel(struct rtw_dev *rtwdev, u8 channel,
 	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
 }
 
+/* Not all indices are valid, based on available data. None of the
+ * known valid values are positive, so use 0x7f as "invalid". */
+#define LNA_IDX_INVALID 0x7f
+static s8 lna_gain_table[16] = {
+	-2, LNA_IDX_INVALID, LNA_IDX_INVALID, LNA_IDX_INVALID,
+	-6, LNA_IDX_INVALID, LNA_IDX_INVALID, -19,
+	-32, LNA_IDX_INVALID, -36, -42,
+	LNA_IDX_INVALID, LNA_IDX_INVALID, LNA_IDX_INVALID, -48,
+};
+
+static s8 get_cck_rx_pwr(struct rtw_dev *rtwdev, u8 lna_idx, u8 vga_idx)
+{
+	s8 lna_gain = 0;
+	if (lna_idx < ARRAY_SIZE(lna_gain_table))
+		lna_gain = lna_gain_table[lna_idx];
+
+	if (lna_gain >= 0) {
+		rtw_warn(rtwdev, "incorrect lna index (%d)\n", lna_idx);
+		return -120;
+	}
+
+	return lna_gain - 2 * vga_idx;
+}
+
+static void query_phy_status_cck(struct rtw_dev *rtwdev, u8 *phy_status,
+				 struct rtw_rx_pkt_stat *pkt_stat)
+{
+	u8 vga_idx = GET_PHY_STAT_VGA(phy_status);
+	u8 lna_idx;
+	if (rtwdev->dm_info.rx_cck_agc_report_type == 1)
+		lna_idx = FIELD_PREP(BIT_LNA_H_MASK, GET_PHY_STAT_LNA_H(phy_status))
+			| FIELD_PREP(BIT_LNA_L_MASK, GET_PHY_STAT_LNA_L(phy_status));
+	else
+		lna_idx = FIELD_PREP(BIT_LNA_L_MASK, GET_PHY_STAT_LNA_L(phy_status));
+	s8 rx_power = get_cck_rx_pwr(rtwdev, lna_idx, vga_idx);
+
+	pkt_stat->rx_power[RF_PATH_A] = rx_power;
+	pkt_stat->rssi = rtw_phy_rf_power_2_rssi(pkt_stat->rx_power, 1);
+	rtwdev->dm_info.rssi[RF_PATH_A] = pkt_stat->rssi;
+	pkt_stat->signal_power = rx_power;
+}
+
+static void query_phy_status_ofdm(struct rtw_dev *rtwdev, u8 *phy_status,
+				  struct rtw_rx_pkt_stat *pkt_stat)
+{
+	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
+	s8 val_s8;
+
+	val_s8 = GET_PHY_STAT_AGC_GAIN_A(phy_status) & 0x3F;
+	pkt_stat->rx_power[RF_PATH_A] = (val_s8 * 2) - 110;
+	pkt_stat->rssi = rtw_phy_rf_power_2_rssi(pkt_stat->rx_power, 1);
+	pkt_stat->rx_snr[RF_PATH_A] = GET_PHY_STAT_RXSNR_A(phy_status);
+
+	/* signal power reported by HW */
+	val_s8 = GET_PHY_STAT_PWDB(phy_status) >> 1;
+	pkt_stat->signal_power = (val_s8  & 0x7f) - 110;
+
+	pkt_stat->rx_evm[RF_PATH_A] = GET_PHY_STAT_RXEVM_A(phy_status);
+	pkt_stat->cfo_tail[RF_PATH_A] = GET_PHY_STAT_CFO_TAIL_A(phy_status);
+
+	dm_info->curr_rx_rate = pkt_stat->rate;
+	dm_info->rssi[RF_PATH_A] = pkt_stat->rssi;
+	dm_info->rx_snr[RF_PATH_A] = pkt_stat->rx_snr[RF_PATH_A] >> 1;
+	dm_info->cfo_tail[RF_PATH_A] = (pkt_stat->cfo_tail[RF_PATH_A] * 5) >> 1;
+
+	s8 rx_evm = clamp_t(s8, -pkt_stat->rx_evm[RF_PATH_A] >> 1, 0, 64);
+	rx_evm &= 0x3F;	/* 64->0: second path of 1SS rate is 64 */
+	dm_info->rx_evm_dbm[RF_PATH_A] = rx_evm;
+}
+
+static void query_phy_status(struct rtw_dev *rtwdev, u8 *phy_status,
+			     struct rtw_rx_pkt_stat *pkt_stat)
+{
+	if (pkt_stat->rate <= DESC_RATE11M)
+		query_phy_status_cck(rtwdev, phy_status, pkt_stat);
+	else
+		query_phy_status_ofdm(rtwdev, phy_status, pkt_stat);
+}
+
 void rtw8703b_query_rx_desc(struct rtw_dev *rtwdev, u8 *rx_desc,
 		      struct rtw_rx_pkt_stat *pkt_stat,
 		      struct ieee80211_rx_status *rx_status)
 {
-	/* References in vendor driver: hal/rtl8703b/rtl8703b_rxdesc.c
-	 * does similar parsing except phy_status, and
-	 * include/rtl8703b_xmit.h has matching macro definitions
-	 * (also for TX). Note that offsets there are in bytes, while
-	 * the rtw88 rx.h macros convert the pointer to __le32 first,
-	 * so offset is in units of 4 bytes. */
 	struct ieee80211_hdr *hdr;
 	u32 desc_sz = rtwdev->chip->rx_pkt_desc_sz;
 	u8 *phy_status = NULL;
@@ -496,19 +611,32 @@ void rtw8703b_query_rx_desc(struct rtw_dev *rtwdev, u8 *rx_desc,
 	if (pkt_stat->is_c2h)
 		return;
 
+	/* hdr is also the right value for pkt_stat->hdr, but oddly
+	 * only rtw8822c.c sets that. */
 	hdr = (struct ieee80211_hdr *)(rx_desc + desc_sz + pkt_stat->shift +
 				       pkt_stat->drv_info_sz);
+
+	pkt_stat->bw = GET_RX_DESC_BW(rx_desc);
+
 	if (pkt_stat->phy_status) {
-		// Vendor driver adds a fixed offset RXDESC_SIZE (24)
-		rtw_dbg(rtwdev, RTW_DBG_RFK, "%s: phy_status offset is %u\n",
-			 __func__, desc_sz + pkt_stat->shift);
 		phy_status = rx_desc + desc_sz + pkt_stat->shift;
-		rtw_warn(rtwdev, "%s: retrieving phy_status not implemented\n",
-			 __func__);
-		// TODO
+		query_phy_status(rtwdev, phy_status, pkt_stat);
 	}
 
 	rtw_rx_fill_rx_status(rtwdev, pkt_stat, hdr, rx_status, phy_status);
+
+	/* Old 8723cs driver checked for size < 14 or size > 8192 and
+	 * simply dropped the packet. Maybe this should go into
+	 * rtw_rx_fill_rx_status()?
+	 *
+	 * Looking at dmesg the zero length packets appear/disappear
+	 * after BT coex change (BT on/idle), so maybe they're
+	 * actually BT artifacts and implementing coex would fix the
+	 * issue. */
+	if (pkt_stat->pkt_len == 0) {
+		rx_status->flag |= RX_FLAG_NO_PSDU;
+		rtw_warn(rtwdev, "zero length packet");
+	}
 }
 
 void rtw8703b_false_alarm_statistics(struct rtw_dev *rtwdev)
@@ -732,7 +860,6 @@ const struct rtw_chip_info rtw8703b_hw_spec = {
 	// .rf_base_addr
 	.rf_sipi_addr = {0x840, 0x844},
 	.rf_sipi_read_addr = rtw8723d_rf_sipi_addr,
-	.fix_rf_phy_num = 2,
 	.ltecoex_addr = &rtw8723d_ltecoex_addr,
 
 	.mac_tbl = &rtw8703b_mac_tbl,
