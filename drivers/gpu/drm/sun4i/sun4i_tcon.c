@@ -837,7 +837,6 @@ static int sun4i_tcon_init_clocks(struct device *dev,
 			dev_err(dev, "Couldn't get the TCON channel 0 clock\n");
 			return PTR_ERR(tcon->sclk0);
 		}
-		clk_prepare_enable(tcon->sclk0);
 	}
 
 	if (tcon->quirks->has_channel_1) {
