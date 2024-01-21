@@ -872,54 +872,65 @@ void rtw8703b_query_rx_desc(struct rtw_dev *rtwdev, u8 *rx_desc,
 	 * issue. */
 	if (pkt_stat->pkt_len == 0) {
 		rx_status->flag |= RX_FLAG_NO_PSDU;
-		rtw_warn(rtwdev, "zero length packet");
+		rtw_dbg(rtwdev, RTW_DBG_RX, "zero length packet");
 	}
 }
 
 void rtw8703b_false_alarm_statistics(struct rtw_dev *rtwdev)
 {
-	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
+	/* called during connection */
+	rtw_dbg(rtwdev, RTW_DBG_DEBUGFS,
+		"%s: not implemented yet\n", __func__);
 }
 
 void rtw8703b_phy_calibration(struct rtw_dev *rtwdev)
 {
-	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
+	rtw_dbg(rtwdev, RTW_DBG_DEBUGFS,
+		"%s: not implemented yet\n", __func__);
 }
 
 void rtw8703b_pwr_track(struct rtw_dev *rtwdev)
 {
+	/* called during connection */
 	/* maybe helpful: hal/phydm/rtl8703b/halhwimg8703b_rf.c */
-	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
+	rtw_dbg(rtwdev, RTW_DBG_DEBUGFS,
+		"%s: not implemented yet\n", __func__);
 }
 
 void rtw8703b_coex_set_init(struct rtw_dev *rtwdev)
 {
-	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
+	rtw_dbg(rtwdev, RTW_DBG_DEBUGFS,
+		"%s: not implemented yet\n", __func__);
 }
 
 void rtw8703b_coex_set_gnt_fix(struct rtw_dev *rtwdev)
 {
-	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
+	rtw_dbg(rtwdev, RTW_DBG_DEBUGFS,
+		"%s: not implemented yet\n", __func__);
 }
 
 void rtw8703b_coex_set_gnt_debug(struct rtw_dev *rtwdev)
 {
-	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
+	rtw_dbg(rtwdev, RTW_DBG_DEBUGFS,
+		"%s: not implemented yet\n", __func__);
 }
 
 void rtw8703b_coex_set_rfe_type(struct rtw_dev *rtwdev)
 {
-	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
+	rtw_dbg(rtwdev, RTW_DBG_DEBUGFS,
+		"%s: not implemented yet\n", __func__);
 }
 
 void rtw8703b_coex_set_wl_tx_power(struct rtw_dev *rtwdev, u8 wl_pwr)
 {
-	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
+	rtw_dbg(rtwdev, RTW_DBG_DEBUGFS,
+		"%s: not implemented yet\n", __func__);
 }
 
 void rtw8703b_coex_set_wl_rx_gain(struct rtw_dev *rtwdev, bool low_gain)
 {
-	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
+	rtw_dbg(rtwdev, RTW_DBG_DEBUGFS,
+		"%s: not implemented yet\n", __func__);
 }
 
 static const u8 rtw8703b_pwrtrk_2gb_n[] = {
