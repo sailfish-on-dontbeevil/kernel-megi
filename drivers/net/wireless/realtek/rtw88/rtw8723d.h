@@ -307,6 +307,9 @@ static inline s32 iqk_mult(s32 x, s32 y, s32 *ext)
  * moved to a shared support module. */
 void rtw8723d_cfg_ldo25(struct rtw_dev *rtwdev, bool enable);
 void rtw8723d_efuse_grant(struct rtw_dev *rtwdev, bool on);
+void rtw8723d_fill_txdesc_checksum(struct rtw_dev *rtwdev,
+				   struct rtw_tx_pkt_info *pkt_info,
+				   u8 *txdesc);
 void rtw8723d_lck(struct rtw_dev *rtwdev);
 int rtw8723d_mac_init(struct rtw_dev *rtwdev);
 int rtw8723d_read_efuse(struct rtw_dev *rtwdev, u8 *log_map);

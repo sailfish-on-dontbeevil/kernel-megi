@@ -892,13 +892,6 @@ void rtw8703b_pwr_track(struct rtw_dev *rtwdev)
 	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
 }
 
-void rtw8703b_fill_txdesc_checksum(struct rtw_dev *rtwdev,
-			     struct rtw_tx_pkt_info *pkt_info,
-			     u8 *txdesc)
-{
-	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
-}
-
 void rtw8703b_coex_set_init(struct rtw_dev *rtwdev)
 {
 	rtw_warn(rtwdev, "%s: not implemented yet\n", __func__);
@@ -1026,7 +1019,7 @@ static struct rtw_chip_ops rtw8703b_ops = {
 	.cfo_track		= NULL,
 	.config_tx_path		= NULL,
 	.config_txrx_mode	= NULL,
-	.fill_txdesc_checksum	= rtw8703b_fill_txdesc_checksum,
+	.fill_txdesc_checksum	= rtw8723d_fill_txdesc_checksum,
 
 	/* for coex */
 	.coex_set_init		= rtw8703b_coex_set_init,
