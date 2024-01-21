@@ -637,6 +637,7 @@ static const u32 rtw8703b_agc[] = {
 
 RTW_DECL_TABLE_PHY_COND(rtw8703b_agc, rtw_phy_cfg_agc);
 
+/* init values for BB registers */
 static const u32 rtw8703b_bb[] = {
 	0x800, 0x83045700,
 	0x804, 0x00000003,
