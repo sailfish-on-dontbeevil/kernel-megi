@@ -306,6 +306,7 @@ static inline s32 iqk_mult(s32 x, s32 y, s32 *ext)
 /* TODO: These are identical to what 8703b needs. Should probably be
  * moved to a shared support module. */
 void rtw8723d_cfg_ldo25(struct rtw_dev *rtwdev, bool enable);
+void rtw8723d_coex_cfg_init(struct rtw_dev *rtwdev);
 void rtw8723d_efuse_grant(struct rtw_dev *rtwdev, bool on);
 void rtw8723d_fill_txdesc_checksum(struct rtw_dev *rtwdev,
 				   struct rtw_tx_pkt_info *pkt_info,

@@ -729,8 +729,8 @@ static void rtw8703b_set_channel_bb(struct rtw_dev *rtwdev, u8 channel, u8 bw,
 	}
 }
 
-void rtw8703b_set_channel(struct rtw_dev *rtwdev, u8 channel,
-			  u8 bw, u8 primary_chan_idx)
+static void rtw8703b_set_channel(struct rtw_dev *rtwdev, u8 channel,
+				 u8 bw, u8 primary_chan_idx)
 {
 	rtw8703b_set_channel_rf(rtwdev, channel, bw);
 	rtw_set_channel_mac(rtwdev, channel, bw, primary_chan_idx);
@@ -816,9 +816,9 @@ static void query_phy_status(struct rtw_dev *rtwdev, u8 *phy_status,
 		query_phy_status_ofdm(rtwdev, phy_status, pkt_stat);
 }
 
-void rtw8703b_query_rx_desc(struct rtw_dev *rtwdev, u8 *rx_desc,
-		      struct rtw_rx_pkt_stat *pkt_stat,
-		      struct ieee80211_rx_status *rx_status)
+static void rtw8703b_query_rx_desc(struct rtw_dev *rtwdev, u8 *rx_desc,
+				   struct rtw_rx_pkt_stat *pkt_stat,
+				   struct ieee80211_rx_status *rx_status)
 {
 	struct ieee80211_hdr *hdr;
 	u32 desc_sz = rtwdev->chip->rx_pkt_desc_sz;
@@ -876,20 +876,20 @@ void rtw8703b_query_rx_desc(struct rtw_dev *rtwdev, u8 *rx_desc,
 	}
 }
 
-void rtw8703b_false_alarm_statistics(struct rtw_dev *rtwdev)
+static void rtw8703b_false_alarm_statistics(struct rtw_dev *rtwdev)
 {
 	/* called during connection */
 	rtw_dbg(rtwdev, RTW_DBG_DEBUGFS,
 		"%s: not implemented yet\n", __func__);
 }
 
-void rtw8703b_phy_calibration(struct rtw_dev *rtwdev)
+static void rtw8703b_phy_calibration(struct rtw_dev *rtwdev)
 {
 	rtw_dbg(rtwdev, RTW_DBG_DEBUGFS,
 		"%s: not implemented yet\n", __func__);
 }
 
-void rtw8703b_pwr_track(struct rtw_dev *rtwdev)
+static void rtw8703b_pwr_track(struct rtw_dev *rtwdev)
 {
 	/* called during connection */
 	/* maybe helpful: hal/phydm/rtl8703b/halhwimg8703b_rf.c */
@@ -897,37 +897,39 @@ void rtw8703b_pwr_track(struct rtw_dev *rtwdev)
 		"%s: not implemented yet\n", __func__);
 }
 
-void rtw8703b_coex_set_init(struct rtw_dev *rtwdev)
+static void rtw8703b_coex_set_gnt_fix(struct rtw_dev *rtwdev)
+{
+}
+
+static void rtw8703b_coex_set_gnt_debug(struct rtw_dev *rtwdev)
+{
+}
+
+static void rtw8703b_coex_set_rfe_type(struct rtw_dev *rtwdev)
+{
+	struct rtw_coex *coex = &rtwdev->coex;
+	struct rtw_coex_rfe *coex_rfe = &coex->rfe;
+
+	coex_rfe->rfe_module_type = rtwdev->efuse.rfe_option;
+	coex_rfe->ant_switch_polarity = 0;
+	coex_rfe->ant_switch_exist = false;
+	coex_rfe->ant_switch_with_bt = false;
+	coex_rfe->ant_switch_diversity = false;
+	coex_rfe->wlg_at_btg = true;
+
+	/* disable LTE coex in wifi side */
+	rtw_coex_write_indirect_reg(rtwdev, LTE_COEX_CTRL, BIT_LTE_COEX_EN, 0x0);
+	rtw_coex_write_indirect_reg(rtwdev, LTE_WL_TRX_CTRL, MASKLWORD, 0xffff);
+	rtw_coex_write_indirect_reg(rtwdev, LTE_BT_TRX_CTRL, MASKLWORD, 0xffff);
+}
+
+static void rtw8703b_coex_set_wl_tx_power(struct rtw_dev *rtwdev, u8 wl_pwr)
 {
 	rtw_dbg(rtwdev, RTW_DBG_DEBUGFS,
 		"%s: not implemented yet\n", __func__);
 }
 
-void rtw8703b_coex_set_gnt_fix(struct rtw_dev *rtwdev)
-{
-	rtw_dbg(rtwdev, RTW_DBG_DEBUGFS,
-		"%s: not implemented yet\n", __func__);
-}
-
-void rtw8703b_coex_set_gnt_debug(struct rtw_dev *rtwdev)
-{
-	rtw_dbg(rtwdev, RTW_DBG_DEBUGFS,
-		"%s: not implemented yet\n", __func__);
-}
-
-void rtw8703b_coex_set_rfe_type(struct rtw_dev *rtwdev)
-{
-	rtw_dbg(rtwdev, RTW_DBG_DEBUGFS,
-		"%s: not implemented yet\n", __func__);
-}
-
-void rtw8703b_coex_set_wl_tx_power(struct rtw_dev *rtwdev, u8 wl_pwr)
-{
-	rtw_dbg(rtwdev, RTW_DBG_DEBUGFS,
-		"%s: not implemented yet\n", __func__);
-}
-
-void rtw8703b_coex_set_wl_rx_gain(struct rtw_dev *rtwdev, bool low_gain)
+static void rtw8703b_coex_set_wl_rx_gain(struct rtw_dev *rtwdev, bool low_gain)
 {
 	rtw_dbg(rtwdev, RTW_DBG_DEBUGFS,
 		"%s: not implemented yet\n", __func__);
@@ -996,6 +998,101 @@ static const struct rtw_pwr_track_tbl rtw8703b_rtw_pwr_track_tbl = {
 	.pwrtrk_xtal_p = rtw8703b_pwrtrk_xtal_p,
 };
 
+/* Shared-Antenna Coex Table
+ * BT is table0, WL is table1 */
+static const struct coex_table_para table_sant_8703b[] = {
+	{0x55555555, 0x55555555}, /* case-0 */
+	{0xa5555555, 0xaa5a5a5a},
+	{0xaa5a5a5a, 0xaa5a5a5a},
+	{0x55555555, 0x5a5a5a5a},
+	{0xa5555555, 0xaa5a5a5a},
+	{0x5a5a5a5a, 0x5a5a5a5a}, /* case-5 */
+	{0xa5555555, 0xaa5a5a5a},
+	{0xaa555555, 0xaa555555},
+	{0xa5555555, 0xaaaa5aaa},
+	{0x5a5a5a5a, 0xaaaa5aaa},
+	{0xaaaaaaaa, 0xaaaaaaaa}, /* case-10 */
+	{0xa5a55555, 0xaaaa5a5a},
+	{0xa5555555, 0xaaaa5a5a},
+	{0xaa5555aa, 0xaa5a5a5a},
+	{0xaa5555aa, 0x5a5a5a5a},
+};
+
+/* Shared-Antenna TDMA */
+#define TDMA_ON_DEFAULT_CASE { {0x61, 0x35, 0x03, 0x11, 0x11} }
+static const struct coex_tdma_para tdma_sant_8703b[] = {
+	/* disable PS TDMA antenna for BT */
+	{ {0x00, 0x00, 0x00, 0x00, 0x00} },
+	/* 2-Ant, antenna control by antenna diversity */
+	{ {0x00, 0x00, 0x00, 0x48, 0x00} },
+	TDMA_ON_DEFAULT_CASE,
+	{ {0x51, 0x30, 0x03, 0x10, 0x50} },
+	{ {0x51, 0x21, 0x03, 0x10, 0x50} },
+	{ {0x61, 0x3a, 0x03, 0x11, 0x11} },
+	{ {0x61, 0x20, 0x03, 0x11, 0x11} },
+	{ {0x51, 0x10, 0x03, 0x10, 0x54} },
+	{ {0x51, 0x10, 0x03, 0x10, 0x54} },
+	{ {0x51, 0x10, 0x03, 0x10, 0x54} },
+	{ {0x61, 0x30, 0x03, 0x11, 0x10} },
+	{ {0x61, 0x25, 0x03, 0x11, 0x11} },
+	{ {0x51, 0x35, 0x03, 0x10, 0x50} },
+	{ {0x51, 0x25, 0x03, 0x10, 0x50} },
+	{ {0x51, 0x15, 0x03, 0x10, 0x50} },
+	{ {0x51, 0x20, 0x03, 0x10, 0x50} },
+	{ {0x61, 0x10, 0x03, 0x11, 0x15} },
+	{ {0x61, 0x10, 0x03, 0x11, 0x14} },
+	{ {0x51, 0x30, 0x03, 0x10, 0x50} },
+	{ {0x61, 0x15, 0x03, 0x11, 0x10} },
+	{ {0x61, 0x30, 0x03, 0x11, 0x10} },
+	{ {0x61, 0x30, 0x03, 0x11, 0x10} },
+	{ {0x61, 0x25, 0x03, 0x11, 0x10} },
+	TDMA_ON_DEFAULT_CASE,
+	{ {0x51, 0x08, 0x03, 0x10,  0x54} },
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	{ {0x61, 0x10, 0x03, 0x11, 0x15} },
+	{ {0x51, 0x10, 0x0b, 0x10,  0x54} },
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	{ {0x61, 0x35, 0x03, 0x11, 0x11} },
+	{ {0x61, 0x35, 0x03, 0x11, 0x10} },
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	{ {0x61, 0x48, 0x03, 0x11, 0x10} },
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	{ {0x51, 0x10, 0x03, 0x10,  0x50} },
+	{ {0x51, 0x10, 0x03, 0x10,  0x50} },
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	TDMA_ON_DEFAULT_CASE,
+	{ {0x61, 0x10, 0x03, 0x11,  0x10} },
+};
+
 static struct rtw_chip_ops rtw8703b_ops = {
 	.mac_init		= rtw8723d_mac_init,
 	.dump_fw_crash		= NULL,
@@ -1033,7 +1130,7 @@ static struct rtw_chip_ops rtw8703b_ops = {
 	.fill_txdesc_checksum	= rtw8723d_fill_txdesc_checksum,
 
 	/* for coex */
-	.coex_set_init		= rtw8703b_coex_set_init,
+	.coex_set_init		= rtw8723d_coex_cfg_init,
 	.coex_set_ant_switch	= NULL,
 	.coex_set_gnt_fix	= rtw8703b_coex_set_gnt_fix,
 	.coex_set_gnt_debug	= rtw8703b_coex_set_gnt_debug,
@@ -1135,29 +1232,14 @@ const struct rtw_chip_info rtw8703b_hw_spec = {
 	.rssi_tolerance = 2,
 	.bt_rssi_step = bt_rssi_step_8703b,
 	.wl_rssi_step = wl_rssi_step_8703b,
-	/*
-	 * sant -> shared antenna, nsant -> non-shared antenna
-	 *
-	 * TODO: Used for coex, but at least nothing should crash with
-	 * these unset.
-	 *
-	 * btc_chip_para defined in hal/btc/halbtcoutsrc.h loks very
-	 * similar, also regarding rssi_step above, but doesn't seem
-	 * to be assigned anywhere.
-	 *
-	 * halbtc8703b1ant_set_coex_table in
-	 * hal/btc/halbtc8703b1ant.c? Generally lots of magic numbers
-	 * in that file.
-	 */
-	.table_sant_num = 0,
-	.table_sant = NULL,
+	/* sant -> shared antenna, nsant -> non-shared antenna
+	 * Not sure if 8703b versions with non-shard antenna even exist. */
+	.table_sant_num = ARRAY_SIZE(table_sant_8703b),
+	.table_sant = table_sant_8703b,
 	.table_nsant_num = 0,
 	.table_nsant = NULL,
-	/* halbtc8703b1ant_ps_tdma in hal/btc/halbtc8703b1ant.c seems
-	 * to have similar data to tdma_sant_8723d in a massive
-	 * switch/case. */
-	.tdma_sant_num = 0,
-	.tdma_sant = NULL,
+	.tdma_sant_num = ARRAY_SIZE(tdma_sant_8703b),
+	.tdma_sant = tdma_sant_8703b,
 	.tdma_nsant_num = 0,
 	.tdma_nsant = NULL,
 	.wl_rf_para_num = ARRAY_SIZE(rf_para_tx_8703b),

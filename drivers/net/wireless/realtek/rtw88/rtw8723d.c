@@ -1546,7 +1546,7 @@ static void rtw8723d_phy_cck_pd_set(struct rtw_dev *rtwdev, u8 new_lvl)
 }
 
 /* for coex */
-static void rtw8723d_coex_cfg_init(struct rtw_dev *rtwdev)
+void rtw8723d_coex_cfg_init(struct rtw_dev *rtwdev)
 {
 	/* enable TBTT nterrupt */
 	rtw_write8_set(rtwdev, REG_BCN_CTRL, BIT_EN_BCN_FUNCTION);
