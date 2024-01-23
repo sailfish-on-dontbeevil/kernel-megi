@@ -1671,7 +1671,7 @@ static void rtw8723d_coex_cfg_wl_rx_gain(struct rtw_dev *rtwdev, bool low_gain)
 	}
 }
 
-static u8 rtw8723d_pwrtrack_get_limit_ofdm(struct rtw_dev *rtwdev)
+u8 rtw8723d_pwrtrack_get_limit_ofdm(struct rtw_dev *rtwdev)
 {
 	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
 	u8 tx_rate = dm_info->tx_rate;
@@ -1873,8 +1873,8 @@ static void rtw8723d_pwrtrack_set(struct rtw_dev *rtwdev, u8 path)
 	rtw_phy_set_tx_power_level(rtwdev, hal->current_channel);
 }
 
-static void rtw8723d_pwrtrack_set_xtal(struct rtw_dev *rtwdev, u8 therm_path,
-				       u8 delta)
+void rtw8723d_pwrtrack_set_xtal(struct rtw_dev *rtwdev, u8 therm_path,
+				u8 delta)
 {
 	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
 	const struct rtw_pwr_track_tbl *tbl = rtwdev->chip->pwr_track_tbl;

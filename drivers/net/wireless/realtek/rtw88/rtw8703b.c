@@ -38,9 +38,6 @@
 #define TBTT_PROHIBIT_HOLD_TIME 0x80
 #define TBTT_PROHIBIT_HOLD_TIME_STOP_BCN 0x64
 
-/* slightly different from 8723d in vendor driver */
-#define RTW_DEF_OFDM_SWING_INDEX_8703B	30
-
 /* raw pkt_stat->drv_info_sz is in unit of 8-bytes */
 #define RX_DRV_INFO_SZ_UNIT_8703B 8
 
@@ -78,6 +75,105 @@ static const struct coex_rf_para rf_para_rx_8703b[] = {
 	{1, 10, true, 5},
 	{1, 15, true, 5}
 };
+
+static const u32 rtw8703b_ofdm_swing_table[] = {
+	0x0b40002d, /* 0,  -15.0dB */
+	0x0c000030, /* 1,  -14.5dB */
+	0x0cc00033, /* 2,  -14.0dB */
+	0x0d800036, /* 3,  -13.5dB */
+	0x0e400039, /* 4,  -13.0dB */
+	0x0f00003c, /* 5,  -12.5dB */
+	0x10000040, /* 6,  -12.0dB */
+	0x11000044, /* 7,  -11.5dB */
+	0x12000048, /* 8,  -11.0dB */
+	0x1300004c, /* 9,  -10.5dB */
+	0x14400051, /* 10, -10.0dB */
+	0x15800056, /* 11, -9.5dB */
+	0x16c0005b, /* 12, -9.0dB */
+	0x18000060, /* 13, -8.5dB */
+	0x19800066, /* 14, -8.0dB */
+	0x1b00006c, /* 15, -7.5dB */
+	0x1c800072, /* 16, -7.0dB */
+	0x1e400079, /* 17, -6.5dB */
+	0x20000080, /* 18, -6.0dB */
+	0x22000088, /* 19, -5.5dB */
+	0x24000090, /* 20, -5.0dB */
+	0x26000098, /* 21, -4.5dB */
+	0x288000a2, /* 22, -4.0dB */
+	0x2ac000ab, /* 23, -3.5dB */
+	0x2d4000b5, /* 24, -3.0dB */
+	0x300000c0, /* 25, -2.5dB */
+	0x32c000cb, /* 26, -2.0dB */
+	0x35c000d7, /* 27, -1.5dB */
+	0x390000e4, /* 28, -1.0dB */
+	0x3c8000f2, /* 29, -0.5dB */
+	0x40000100, /* 30, +0dB */
+	0x43c0010f, /* 31, +0.5dB */
+	0x47c0011f, /* 32, +1.0dB */
+	0x4c000130, /* 33, +1.5dB */
+	0x50800142, /* 34, +2.0dB */
+	0x55400155, /* 35, +2.5dB */
+	0x5a400169, /* 36, +3.0dB */
+	0x5fc0017f, /* 37, +3.5dB */
+	0x65400195, /* 38, +4.0dB */
+	0x6b8001ae, /* 39, +4.5dB */
+	0x71c001c7, /* 40, +5.0dB */
+	0x788001e2, /* 41, +5.5dB */
+	0x7f8001fe /* 42, +6.0dB */
+};
+
+static const u32 rtw8703b_cck_pwr_regs[] = {
+	0x0a22, 0x0a23, 0x0a24, 0x0a25, 0x0a26, 0x0a27, 0x0a28, 0x0a29,
+	0x0a9a, 0x0a9b, 0x0a9c, 0x0a9d, 0x0aa0, 0x0aa1, 0x0aa2, 0x0aa3,
+};
+
+static const u8 rtw8703b_cck_swing_table[][16] = {
+	{0x44, 0x42, 0x3C, 0x33, 0x28, 0x1C, 0x13, 0x0B, 0x05, 0x02,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, /*-16dB*/
+	{0x48, 0x46, 0x3F, 0x36, 0x2A, 0x1E, 0x14, 0x0B, 0x05, 0x02,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, /*-15.5dB*/
+	{0x4D, 0x4A, 0x43, 0x39, 0x2C, 0x20, 0x15, 0x0C, 0x06, 0x02,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, /*-15dB*/
+	{0x51, 0x4F, 0x47, 0x3C, 0x2F, 0x22, 0x16, 0x0D, 0x06, 0x02,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, /*-14.5dB*/
+	{0x56, 0x53, 0x4B, 0x40, 0x32, 0x24, 0x17, 0x0E, 0x06, 0x02,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, /*-14dB*/
+	{0x5B, 0x58, 0x50, 0x43, 0x35, 0x26, 0x19, 0x0E, 0x07, 0x02,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, /*-13.5dB*/
+	{0x60, 0x5D, 0x54, 0x47, 0x38, 0x28, 0x1A, 0x0F, 0x07, 0x02,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, /*-13dB*/
+	{0x66, 0x63, 0x59, 0x4C, 0x3B, 0x2B, 0x1C, 0x10, 0x08, 0x02,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, /*-12.5dB*/
+	{0x6C, 0x69, 0x5F, 0x50, 0x3F, 0x2D, 0x1E, 0x11, 0x08, 0x03,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, /*-12dB*/
+	{0x73, 0x6F, 0x64, 0x55, 0x42, 0x30, 0x1F, 0x12, 0x08, 0x03,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, /*-11.5dB*/
+	{0x79, 0x76, 0x6A, 0x5A, 0x46, 0x33, 0x21, 0x13, 0x09, 0x03,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, /*-11dB*/
+	{0x81, 0x7C, 0x71, 0x5F, 0x4A, 0x36, 0x23, 0x14, 0x0A, 0x03,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, /*-10.5dB*/
+	{0x88, 0x84, 0x77, 0x65, 0x4F, 0x39, 0x25, 0x15, 0x0A, 0x03,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, /*-10dB*/
+	{0x90, 0x8C, 0x7E, 0x6B, 0x54, 0x3C, 0x27, 0x17, 0x0B, 0x03,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, /*-9.5dB*/
+	{0x99, 0x94, 0x86, 0x71, 0x58, 0x40, 0x2A, 0x18, 0x0B, 0x04,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, /*-9dB*/
+	{0xA2, 0x9D, 0x8E, 0x78, 0x5E, 0x43, 0x2C, 0x19, 0x0C, 0x04,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, /*-8.5dB*/
+	{0xAC, 0xA6, 0x96, 0x7F, 0x63, 0x47, 0x2F, 0x1B, 0x0D, 0x04,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, /*-8dB*/
+	{0xB6, 0xB0, 0x9F, 0x87, 0x69, 0x4C, 0x32, 0x1D, 0x0D, 0x04,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, /*-7.5dB*/
+	{0xC1, 0xBA, 0xA8, 0x8F, 0x6F, 0x50, 0x35, 0x1E, 0x0E, 0x04,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, /*-7dB*/
+	{0xCC, 0xC5, 0xB2, 0x97, 0x76, 0x55, 0x38, 0x20, 0x0F, 0x05,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, /*-6.5dB*/
+	{0xD8, 0xD1, 0xBD, 0xA0, 0x7D, 0x5A, 0x3B, 0x22, 0x10, 0x05,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00} /*-6dB*/
+};
+
+#define RTW_OFDM_SWING_TABLE_SIZE	ARRAY_SIZE(rtw8703b_ofdm_swing_table)
+#define RTW_CCK_SWING_TABLE_SIZE	ARRAY_SIZE(rtw8703b_cck_swing_table)
 
 static const struct rtw_pwr_seq_cmd trans_carddis_to_cardemu_8703b[] = {
 	{0x0005,
@@ -419,10 +515,13 @@ static void rtw8703b_pwrtrack_init(struct rtw_dev *rtwdev)
 	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
 	u8 path;
 
-	/* TODO: This is the only difference from the 8723d
-	 * function. Unify with a parameter when creating support
-	 * module. */
-	dm_info->default_ofdm_index = RTW_DEF_OFDM_SWING_INDEX_8703B;
+	/* TODO: The vendor driver selects these using tables in
+	 * halrf_powertracking_ce.c, functions are called
+	 * get_swing_index and get_cck_swing_index. There the current
+	 * fixed values are only the defaults in case no match is
+	 * found. */
+	dm_info->default_ofdm_index = 30;
+	dm_info->default_cck_index = 20;
 
 	for (path = RF_PATH_A; path < rtwdev->hal.rf_path_num; path++) {
 		ewma_thermal_init(&dm_info->avg_thermal[path]);
@@ -701,7 +800,7 @@ static void rtw8703b_set_channel_bb(struct rtw_dev *rtwdev, u8 channel, u8 bw,
 
 	cck_dfir = channel <= 13 ? cck_dfir_cfg[0] : cck_dfir_cfg[1];
 
-	for (i = 0; i < CCK_DFIR_NR; i++, cck_dfir++)
+	for (i = 0; i < CCK_DFIR_NR_8703B; i++, cck_dfir++)
 		rtw_write32(rtwdev, cck_dfir->reg, cck_dfir->val);
 
 	switch (bw) {
@@ -887,14 +986,187 @@ static void rtw8703b_phy_calibration(struct rtw_dev *rtwdev)
 {
 	rtw_dbg(rtwdev, RTW_DBG_DEBUGFS,
 		"%s: not implemented yet\n", __func__);
+	/* stub: ensure it's clear no calibration happened */
+	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
+	dm_info->iqk.done = false;
+}
+
+static void rtw8703b_set_iqk_matrix(struct rtw_dev *rtwdev, s8 ofdm_index,
+				    u8 rf_path)
+{
+	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
+	s32 value32;
+	u32 ofdm_swing;
+
+	ofdm_index = clamp_t(s8, ofdm_index, 0, RTW_OFDM_SWING_TABLE_SIZE - 1);
+
+	ofdm_swing = rtw8703b_ofdm_swing_table[ofdm_index];
+
+	if (dm_info->iqk.done) {
+		/* TODO, not implemented yet */
+		// rtw8703b_set_iqk_matrix_by_result(rtwdev, ofdm_swing, rf_path);
+		return;
+	}
+
+	switch (rf_path) {
+	case RF_PATH_A:
+	default:
+		rtw_write32(rtwdev, REG_OFDM_0_XA_TX_IQ_IMBALANCE, ofdm_swing);
+		rtw_write32_mask(rtwdev, REG_TXIQK_MATRIXA_LSB2_11N, MASKH4BITS,
+				 0x00);
+
+		value32 = rtw_read32(rtwdev, REG_OFDM_0_ECCA_THRESHOLD);
+		value32 &= ~BIT_MASK_OFDM0_EXTS_A;
+		rtw_write32(rtwdev, REG_OFDM_0_ECCA_THRESHOLD, value32);
+		break;
+
+	case RF_PATH_B:
+		rtw_write32(rtwdev, REG_OFDM0_XB_TX_IQ_IMBALANCE, ofdm_swing);
+		rtw_write32_mask(rtwdev, REG_TXIQK_MATRIXB_LSB2_11N, MASKH4BITS,
+				 0x00);
+
+		value32 = rtw_read32(rtwdev, REG_OFDM_0_ECCA_THRESHOLD);
+		value32 &= ~BIT_MASK_OFDM0_EXTS_B;
+		rtw_write32(rtwdev, REG_OFDM_0_ECCA_THRESHOLD, value32);
+		break;
+	}
+}
+
+static void rtw8703b_pwrtrack_set_ofdm_pwr(struct rtw_dev *rtwdev, s8 swing_idx,
+					   s8 txagc_idx)
+{
+	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
+
+	dm_info->txagc_remnant_ofdm = txagc_idx;
+
+	rtw8703b_set_iqk_matrix(rtwdev, swing_idx, RF_PATH_A);
+	rtw8703b_set_iqk_matrix(rtwdev, swing_idx, RF_PATH_B);
+}
+
+static void rtw8703b_pwrtrack_set_cck_pwr(struct rtw_dev *rtwdev, s8 swing_idx,
+					  s8 txagc_idx)
+{
+	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
+
+	dm_info->txagc_remnant_cck = txagc_idx;
+
+	swing_idx = clamp_t(s8, swing_idx, 0, RTW_CCK_SWING_TABLE_SIZE - 1);
+
+	BUILD_BUG_ON(ARRAY_SIZE(rtw8703b_cck_pwr_regs)
+		     != ARRAY_SIZE(rtw8703b_cck_swing_table[0]));
+
+	for (int i = 0; i < ARRAY_SIZE(rtw8703b_cck_pwr_regs); i++)
+		rtw_write8(rtwdev, rtw8703b_cck_pwr_regs[i],
+			   rtw8703b_cck_swing_table[swing_idx][i]);
+}
+
+static void rtw8703b_pwrtrack_set(struct rtw_dev *rtwdev, u8 path)
+{
+	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
+	struct rtw_hal *hal = &rtwdev->hal;
+	u8 limit_ofdm;
+	u8 limit_cck = 21;
+	s8 final_ofdm_swing_index;
+	s8 final_cck_swing_index;
+
+	limit_ofdm = rtw8723d_pwrtrack_get_limit_ofdm(rtwdev);
+
+	final_ofdm_swing_index = dm_info->default_ofdm_index +
+				 dm_info->delta_power_index[path];
+	final_cck_swing_index = dm_info->default_cck_index +
+				dm_info->delta_power_index[path];
+
+	if (final_ofdm_swing_index > limit_ofdm)
+		rtw8703b_pwrtrack_set_ofdm_pwr(rtwdev, limit_ofdm,
+					       final_ofdm_swing_index - limit_ofdm);
+	else if (final_ofdm_swing_index < 0)
+		rtw8703b_pwrtrack_set_ofdm_pwr(rtwdev, 0,
+					       final_ofdm_swing_index);
+	else
+		rtw8703b_pwrtrack_set_ofdm_pwr(rtwdev, final_ofdm_swing_index, 0);
+
+	if (final_cck_swing_index > limit_cck)
+		rtw8703b_pwrtrack_set_cck_pwr(rtwdev, limit_cck,
+					      final_cck_swing_index - limit_cck);
+	else if (final_cck_swing_index < 0)
+		rtw8703b_pwrtrack_set_cck_pwr(rtwdev, 0,
+					      final_cck_swing_index);
+	else
+		rtw8703b_pwrtrack_set_cck_pwr(rtwdev, final_cck_swing_index, 0);
+
+	rtw_phy_set_tx_power_level(rtwdev, hal->current_channel);
+}
+
+static void rtw8703b_phy_pwrtrack(struct rtw_dev *rtwdev)
+{
+	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
+	struct rtw_swing_table swing_table;
+	u8 thermal_value, delta, path;
+	bool do_iqk = false;
+
+	rtw_phy_config_swing_table(rtwdev, &swing_table);
+
+	if (rtwdev->efuse.thermal_meter[0] == 0xff)
+		return;
+
+	thermal_value = rtw_read_rf(rtwdev, RF_PATH_A, RF_T_METER, 0xfc00);
+
+	rtw_phy_pwrtrack_avg(rtwdev, thermal_value, RF_PATH_A);
+
+	do_iqk = rtw_phy_pwrtrack_need_iqk(rtwdev);
+
+	if (do_iqk)
+		rtw8723d_lck(rtwdev);
+
+	if (dm_info->pwr_trk_init_trigger)
+		dm_info->pwr_trk_init_trigger = false;
+	else if (!rtw_phy_pwrtrack_thermal_changed(rtwdev, thermal_value,
+						   RF_PATH_A))
+		goto iqk;
+
+	delta = rtw_phy_pwrtrack_get_delta(rtwdev, RF_PATH_A);
+
+	delta = min_t(u8, delta, RTW_PWR_TRK_TBL_SZ - 1);
+
+	for (path = 0; path < rtwdev->hal.rf_path_num; path++) {
+		s8 delta_cur, delta_last;
+
+		delta_last = dm_info->delta_power_index[path];
+		delta_cur = rtw_phy_pwrtrack_get_pwridx(rtwdev, &swing_table,
+							path, RF_PATH_A, delta);
+		if (delta_last == delta_cur)
+			continue;
+
+		dm_info->delta_power_index[path] = delta_cur;
+		rtw8703b_pwrtrack_set(rtwdev, path);
+	}
+
+	rtw8723d_pwrtrack_set_xtal(rtwdev, RF_PATH_A, delta);
+
+iqk:
+	if (do_iqk)
+		rtw8703b_phy_calibration(rtwdev);
 }
 
 static void rtw8703b_pwr_track(struct rtw_dev *rtwdev)
 {
-	/* called during connection */
-	/* maybe helpful: hal/phydm/rtl8703b/halhwimg8703b_rf.c */
-	rtw_dbg(rtwdev, RTW_DBG_DEBUGFS,
-		"%s: not implemented yet\n", __func__);
+	struct rtw_efuse *efuse = &rtwdev->efuse;
+	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
+
+	if (efuse->power_track_type != 0) {
+		rtw_warn(rtwdev, "unsupported power track type");
+		return;
+	}
+
+	if (!dm_info->pwr_trk_triggered) {
+		rtw_write_rf(rtwdev, RF_PATH_A, RF_T_METER,
+			     GENMASK(17, 16), 0x03);
+		dm_info->pwr_trk_triggered = true;
+		return;
+	}
+
+	rtw8703b_phy_pwrtrack(rtwdev);
+	dm_info->pwr_trk_triggered = false;
 }
 
 static void rtw8703b_coex_set_gnt_fix(struct rtw_dev *rtwdev)
@@ -907,8 +1179,10 @@ static void rtw8703b_coex_set_gnt_debug(struct rtw_dev *rtwdev)
 
 static void rtw8703b_coex_set_rfe_type(struct rtw_dev *rtwdev)
 {
+	struct rtw_efuse *efuse = &rtwdev->efuse;
 	struct rtw_coex *coex = &rtwdev->coex;
 	struct rtw_coex_rfe *coex_rfe = &coex->rfe;
+	bool aux = efuse->bt_setting & BIT(6);
 
 	coex_rfe->rfe_module_type = rtwdev->efuse.rfe_option;
 	coex_rfe->ant_switch_polarity = 0;
@@ -916,6 +1190,11 @@ static void rtw8703b_coex_set_rfe_type(struct rtw_dev *rtwdev)
 	coex_rfe->ant_switch_with_bt = false;
 	coex_rfe->ant_switch_diversity = false;
 	coex_rfe->wlg_at_btg = true;
+
+	/* TODO: 8723d sets REG_BB_SEL_BTG depending on antenna here */
+	rtw_dbg(rtwdev, RTW_DBG_COEX, "shared antenna: %s, aux: %s",
+		efuse->share_ant ? "true" : "false",
+		aux ? "true" : "false");
 
 	/* disable LTE coex in wifi side */
 	rtw_coex_write_indirect_reg(rtwdev, LTE_COEX_CTRL, BIT_LTE_COEX_EN, 0x0);
@@ -1103,7 +1382,6 @@ static struct rtw_chip_ops rtw8703b_ops = {
 	.query_rx_desc		= rtw8703b_query_rx_desc,
 	.read_rf		= rtw_phy_read_rf_sipi,
 	.write_rf		= rtw_phy_write_rf_reg_sipi,
-	// the settings are exactly the same
 	.set_tx_power_index	= rtw8723d_set_tx_power_index,
 	.set_antenna		= NULL,
 	.cfg_ldo25		= rtw8723d_cfg_ldo25,

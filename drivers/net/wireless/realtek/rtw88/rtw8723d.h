@@ -314,6 +314,9 @@ void rtw8723d_fill_txdesc_checksum(struct rtw_dev *rtwdev,
 void rtw8723d_lck(struct rtw_dev *rtwdev);
 int rtw8723d_mac_init(struct rtw_dev *rtwdev);
 int rtw8723d_read_efuse(struct rtw_dev *rtwdev, u8 *log_map);
+u8 rtw8723d_pwrtrack_get_limit_ofdm(struct rtw_dev *rtwdev);
+void rtw8723d_pwrtrack_set_xtal(struct rtw_dev *rtwdev, u8 therm_path,
+				u8 delta);
 void rtw8723d_set_tx_power_index(struct rtw_dev *rtwdev);
 extern const struct rtw_ltecoex_addr rtw8723d_ltecoex_addr;
 extern const struct rtw_rf_sipi_addr rtw8723d_rf_sipi_addr[];

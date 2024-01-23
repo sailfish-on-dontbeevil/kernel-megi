@@ -51,6 +51,13 @@ extern const struct rtw_chip_info rtw8703b_hw_spec;
 #define REG_CCK_TXSF2 0x0a24  /* CCK TX filter 2 */
 #define REG_CCK_DBG 0x0a28  /* debug port */
 #define REG_OFDM0_A_TX_AFE 0x0c84
+/* TODO: rename REG_OFDM_0_XA_TX_IQ_IMBALANCE in rtw8723d.h to match
+ * other OFDM0 registers? */
+#define REG_OFDM0_XB_TX_IQ_IMBALANCE 0x0c88
+#define REG_TXIQK_MATRIXB_LSB2_11N 0x0c9c
+/* TODO: defined as BIT_MASK_OFDM0_EXTS in rtw8723d.h, deduplicate? */
+#define BIT_MASK_OFDM0_EXTS_A (BIT(31) | BIT(29) | BIT(28))
+#define BIT_MASK_OFDM0_EXTS_B (BIT(27) | BIT(25) | BIT(24))
 #define REG_OFDM0_TX_PSD_NOISE 0x0ce4  /* TX pseudo noise weighting */
 
 /* RF registers */
