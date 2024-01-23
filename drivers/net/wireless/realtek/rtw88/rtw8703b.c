@@ -14,10 +14,7 @@
 #include "rx.h"
 #include "rtw8703b.h"
 #include "rtw8703b_tables.h"
-/* 8703b and 8723d have a lot of similarities, so I can reuse
- * code. The shared code should be moved to a support module or
- * similar, though. */
-#include "rtw8723d.h"
+#include "rtw8723x.h"
 
 #define GET_RX_DESC_BW(rxdesc)                                              \
 	(le32_get_bits(*((__le32 *)(rxdesc) + 0x04), GENMASK(31, 24)))
@@ -494,7 +491,7 @@ static int rtw8703b_read_efuse(struct rtw_dev *rtwdev, u8 *log_map)
 {
 	/* include/hal_pg.h lists the eeprom/efuse offsets, the
 	 * structure is the same as for 8723d. */
-	int ret = rtw8723d_read_efuse(rtwdev, log_map);
+	int ret = rtw8723x_read_efuse(rtwdev, log_map);
 	if (ret != 0)
 		return ret;
 
@@ -617,7 +614,7 @@ static void rtw8703b_phy_set_param(struct rtw_dev *rtwdev)
 	/* We can reuse rtw8723d_lck, equivalent is
 	 * _phy_lc_calibrate_8703b in
 	 * hal/phydm/halrf/rtl8703b/halrf_8703b.c */
-	rtw8723d_lck(rtwdev);
+	rtw8723x_lck(rtwdev);
 
 	/* Vendor driver describes setting the register to 0x50 (with
 	 * the same mask) as "initial gain" in
@@ -1069,7 +1066,7 @@ static void rtw8703b_pwrtrack_set(struct rtw_dev *rtwdev, u8 path)
 	s8 final_ofdm_swing_index;
 	s8 final_cck_swing_index;
 
-	limit_ofdm = rtw8723d_pwrtrack_get_limit_ofdm(rtwdev);
+	limit_ofdm = rtw8723x_pwrtrack_get_limit_ofdm(rtwdev);
 
 	final_ofdm_swing_index = dm_info->default_ofdm_index +
 				 dm_info->delta_power_index[path];
@@ -1116,7 +1113,7 @@ static void rtw8703b_phy_pwrtrack(struct rtw_dev *rtwdev)
 	do_iqk = rtw_phy_pwrtrack_need_iqk(rtwdev);
 
 	if (do_iqk)
-		rtw8723d_lck(rtwdev);
+		rtw8723x_lck(rtwdev);
 
 	if (dm_info->pwr_trk_init_trigger)
 		dm_info->pwr_trk_init_trigger = false;
@@ -1141,7 +1138,7 @@ static void rtw8703b_phy_pwrtrack(struct rtw_dev *rtwdev)
 		rtw8703b_pwrtrack_set(rtwdev, path);
 	}
 
-	rtw8723d_pwrtrack_set_xtal(rtwdev, RF_PATH_A, delta);
+	rtw8723x_pwrtrack_set_xtal(rtwdev, RF_PATH_A, delta);
 
 iqk:
 	if (do_iqk)
@@ -1373,7 +1370,7 @@ static const struct coex_tdma_para tdma_sant_8703b[] = {
 };
 
 static struct rtw_chip_ops rtw8703b_ops = {
-	.mac_init		= rtw8723d_mac_init,
+	.mac_init		= rtw8723x_mac_init,
 	.dump_fw_crash		= NULL,
 	.shutdown		= NULL,
 	.read_efuse		= rtw8703b_read_efuse,
@@ -1382,10 +1379,10 @@ static struct rtw_chip_ops rtw8703b_ops = {
 	.query_rx_desc		= rtw8703b_query_rx_desc,
 	.read_rf		= rtw_phy_read_rf_sipi,
 	.write_rf		= rtw_phy_write_rf_reg_sipi,
-	.set_tx_power_index	= rtw8723d_set_tx_power_index,
+	.set_tx_power_index	= rtw8723x_set_tx_power_index,
 	.set_antenna		= NULL,
-	.cfg_ldo25		= rtw8723d_cfg_ldo25,
-	.efuse_grant		= rtw8723d_efuse_grant,
+	.cfg_ldo25		= rtw8723x_cfg_ldo25,
+	.efuse_grant		= rtw8723x_efuse_grant,
 	.false_alarm_statistics	= rtw8703b_false_alarm_statistics,
 	.phy_calibration	= rtw8703b_phy_calibration,
 	.dpk_track		= NULL,
@@ -1405,10 +1402,10 @@ static struct rtw_chip_ops rtw8703b_ops = {
 	.cfo_track		= NULL,
 	.config_tx_path		= NULL,
 	.config_txrx_mode	= NULL,
-	.fill_txdesc_checksum	= rtw8723d_fill_txdesc_checksum,
+	.fill_txdesc_checksum	= rtw8723x_fill_txdesc_checksum,
 
 	/* for coex */
-	.coex_set_init		= rtw8723d_coex_cfg_init,
+	.coex_set_init		= rtw8723x_coex_cfg_init,
 	.coex_set_ant_switch	= NULL,
 	.coex_set_gnt_fix	= rtw8703b_coex_set_gnt_fix,
 	.coex_set_gnt_debug	= rtw8703b_coex_set_gnt_debug,
@@ -1464,20 +1461,20 @@ const struct rtw_chip_info rtw8703b_hw_spec = {
 	// The "available" addresses are exactly the same in the
 	// vendor driver, it doesn't seem to have an equivalent for
 	// the "reserved" part.
-	.prioq_addrs = &prioq_addrs_8723d,
+	.prioq_addrs = &prioq_addrs_8723x,
 	.page_table = page_table_8703b,
 	// used only in pci.c, probably don't need
 	.intf_table = NULL,
 
-	.dig = rtw8723d_dig,
-	.dig_cck = rtw8723d_dig_cck,
+	.dig = rtw8723x_dig,
+	.dig_cck = rtw8723x_dig_cck,
 
 	/* this is just not set for 8723d */
 	// .rf_base_addr
 	.rf_sipi_addr = {0x840, 0x844},
-	.rf_sipi_read_addr = rtw8723d_rf_sipi_addr,
+	.rf_sipi_read_addr = rtw8723x_rf_sipi_addr,
 	.fix_rf_phy_num = 2,
-	.ltecoex_addr = &rtw8723d_ltecoex_addr,
+	.ltecoex_addr = &rtw8723x_ltecoex_addr,
 
 	.mac_tbl = &rtw8703b_mac_tbl,
 	.agc_tbl = &rtw8703b_agc_tbl,
@@ -1527,10 +1524,13 @@ const struct rtw_chip_info rtw8703b_hw_spec = {
 	.bt_afh_span_bw40 = 0x30,
 	.afh_5g_num = ARRAY_SIZE(afh_5g_8703b),
 	.afh_5g = afh_5g_8703b,
-	/* this is set ONLY in rtw8723d, can't find similar in
-	 * rtl8723cs driver */
-	// The REG_BTG_SEL doesn't seem to have a counterpart in the
-	// vendor driver either. Maybe not supported?
+	/* REG_BTG_SEL doesn't seem to have a counterpart in the
+	 * vendor driver. Mathematically it's REG_PAD_CTRL1 + 3
+	 * though.
+	 *
+	 * It is used in the cardemu_to_act power sequence by though
+	 * (by address, 0x0067), comment: "0x67[0] = 0 to disable
+	 * BT_GPS_SEL pins" That seems to fit? */
 	.btg_reg = NULL,
 	/* Whatever this is seems to be only informational? At least
 	 * its use in coex.c handles the count of 0. */

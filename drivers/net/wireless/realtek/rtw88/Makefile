@@ -44,11 +44,11 @@ rtw88_8822cs-objs		:= rtw8822cs.o
 obj-$(CONFIG_RTW88_8822CU)	+= rtw88_8822cu.o
 rtw88_8822cu-objs		:= rtw8822cu.o
 
+obj-$(CONFIG_RTW88_8723X)	+= rtw88_8723x.o
+rtw88_8723x-objs		:= rtw8723x.o
+
 obj-$(CONFIG_RTW88_8703B)	+= rtw88_8703b.o
 rtw88_8703b-objs		:= rtw8703b.o rtw8703b_tables.o
-# TODO: Hack to reuse code without duplication. To be replaced with a
-# common support module.
-rtw88_8703b-objs		+=rtw8723d.o rtw8723d_table.o
 
 obj-$(CONFIG_RTW88_8723CS)	+= rtw88_8723cs.o
 rtw88_8723cs-objs		:= rtw8723cs.o
