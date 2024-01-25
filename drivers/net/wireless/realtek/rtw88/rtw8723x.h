@@ -121,6 +121,18 @@ struct rtw8723x_iqk_backup_regs {
 	u8 igib;
 };
 
+#define PATH_IQK_RETRY	2
+#define MAX_TOLERANCE	5
+#define IQK_TX_X_ERR	0x142
+#define IQK_TX_Y_ERR	0x42
+#define IQK_RX_X_ERR	0x132
+#define IQK_RX_Y_ERR	0x36
+#define IQK_RX_X_UPPER	0x11a
+#define IQK_RX_X_LOWER	0xe6
+#define IQK_RX_Y_LMT	0x1a
+#define IQK_TX_OK	BIT(0)
+#define IQK_RX_OK	BIT(1)
+
 extern const struct rtw_ltecoex_addr rtw8723x_ltecoex_addr;
 extern const struct rtw_rf_sipi_addr rtw8723x_rf_sipi_addr[];
 extern const struct rtw_hw_reg rtw8723x_dig[];
@@ -195,10 +207,13 @@ extern const struct rtw_prioq_addrs prioq_addrs_8723x;
 #define BIT_MASK_OFDM0_EXT_C	BIT(29)
 #define BIT_MASK_OFDM0_EXTS	(BIT(31) | BIT(29) | BIT(28))
 #define BIT_SET_OFDM0_EXTS(a, c, d) (((a) << 31) | ((c) << 29) | ((d) << 28))
+#define BIT_MASK_OFDM0_EXTS_B	(BIT(27) | BIT(25) | BIT(24))
+#define BIT_SET_OFDM0_EXTS_B(a, c, d) (((a) << 27) | ((c) << 25) | ((d) << 24))
 #define REG_OFDM0_XAAGC1	0x0c50
 #define REG_OFDM0_XBAGC1	0x0c58
 #define REG_AGCRSSI		0x0c78
 #define REG_OFDM_0_XA_TX_IQ_IMBALANCE	0x0c80
+#define REG_OFDM_0_XB_TX_IQ_IMBALANCE	0x0c88
 #define BIT_MASK_TXIQ_ELM_A	0x03ff
 #define BIT_SET_TXIQ_ELM_ACD(a, c, d) (((d) << 22) | (((c) & 0x3F) << 16) |    \
 				       ((a) & 0x03ff))
@@ -259,6 +274,8 @@ extern const struct rtw_prioq_addrs prioq_addrs_8723x;
 #define REG_IQK_AGC_RSP_11N	0x0e4c
 #define REG_TX_IQK_TONE_B	0x0e50
 #define REG_RX_IQK_TONE_B	0x0e54
+#define REG_TXIQK_PI_B		0x0e58
+#define REG_RXIQK_PI_B		0x0e5c
 #define REG_IQK_RES_TX		0x0e94
 #define BIT_MASK_RES_TX		GENMASK(25, 16)
 #define REG_IQK_RES_TY		0x0e9c
@@ -282,12 +299,36 @@ extern const struct rtw_prioq_addrs prioq_addrs_8723x;
 #define BIT_MASK_OFDM_LCRC_ERR		GENMASK(31, 16)
 #define REG_HT_CRC32_CNT_11N_AGG	0x0fb8
 
+#define OFDM_SWING_A(swing)		FIELD_GET(GENMASK(9, 0), swing)
+#define OFDM_SWING_B(swing)		FIELD_GET(GENMASK(15, 10), swing)
+#define OFDM_SWING_C(swing)		FIELD_GET(GENMASK(21, 16), swing)
+#define OFDM_SWING_D(swing)		FIELD_GET(GENMASK(31, 22), swing)
+
+static inline s32 iqkxy_to_s32(s32 val)
+{
+	/* val is Q10.8 */
+	return sign_extend32(val, 9);
+}
+
+static inline s32 iqk_mult(s32 x, s32 y, s32 *ext)
+{
+	/* x, y and return value are Q10.8 */
+	s32 t;
+
+	t = x * y;
+	if (ext)
+		*ext = (t >> 7) & 0x1;	/* Q.16 --> Q.9; get LSB of Q.9 */
+
+	return (t >> 8);	/* Q.16 --> Q.8 */
+}
+
 void rtw8723x_lck(struct rtw_dev *rtwdev);
 int rtw8723x_read_efuse(struct rtw_dev *rtwdev, u8 *log_map);
 int rtw8723x_mac_init(struct rtw_dev *rtwdev);
 void rtw8723x_cfg_ldo25(struct rtw_dev *rtwdev, bool enable);
 void rtw8723x_set_tx_power_index(struct rtw_dev *rtwdev);
 void rtw8723x_efuse_grant(struct rtw_dev *rtwdev, bool on);
+void rtw8723x_false_alarm_statistics(struct rtw_dev *rtwdev);
 void rtw8723x_iqk_backup_regs(struct rtw_dev *rtwdev,
 			      struct rtw8723x_iqk_backup_regs *backup);
 void rtw8723x_iqk_restore_regs(struct rtw_dev *rtwdev,
@@ -299,9 +340,13 @@ void rtw8723x_iqk_restore_path_ctrl(struct rtw_dev *rtwdev,
 				    const struct rtw8723x_iqk_backup_regs *backup);
 void rtw8723x_iqk_backup_lte_path_gnt(struct rtw_dev *rtwdev,
 				      struct rtw8723x_iqk_backup_regs *backup);
-void rtw8723x_iqk_config_lte_path_gnt(struct rtw_dev *rtwdev);
+void rtw8723x_iqk_config_lte_path_gnt(struct rtw_dev *rtwdev,
+				      u32 write_data);
 void rtw8723x_iqk_restore_lte_path_gnt(struct rtw_dev *rtwdev,
 				       const struct rtw8723x_iqk_backup_regs *bak);
+void rtw8723x_iqk_path_adda_on(struct rtw_dev *rtwdev, u32 value);
+bool rtw8723x_iqk_similarity_cmp(struct rtw_dev *rtwdev, s32 result[][IQK_NR],
+				 u8 c1, u8 c2);
 u8 rtw8723x_pwrtrack_get_limit_ofdm(struct rtw_dev *rtwdev);
 void rtw8723x_pwrtrack_set_xtal(struct rtw_dev *rtwdev, u8 therm_path,
 				u8 delta);

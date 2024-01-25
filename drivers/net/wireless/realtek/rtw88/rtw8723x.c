@@ -221,6 +221,71 @@ void rtw8723x_efuse_grant(struct rtw_dev *rtwdev, bool on)
 }
 EXPORT_SYMBOL(rtw8723x_efuse_grant);
 
+void rtw8723x_false_alarm_statistics(struct rtw_dev *rtwdev)
+{
+	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
+	u32 cck_fa_cnt;
+	u32 ofdm_fa_cnt;
+	u32 crc32_cnt;
+	u32 val32;
+
+	/* hold counter */
+	rtw_write32_mask(rtwdev, REG_OFDM_FA_HOLDC_11N, BIT_MASK_OFDM_FA_KEEP, 1);
+	rtw_write32_mask(rtwdev, REG_OFDM_FA_RSTD_11N, BIT_MASK_OFDM_FA_KEEP1, 1);
+	rtw_write32_mask(rtwdev, REG_CCK_FA_RST_11N, BIT_MASK_CCK_CNT_KEEP, 1);
+	rtw_write32_mask(rtwdev, REG_CCK_FA_RST_11N, BIT_MASK_CCK_FA_KEEP, 1);
+
+	cck_fa_cnt = rtw_read32_mask(rtwdev, REG_CCK_FA_LSB_11N, MASKBYTE0);
+	cck_fa_cnt += rtw_read32_mask(rtwdev, REG_CCK_FA_MSB_11N, MASKBYTE3) << 8;
+
+	val32 = rtw_read32(rtwdev, REG_OFDM_FA_TYPE1_11N);
+	ofdm_fa_cnt = u32_get_bits(val32, BIT_MASK_OFDM_FF_CNT);
+	ofdm_fa_cnt += u32_get_bits(val32, BIT_MASK_OFDM_SF_CNT);
+	val32 = rtw_read32(rtwdev, REG_OFDM_FA_TYPE2_11N);
+	dm_info->ofdm_cca_cnt = u32_get_bits(val32, BIT_MASK_OFDM_CCA_CNT);
+	ofdm_fa_cnt += u32_get_bits(val32, BIT_MASK_OFDM_PF_CNT);
+	val32 = rtw_read32(rtwdev, REG_OFDM_FA_TYPE3_11N);
+	ofdm_fa_cnt += u32_get_bits(val32, BIT_MASK_OFDM_RI_CNT);
+	ofdm_fa_cnt += u32_get_bits(val32, BIT_MASK_OFDM_CRC_CNT);
+	val32 = rtw_read32(rtwdev, REG_OFDM_FA_TYPE4_11N);
+	ofdm_fa_cnt += u32_get_bits(val32, BIT_MASK_OFDM_MNS_CNT);
+
+	dm_info->cck_fa_cnt = cck_fa_cnt;
+	dm_info->ofdm_fa_cnt = ofdm_fa_cnt;
+	dm_info->total_fa_cnt = cck_fa_cnt + ofdm_fa_cnt;
+
+	dm_info->cck_err_cnt = rtw_read32(rtwdev, REG_IGI_C_11N);
+	dm_info->cck_ok_cnt = rtw_read32(rtwdev, REG_IGI_D_11N);
+	crc32_cnt = rtw_read32(rtwdev, REG_OFDM_CRC32_CNT_11N);
+	dm_info->ofdm_err_cnt = u32_get_bits(crc32_cnt, BIT_MASK_OFDM_LCRC_ERR);
+	dm_info->ofdm_ok_cnt = u32_get_bits(crc32_cnt, BIT_MASK_OFDM_LCRC_OK);
+	crc32_cnt = rtw_read32(rtwdev, REG_HT_CRC32_CNT_11N);
+	dm_info->ht_err_cnt = u32_get_bits(crc32_cnt, BIT_MASK_HT_CRC_ERR);
+	dm_info->ht_ok_cnt = u32_get_bits(crc32_cnt, BIT_MASK_HT_CRC_OK);
+	dm_info->vht_err_cnt = 0;
+	dm_info->vht_ok_cnt = 0;
+
+	val32 = rtw_read32(rtwdev, REG_CCK_CCA_CNT_11N);
+	dm_info->cck_cca_cnt = (u32_get_bits(val32, BIT_MASK_CCK_FA_MSB) << 8) |
+			       u32_get_bits(val32, BIT_MASK_CCK_FA_LSB);
+	dm_info->total_cca_cnt = dm_info->cck_cca_cnt + dm_info->ofdm_cca_cnt;
+
+	/* reset counter */
+	rtw_write32_mask(rtwdev, REG_OFDM_FA_RSTC_11N, BIT_MASK_OFDM_FA_RST, 1);
+	rtw_write32_mask(rtwdev, REG_OFDM_FA_RSTC_11N, BIT_MASK_OFDM_FA_RST, 0);
+	rtw_write32_mask(rtwdev, REG_OFDM_FA_RSTD_11N, BIT_MASK_OFDM_FA_RST1, 1);
+	rtw_write32_mask(rtwdev, REG_OFDM_FA_RSTD_11N, BIT_MASK_OFDM_FA_RST1, 0);
+	rtw_write32_mask(rtwdev, REG_OFDM_FA_HOLDC_11N, BIT_MASK_OFDM_FA_KEEP, 0);
+	rtw_write32_mask(rtwdev, REG_OFDM_FA_RSTD_11N, BIT_MASK_OFDM_FA_KEEP1, 0);
+	rtw_write32_mask(rtwdev, REG_CCK_FA_RST_11N, BIT_MASK_CCK_CNT_KPEN, 0);
+	rtw_write32_mask(rtwdev, REG_CCK_FA_RST_11N, BIT_MASK_CCK_CNT_KPEN, 2);
+	rtw_write32_mask(rtwdev, REG_CCK_FA_RST_11N, BIT_MASK_CCK_FA_KPEN, 0);
+	rtw_write32_mask(rtwdev, REG_CCK_FA_RST_11N, BIT_MASK_CCK_FA_KPEN, 2);
+	rtw_write32_mask(rtwdev, REG_PAGE_F_RST_11N, BIT_MASK_F_RST_ALL, 1);
+	rtw_write32_mask(rtwdev, REG_PAGE_F_RST_11N, BIT_MASK_F_RST_ALL, 0);
+}
+EXPORT_SYMBOL(rtw8723x_false_alarm_statistics);
+
 /* IQK (IQ calibration) */
 
 const u32 rtw8723x_iqk_adda_regs[] = {
@@ -328,9 +393,9 @@ void rtw8723x_iqk_backup_lte_path_gnt(struct rtw_dev *rtwdev,
 }
 EXPORT_SYMBOL(rtw8723x_iqk_backup_lte_path_gnt);
 
-void rtw8723x_iqk_config_lte_path_gnt(struct rtw_dev *rtwdev)
+void rtw8723x_iqk_config_lte_path_gnt(struct rtw_dev *rtwdev, u32 write_data)
 {
-	rtw_write32(rtwdev, REG_LTECOEX_WRITE_DATA, 0x0000ff00);
+	rtw_write32(rtwdev, REG_LTECOEX_WRITE_DATA, write_data);
 	rtw_write32(rtwdev, REG_LTECOEX_CTRL, 0xc0020038);
 	rtw_write32_mask(rtwdev, REG_LTECOEX_PATH_CONTROL, BIT_LTE_MUX_CTRL_PATH, 0x1);
 }
@@ -344,6 +409,72 @@ void rtw8723x_iqk_restore_lte_path_gnt(struct rtw_dev *rtwdev,
 	rtw_write32(rtwdev, REG_LTECOEX_PATH_CONTROL, bak->lte_path);
 }
 EXPORT_SYMBOL(rtw8723x_iqk_restore_lte_path_gnt);
+
+/* set all ADDA registers to the given value */
+void rtw8723x_iqk_path_adda_on(struct rtw_dev *rtwdev, u32 value)
+{
+	for (int i = 0; i < RTW8723X_IQK_ADDA_REG_NUM; i++)
+		rtw_write32(rtwdev, rtw8723x_iqk_adda_regs[i], value);
+}
+EXPORT_SYMBOL(rtw8723x_iqk_path_adda_on);
+
+bool rtw8723x_iqk_similarity_cmp(struct rtw_dev *rtwdev, s32 result[][IQK_NR],
+				 u8 c1, u8 c2)
+{
+	u32 i, j, diff;
+	u32 bitmap = 0;
+	u8 candidate[PATH_NR] = {IQK_ROUND_INVALID, IQK_ROUND_INVALID};
+	bool ret = true;
+
+	s32 tmp1, tmp2;
+
+	for (i = 0; i < IQK_NR; i++) {
+		tmp1 = iqkxy_to_s32(result[c1][i]);
+		tmp2 = iqkxy_to_s32(result[c2][i]);
+
+		diff = abs(tmp1 - tmp2);
+
+		if (diff <= MAX_TOLERANCE)
+			continue;
+
+		if ((i == IQK_S1_RX_X || i == IQK_S0_RX_X) && !bitmap) {
+			if (result[c1][i] + result[c1][i + 1] == 0)
+				candidate[i / IQK_SX_NR] = c2;
+			else if (result[c2][i] + result[c2][i + 1] == 0)
+				candidate[i / IQK_SX_NR] = c1;
+			else
+				bitmap |= BIT(i);
+		} else {
+			bitmap |= BIT(i);
+		}
+	}
+
+	if (bitmap != 0)
+		goto check_sim;
+
+	for (i = 0; i < PATH_NR; i++) {
+		if (candidate[i] == IQK_ROUND_INVALID)
+			continue;
+
+		for (j = i * IQK_SX_NR; j < i * IQK_SX_NR + 2; j++)
+			result[IQK_ROUND_HYBRID][j] = result[candidate[i]][j];
+		ret = false;
+	}
+
+	return ret;
+
+check_sim:
+	for (i = 0; i < IQK_NR; i++) {
+		j = i & ~1;	/* 2 bits are a pair for IQ[X, Y] */
+		if (bitmap & GENMASK(j + 1, j))
+			continue;
+
+		result[IQK_ROUND_HYBRID][i] = result[c1][i];
+	}
+
+	return false;
+}
+EXPORT_SYMBOL(rtw8723x_iqk_similarity_cmp);
 
 u8 rtw8723x_pwrtrack_get_limit_ofdm(struct rtw_dev *rtwdev)
 {

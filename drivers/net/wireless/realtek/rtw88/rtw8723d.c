@@ -434,70 +434,6 @@ static void rtw8723d_shutdown(struct rtw_dev *rtwdev)
 	rtw_write16_set(rtwdev, REG_HCI_OPT_CTRL, BIT_USB_SUS_DIS);
 }
 
-static void rtw8723d_false_alarm_statistics(struct rtw_dev *rtwdev)
-{
-	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
-	u32 cck_fa_cnt;
-	u32 ofdm_fa_cnt;
-	u32 crc32_cnt;
-	u32 val32;
-
-	/* hold counter */
-	rtw_write32_mask(rtwdev, REG_OFDM_FA_HOLDC_11N, BIT_MASK_OFDM_FA_KEEP, 1);
-	rtw_write32_mask(rtwdev, REG_OFDM_FA_RSTD_11N, BIT_MASK_OFDM_FA_KEEP1, 1);
-	rtw_write32_mask(rtwdev, REG_CCK_FA_RST_11N, BIT_MASK_CCK_CNT_KEEP, 1);
-	rtw_write32_mask(rtwdev, REG_CCK_FA_RST_11N, BIT_MASK_CCK_FA_KEEP, 1);
-
-	cck_fa_cnt = rtw_read32_mask(rtwdev, REG_CCK_FA_LSB_11N, MASKBYTE0);
-	cck_fa_cnt += rtw_read32_mask(rtwdev, REG_CCK_FA_MSB_11N, MASKBYTE3) << 8;
-
-	val32 = rtw_read32(rtwdev, REG_OFDM_FA_TYPE1_11N);
-	ofdm_fa_cnt = u32_get_bits(val32, BIT_MASK_OFDM_FF_CNT);
-	ofdm_fa_cnt += u32_get_bits(val32, BIT_MASK_OFDM_SF_CNT);
-	val32 = rtw_read32(rtwdev, REG_OFDM_FA_TYPE2_11N);
-	dm_info->ofdm_cca_cnt = u32_get_bits(val32, BIT_MASK_OFDM_CCA_CNT);
-	ofdm_fa_cnt += u32_get_bits(val32, BIT_MASK_OFDM_PF_CNT);
-	val32 = rtw_read32(rtwdev, REG_OFDM_FA_TYPE3_11N);
-	ofdm_fa_cnt += u32_get_bits(val32, BIT_MASK_OFDM_RI_CNT);
-	ofdm_fa_cnt += u32_get_bits(val32, BIT_MASK_OFDM_CRC_CNT);
-	val32 = rtw_read32(rtwdev, REG_OFDM_FA_TYPE4_11N);
-	ofdm_fa_cnt += u32_get_bits(val32, BIT_MASK_OFDM_MNS_CNT);
-
-	dm_info->cck_fa_cnt = cck_fa_cnt;
-	dm_info->ofdm_fa_cnt = ofdm_fa_cnt;
-	dm_info->total_fa_cnt = cck_fa_cnt + ofdm_fa_cnt;
-
-	dm_info->cck_err_cnt = rtw_read32(rtwdev, REG_IGI_C_11N);
-	dm_info->cck_ok_cnt = rtw_read32(rtwdev, REG_IGI_D_11N);
-	crc32_cnt = rtw_read32(rtwdev, REG_OFDM_CRC32_CNT_11N);
-	dm_info->ofdm_err_cnt = u32_get_bits(crc32_cnt, BIT_MASK_OFDM_LCRC_ERR);
-	dm_info->ofdm_ok_cnt = u32_get_bits(crc32_cnt, BIT_MASK_OFDM_LCRC_OK);
-	crc32_cnt = rtw_read32(rtwdev, REG_HT_CRC32_CNT_11N);
-	dm_info->ht_err_cnt = u32_get_bits(crc32_cnt, BIT_MASK_HT_CRC_ERR);
-	dm_info->ht_ok_cnt = u32_get_bits(crc32_cnt, BIT_MASK_HT_CRC_OK);
-	dm_info->vht_err_cnt = 0;
-	dm_info->vht_ok_cnt = 0;
-
-	val32 = rtw_read32(rtwdev, REG_CCK_CCA_CNT_11N);
-	dm_info->cck_cca_cnt = (u32_get_bits(val32, BIT_MASK_CCK_FA_MSB) << 8) |
-			       u32_get_bits(val32, BIT_MASK_CCK_FA_LSB);
-	dm_info->total_cca_cnt = dm_info->cck_cca_cnt + dm_info->ofdm_cca_cnt;
-
-	/* reset counter */
-	rtw_write32_mask(rtwdev, REG_OFDM_FA_RSTC_11N, BIT_MASK_OFDM_FA_RST, 1);
-	rtw_write32_mask(rtwdev, REG_OFDM_FA_RSTC_11N, BIT_MASK_OFDM_FA_RST, 0);
-	rtw_write32_mask(rtwdev, REG_OFDM_FA_RSTD_11N, BIT_MASK_OFDM_FA_RST1, 1);
-	rtw_write32_mask(rtwdev, REG_OFDM_FA_RSTD_11N, BIT_MASK_OFDM_FA_RST1, 0);
-	rtw_write32_mask(rtwdev, REG_OFDM_FA_HOLDC_11N, BIT_MASK_OFDM_FA_KEEP, 0);
-	rtw_write32_mask(rtwdev, REG_OFDM_FA_RSTD_11N, BIT_MASK_OFDM_FA_KEEP1, 0);
-	rtw_write32_mask(rtwdev, REG_CCK_FA_RST_11N, BIT_MASK_CCK_CNT_KPEN, 0);
-	rtw_write32_mask(rtwdev, REG_CCK_FA_RST_11N, BIT_MASK_CCK_CNT_KPEN, 2);
-	rtw_write32_mask(rtwdev, REG_CCK_FA_RST_11N, BIT_MASK_CCK_FA_KPEN, 0);
-	rtw_write32_mask(rtwdev, REG_CCK_FA_RST_11N, BIT_MASK_CCK_FA_KPEN, 2);
-	rtw_write32_mask(rtwdev, REG_PAGE_F_RST_11N, BIT_MASK_F_RST_ALL, 1);
-	rtw_write32_mask(rtwdev, REG_PAGE_F_RST_11N, BIT_MASK_F_RST_ALL, 0);
-}
-
 struct rtw_8723d_iqk_cfg {
 	const char *name;
 	u32 val_bb_sel_btg;
@@ -597,6 +533,8 @@ static u8 rtw8723d_iqk_check_rx_failed(struct rtw_dev *rtwdev,
 	return 0;
 }
 
+#define IQK_LTE_WRITE_VAL 0x0000ff00
+
 static void rtw8723d_iqk_one_shot(struct rtw_dev *rtwdev, bool tx,
 				  const struct rtw_8723d_iqk_cfg *iqk_cfg)
 {
@@ -604,7 +542,7 @@ static void rtw8723d_iqk_one_shot(struct rtw_dev *rtwdev, bool tx,
 
 	/* enter IQK mode */
 	rtw_write32_mask(rtwdev, REG_FPGA0_IQK_11N, BIT_MASK_IQK_MOD, EN_IQK);
-	rtw8723x_iqk_config_lte_path_gnt(rtwdev);
+	rtw8723x_iqk_config_lte_path_gnt(rtwdev, IQK_LTE_WRITE_VAL);
 
 	rtw_write32(rtwdev, REG_LTECOEX_CTRL, 0x800f0054);
 	mdelay(1);
@@ -887,14 +825,6 @@ void rtw8723d_iqk_fill_s0_matrix(struct rtw_dev *rtwdev, const s32 result[])
 			 result[IQK_S0_RX_Y]);
 }
 
-static void rtw8723d_iqk_path_adda_on(struct rtw_dev *rtwdev)
-{
-	int i;
-
-	for (i = 0; i < RTW8723X_IQK_ADDA_REG_NUM; i++)
-		rtw_write32(rtwdev, rtw8723x_iqk_adda_regs[i], 0x03c00016);
-}
-
 static void rtw8723d_iqk_config_mac(struct rtw_dev *rtwdev)
 {
 	rtw_write8(rtwdev, REG_TXPAUSE, 0xff);
@@ -912,70 +842,14 @@ void rtw8723d_iqk_rf_standby(struct rtw_dev *rtwdev, enum rtw_rf_path path)
 	rtw_write32_mask(rtwdev, REG_FPGA0_IQK_11N, BIT_MASK_IQK_MOD, EN_IQK);
 }
 
-static
-bool rtw8723d_iqk_similarity_cmp(struct rtw_dev *rtwdev, s32 result[][IQK_NR],
-				 u8 c1, u8 c2)
-{
-	u32 i, j, diff;
-	u32 bitmap = 0;
-	u8 candidate[PATH_NR] = {IQK_ROUND_INVALID, IQK_ROUND_INVALID};
-	bool ret = true;
-
-	s32 tmp1, tmp2;
-
-	for (i = 0; i < IQK_NR; i++) {
-		tmp1 = iqkxy_to_s32(result[c1][i]);
-		tmp2 = iqkxy_to_s32(result[c2][i]);
-
-		diff = abs(tmp1 - tmp2);
-
-		if (diff <= MAX_TOLERANCE)
-			continue;
-
-		if ((i == IQK_S1_RX_X || i == IQK_S0_RX_X) && !bitmap) {
-			if (result[c1][i] + result[c1][i + 1] == 0)
-				candidate[i / IQK_SX_NR] = c2;
-			else if (result[c2][i] + result[c2][i + 1] == 0)
-				candidate[i / IQK_SX_NR] = c1;
-			else
-				bitmap |= BIT(i);
-		} else {
-			bitmap |= BIT(i);
-		}
-	}
-
-	if (bitmap != 0)
-		goto check_sim;
-
-	for (i = 0; i < PATH_NR; i++) {
-		if (candidate[i] == IQK_ROUND_INVALID)
-			continue;
-
-		for (j = i * IQK_SX_NR; j < i * IQK_SX_NR + 2; j++)
-			result[IQK_ROUND_HYBRID][j] = result[candidate[i]][j];
-		ret = false;
-	}
-
-	return ret;
-
-check_sim:
-	for (i = 0; i < IQK_NR; i++) {
-		j = i & ~1;	/* 2 bits are a pair for IQ[X, Y] */
-		if (bitmap & GENMASK(j + 1, j))
-			continue;
-
-		result[IQK_ROUND_HYBRID][i] = result[c1][i];
-	}
-
-	return false;
-}
+#define ADDA_ON_VAL 0x03c00016
 
 static
 void rtw8723d_iqk_precfg_path(struct rtw_dev *rtwdev, enum rtw8723x_path path)
 {
 	if (path == PATH_S0) {
 		rtw8723d_iqk_rf_standby(rtwdev, RF_PATH_A);
-		rtw8723d_iqk_path_adda_on(rtwdev);
+		rtw8723x_iqk_path_adda_on(rtwdev, ADDA_ON_VAL);
 	}
 
 	rtw_write32_mask(rtwdev, REG_FPGA0_IQK_11N, BIT_MASK_IQK_MOD, EN_IQK);
@@ -984,7 +858,7 @@ void rtw8723d_iqk_precfg_path(struct rtw_dev *rtwdev, enum rtw8723x_path path)
 
 	if (path == PATH_S1) {
 		rtw8723d_iqk_rf_standby(rtwdev, RF_PATH_B);
-		rtw8723d_iqk_path_adda_on(rtwdev);
+		rtw8723x_iqk_path_adda_on(rtwdev, ADDA_ON_VAL);
 	}
 }
 
@@ -998,7 +872,7 @@ void rtw8723d_iqk_one_round(struct rtw_dev *rtwdev, s32 result[][IQK_NR], u8 t,
 	rtw_dbg(rtwdev, RTW_DBG_RFK,
 		"[IQK] IQ Calibration for 1T1R_S0/S1 for %d times\n", t);
 
-	rtw8723d_iqk_path_adda_on(rtwdev);
+	rtw8723x_iqk_path_adda_on(rtwdev, ADDA_ON_VAL);
 	rtw8723d_iqk_config_mac(rtwdev);
 	rtw_write32_mask(rtwdev, REG_CCK_ANT_SEL_11N, 0x0f000000, 0xf);
 	rtw_write32(rtwdev, REG_BB_RX_PATH_11N, 0x03a05611);
@@ -1109,7 +983,7 @@ static void rtw8723d_phy_calibration(struct rtw_dev *rtwdev)
 
 	for (i = IQK_ROUND_0; i <= IQK_ROUND_2; i++) {
 		rtw8723x_iqk_config_path_ctrl(rtwdev);
-		rtw8723x_iqk_config_lte_path_gnt(rtwdev);
+		rtw8723x_iqk_config_lte_path_gnt(rtwdev, IQK_LTE_WRITE_VAL);
 
 		rtw8723d_iqk_one_round(rtwdev, result, i, &backup);
 
@@ -1119,7 +993,7 @@ static void rtw8723d_phy_calibration(struct rtw_dev *rtwdev)
 		rtw8723x_iqk_restore_path_ctrl(rtwdev, &backup);
 
 		for (j = IQK_ROUND_0; j < i; j++) {
-			good = rtw8723d_iqk_similarity_cmp(rtwdev, result, j, i);
+			good = rtw8723x_iqk_similarity_cmp(rtwdev, result, j, i);
 
 			if (good) {
 				final_candidate = j;
@@ -1570,7 +1444,7 @@ static struct rtw_chip_ops rtw8723d_ops = {
 	.set_antenna		= NULL,
 	.cfg_ldo25		= rtw8723x_cfg_ldo25,
 	.efuse_grant		= rtw8723x_efuse_grant,
-	.false_alarm_statistics	= rtw8723d_false_alarm_statistics,
+	.false_alarm_statistics	= rtw8723x_false_alarm_statistics,
 	.phy_calibration	= rtw8723d_phy_calibration,
 	.cck_pd_set		= rtw8723d_phy_cck_pd_set,
 	.pwr_track		= rtw8723d_pwr_track,

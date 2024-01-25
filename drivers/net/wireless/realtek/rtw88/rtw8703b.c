@@ -487,6 +487,18 @@ static const struct rtw_rqpn rqpn_table_8703b[] = {
 	 RTW_DMA_MAPPING_EXTRA, RTW_DMA_MAPPING_HIGH},
 };
 
+/*
+ * Default power index table for RTL8703B, used if EFUSE does not
+ * contain valid data. Replaces EFUSE data from offset 0x10 (start of
+ * txpwr_idx_table).
+ */
+static const u8 rtw8703b_txpwr_idx_table[] = {
+	0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x2D,
+	0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x02
+};
+#define RTW8703B_TXPWR_IDX_TABLE_LEN ARRAY_SIZE(rtw8703b_txpwr_idx_table)
+
+
 static int rtw8703b_read_efuse(struct rtw_dev *rtwdev, u8 *log_map)
 {
 	/* include/hal_pg.h lists the eeprom/efuse offsets, the
@@ -504,6 +516,20 @@ static int rtw8703b_read_efuse(struct rtw_dev *rtwdev, u8 *log_map)
 		ether_addr_copy(rtwdev->efuse.addr, addr);
 		rtw_dbg(rtwdev, RTW_DBG_PHY, "got wifi mac address from DT: %pM\n", rtwdev->efuse.addr);
 	}
+
+	/* If power index table in EFUSE is invalid, fall back to
+	 * built-in table. */
+	u8 *pwr = (u8*) &rtwdev->efuse.txpwr_idx_table[RF_PATH_A];
+	bool valid = false;
+	for (int i = 0; i < RTW8703B_TXPWR_IDX_TABLE_LEN; i++)
+		if (pwr[i] != 0xff) {
+			valid = true;
+			break;
+		}
+	if (!valid)
+		for (int i = 0; i < RTW8703B_TXPWR_IDX_TABLE_LEN; i++)
+			pwr[i] = rtw8703b_txpwr_idx_table[i];
+
 	return 0;
 }
 
@@ -972,20 +998,515 @@ static void rtw8703b_query_rx_desc(struct rtw_dev *rtwdev, u8 *rx_desc,
 	}
 }
 
-static void rtw8703b_false_alarm_statistics(struct rtw_dev *rtwdev)
+#define ADDA_ON_VAL 0x03c00014
+
+static
+void rtw8703b_iqk_config_mac(struct rtw_dev *rtwdev,
+			     const struct rtw8723x_iqk_backup_regs *backup)
 {
-	/* called during connection */
-	rtw_dbg(rtwdev, RTW_DBG_DEBUGFS,
-		"%s: not implemented yet\n", __func__);
+	rtw_write8(rtwdev, rtw8723x_iqk_mac8_regs[0], 0x3F);
+	for (int i = 1; i < RTW8723X_IQK_MAC8_REG_NUM; i++)
+		rtw_write8(rtwdev, rtw8723x_iqk_mac8_regs[i],
+			   backup->mac8[i] & (~BIT(3)));
+}
+
+#define IQK_LTE_WRITE_VAL 0x00007700
+#define IQK_DELAY_TIME_8703B 10
+
+static void rtw8703b_iqk_one_shot(struct rtw_dev *rtwdev, bool tx)
+{
+	/* enter IQK mode */
+	rtw_write32_mask(rtwdev, REG_FPGA0_IQK_11N, BIT_MASK_IQK_MOD, EN_IQK);
+	rtw8723x_iqk_config_lte_path_gnt(rtwdev, IQK_LTE_WRITE_VAL);
+
+	/* One shot, LOK & IQK */
+	rtw_write32(rtwdev, REG_IQK_AGC_PTS_11N, 0xf9000000);
+	rtw_write32(rtwdev, REG_IQK_AGC_PTS_11N, 0xf8000000);
+
+	mdelay(IQK_DELAY_TIME_8703B);
+	/* This is very similar to check_hw_ready, but the exact
+	 * "done" value isn't known, just != 0 */
+	for (int cnt = 0; cnt < 10; cnt++) {
+		if (rtw_read32(rtwdev, REG_IQK_RDY) != 0)
+			return;
+		mdelay(5);
+	}
+	rtw_warn(rtwdev, "A %s IQK isn't done\n", tx ? "TX" : "RX");
+}
+
+static void rtw8703b_iqk_txrx_path_post(struct rtw_dev *rtwdev,
+					const struct rtw8723x_iqk_backup_regs *backup)
+{
+	rtw8723x_iqk_restore_lte_path_gnt(rtwdev, backup);
+	rtw_write32(rtwdev, REG_BB_SEL_BTG, backup->bb_sel_btg);
+
+	/* leave IQK mode */
+	rtw_write32_mask(rtwdev, REG_FPGA0_IQK_11N, BIT_MASK_IQK_MOD, RST_IQK);
+	rtw_write_rf(rtwdev, RF_PATH_A, RF_LUTDBG, 0x800, 0x0);
+}
+
+static u8 rtw8703b_iqk_check_tx_failed(struct rtw_dev *rtwdev)
+{
+	s32 tx_x, tx_y;
+	u32 tx_fail;
+
+	rtw_dbg(rtwdev, RTW_DBG_RFK, "[IQK] 0xeac = 0x%x\n",
+		rtw_read32(rtwdev, REG_IQK_RES_RY));
+	rtw_dbg(rtwdev, RTW_DBG_RFK, "[IQK] 0xe94 = 0x%x, 0xe9c = 0x%x\n",
+		rtw_read32(rtwdev, REG_IQK_RES_TX),
+		rtw_read32(rtwdev, REG_IQK_RES_TY));
+	rtw_dbg(rtwdev, RTW_DBG_RFK,
+		"[IQK] 0xe90(before IQK) = 0x%x, 0xe98(after IQK) = 0x%x\n",
+		rtw_read32(rtwdev, REG_IQK_RDY),
+		rtw_read32(rtwdev, 0xe98));
+
+	tx_fail = rtw_read32_mask(rtwdev, REG_IQK_RES_RY, BIT_IQK_TX_FAIL);
+	tx_x = rtw_read32_mask(rtwdev, REG_IQK_RES_TX, BIT_MASK_RES_TX);
+	tx_y = rtw_read32_mask(rtwdev, REG_IQK_RES_TY, BIT_MASK_RES_TY);
+
+	if (!tx_fail && tx_x != IQK_TX_X_ERR && tx_y != IQK_TX_Y_ERR)
+		return IQK_TX_OK;
+
+	rtw_dbg(rtwdev, RTW_DBG_RFK, "[IQK] A TX IQK failed\n");
+
+	return 0;
+}
+
+static u8 rtw8703b_iqk_check_rx_failed(struct rtw_dev *rtwdev)
+{
+	s32 rx_x, rx_y;
+	u32 rx_fail;
+
+	rtw_dbg(rtwdev, RTW_DBG_RFK, "[IQK] 0xea4 = 0x%x, 0xeac = 0x%x\n",
+		rtw_read32(rtwdev, REG_IQK_RES_RX),
+		rtw_read32(rtwdev, REG_IQK_RES_RY));
+
+	rtw_dbg(rtwdev, RTW_DBG_RFK,
+		"[IQK] 0xea0(before IQK) = 0x%x, 0xea8(after IQK) = 0x%x\n",
+		rtw_read32(rtwdev, 0xea0),
+		rtw_read32(rtwdev, 0xea8));
+
+	rx_fail = rtw_read32_mask(rtwdev, REG_IQK_RES_RY, BIT_IQK_RX_FAIL);
+	rx_x = rtw_read32_mask(rtwdev, REG_IQK_RES_RX, BIT_MASK_RES_RX);
+	rx_y = rtw_read32_mask(rtwdev, REG_IQK_RES_RY, BIT_MASK_RES_RY);
+	rx_y = abs(iqkxy_to_s32(rx_y));
+
+	if (!rx_fail && rx_x != IQK_RX_X_ERR && rx_y != IQK_RX_Y_ERR &&
+	    rx_x < IQK_RX_X_UPPER && rx_x > IQK_RX_X_LOWER &&
+	    rx_y < IQK_RX_Y_LMT)
+		return IQK_RX_OK;
+
+	rtw_dbg(rtwdev, RTW_DBG_RFK, "[IQK] A RX IQK failed\n");
+
+	return 0;
+}
+
+static u8 rtw8703b_iqk_tx_path(struct rtw_dev *rtwdev,
+			       const struct rtw8723x_iqk_backup_regs *backup)
+{
+	u8 status;
+
+	rtw_dbg(rtwdev, RTW_DBG_RFK, "[IQK] path A TX IQK!\n");
+
+	/* IQK setting */
+	rtw_write32(rtwdev, REG_TXIQK_11N, 0x01007c00);
+	rtw_write32(rtwdev, REG_RXIQK_11N, 0x01004800);
+	rtw_write32(rtwdev, REG_TXIQK_TONE_A_11N, 0x18008c1c);
+	rtw_write32(rtwdev, REG_RXIQK_TONE_A_11N, 0x38008c1c);
+	rtw_write32(rtwdev, REG_TX_IQK_TONE_B, 0x38008c1c);
+	rtw_write32(rtwdev, REG_RX_IQK_TONE_B, 0x38008c1c);
+	rtw_write32(rtwdev, REG_TXIQK_PI_A_11N, 0x8214030f);
+	rtw_write32(rtwdev, REG_RXIQK_PI_A_11N, 0x28110000);
+	rtw_write32(rtwdev, REG_TXIQK_PI_B, 0x82110000);
+	rtw_write32(rtwdev, REG_RXIQK_PI_B, 0x28110000);
+
+	/* LO calibration setting */
+	rtw_write32(rtwdev, REG_IQK_AGC_RSP_11N, 0x00462911);
+
+	/* leave IQK mode */
+	rtw_write32_mask(rtwdev, REG_FPGA0_IQK_11N, 0xffffff00, 0x000000);
+
+	/* PA, PAD setting */
+	rtw_write_rf(rtwdev, RF_PATH_A, RF_LUTDBG, 0x800, 0x1);
+	rtw_write_rf(rtwdev, RF_PATH_A, 0x55, 0x7f, 0x7);
+	rtw_write_rf(rtwdev, RF_PATH_A, 0x7f, RFREG_MASK, 0xd400);
+
+	rtw8703b_iqk_one_shot(rtwdev, true);
+	status = rtw8703b_iqk_check_tx_failed(rtwdev);
+
+	rtw8703b_iqk_txrx_path_post(rtwdev, backup);
+
+	return status;
+}
+
+static u8 rtw8703b_iqk_rx_path(struct rtw_dev *rtwdev,
+			       const struct rtw8723x_iqk_backup_regs *backup)
+{
+	u8 status;
+	u32 tx_x, tx_y;
+
+	rtw_dbg(rtwdev, RTW_DBG_RFK, "[IQK] path A RX IQK step 1!\n");
+	rtw_dbg(rtwdev, RTW_DBG_RFK, "[IQK] 0x67 @A RX IQK1 = 0x%x\n",
+		rtw_read32_mask(rtwdev, REG_PAD_CTRL1, MASKBYTE3));
+	rtw_write32(rtwdev, REG_BB_SEL_BTG, 0x99000000);
+
+	/* disable IQC mode */
+	rtw_write32_mask(rtwdev, REG_FPGA0_IQK_11N, BIT_MASK_IQK_MOD, RST_IQK);
+
+	/* IQK setting */
+	rtw_write32(rtwdev, REG_TXIQK_11N, 0x01007c00);
+	rtw_write32(rtwdev, REG_RXIQK_11N, 0x01004800);
+
+	/* path IQK setting */
+	rtw_write32(rtwdev, REG_TXIQK_TONE_A_11N, 0x18008c1c);
+	rtw_write32(rtwdev, REG_RXIQK_TONE_A_11N, 0x38008c1c);
+	rtw_write32(rtwdev, REG_TX_IQK_TONE_B, 0x38008c1c);
+	rtw_write32(rtwdev, REG_RX_IQK_TONE_B, 0x38008c1c);
+	rtw_write32(rtwdev, REG_TXIQK_PI_A_11N, 0x8216000f);
+	rtw_write32(rtwdev, REG_RXIQK_PI_A_11N, 0x28110000);
+	rtw_write32(rtwdev, REG_TXIQK_PI_B, 0x28110000);
+	rtw_write32(rtwdev, REG_RXIQK_PI_B, 0x28110000);
+
+	/* LOK setting */
+	rtw_write32(rtwdev, REG_IQK_AGC_RSP_11N, 0x0046a911);
+
+	/* RX IQK mode */
+	rtw_write_rf(rtwdev, RF_PATH_A, RF_LUTWE, 0x80000, 0x1);
+	rtw_write_rf(rtwdev, RF_PATH_A, 0x30, RFREG_MASK, 0x30000);
+	rtw_write_rf(rtwdev, RF_PATH_A, 0x31, RFREG_MASK, 0x00007);
+	rtw_write_rf(rtwdev, RF_PATH_A, 0x32, RFREG_MASK, 0x57db7);
+
+	rtw8703b_iqk_one_shot(rtwdev, false);
+	/* leave IQK mode */
+	rtw_write32_mask(rtwdev, REG_FPGA0_IQK_11N, 0xffffff00, 0x000000);
+	status = rtw8703b_iqk_check_tx_failed(rtwdev);
+
+	if (!status)
+		goto restore;
+
+	/* second round */
+	tx_x = rtw_read32_mask(rtwdev, REG_IQK_RES_TX, BIT_MASK_RES_TX);
+	tx_y = rtw_read32_mask(rtwdev, REG_IQK_RES_TY, BIT_MASK_RES_TY);
+
+	rtw_write32(rtwdev, REG_TXIQK_11N, BIT_SET_TXIQK_11N(tx_x, tx_y));
+	rtw_dbg(rtwdev, RTW_DBG_RFK, "[IQK] 0xe40 = 0x%x u4tmp = 0x%x\n",
+		rtw_read32(rtwdev, REG_TXIQK_11N),
+		BIT_SET_TXIQK_11N(tx_x, tx_y));
+
+	rtw_dbg(rtwdev, RTW_DBG_RFK, "[IQK] path A RX IQK step 2!\n");
+	rtw_dbg(rtwdev, RTW_DBG_RFK, "[IQK] 0x67 @A RX IQK 2 = 0x%x\n",
+		rtw_read32_mask(rtwdev, REG_PAD_CTRL1, MASKBYTE3));
+
+	/* IQK setting */
+	rtw_write32(rtwdev, REG_RXIQK_11N, 0x01004800);
+	rtw_write32(rtwdev, REG_TXIQK_TONE_A_11N, 0x38008c1c);
+	rtw_write32(rtwdev, REG_RXIQK_TONE_A_11N, 0x18008c1c);
+	rtw_write32(rtwdev, REG_TX_IQK_TONE_B, 0x38008c1c);
+	rtw_write32(rtwdev, REG_RX_IQK_TONE_B, 0x38008c1c);
+	rtw_write32(rtwdev, REG_TXIQK_PI_A_11N, 0x82110000);
+	rtw_write32(rtwdev, REG_RXIQK_PI_A_11N, 0x28160c1f);
+	rtw_write32(rtwdev, REG_TXIQK_PI_B, 0x82110000);
+	rtw_write32(rtwdev, REG_RXIQK_PI_B, 0x28110000);
+
+	/* LO calibration setting */
+	rtw_write32(rtwdev, REG_IQK_AGC_RSP_11N, 0x0046a8d1);
+
+	/* leave IQK mode */
+	rtw_write32_mask(rtwdev, REG_FPGA0_IQK_11N, 0xffffff00, 0x000000);
+	/* modify RX IQK mode table */
+	rtw_write_rf(rtwdev, RF_PATH_A, RF_LUTWE, 0x80000, 0x1);
+	/* RF_RCK_OS, RF_TXPA_G1, RF_TXPA_G2 */
+	rtw_write_rf(rtwdev, RF_PATH_A, 0x30, RFREG_MASK, 0x30000);
+	rtw_write_rf(rtwdev, RF_PATH_A, 0x31, RFREG_MASK, 0x00007);
+	rtw_write_rf(rtwdev, RF_PATH_A, 0x32, RFREG_MASK, 0xf7d77);
+
+	/* PA, PAD setting */
+	rtw_write_rf(rtwdev, RF_PATH_A, RF_LUTDBG, 0x800, 0x1);
+	rtw_write_rf(rtwdev, RF_PATH_A, 0x55, 0x7f, 0x5);
+
+	rtw8703b_iqk_one_shot(rtwdev, false);
+	status |= rtw8703b_iqk_check_rx_failed(rtwdev);
+
+restore:
+	rtw8703b_iqk_txrx_path_post(rtwdev, backup);
+
+	return status;
+}
+
+static
+void rtw8703b_iqk_one_round(struct rtw_dev *rtwdev, s32 result[][IQK_NR], u8 t,
+			    const struct rtw8723x_iqk_backup_regs *backup)
+{
+	/* 8723cs has all code for path B calibration behind "#if 0",
+	 * I'm trying to keep this code flexible though. Might be
+	 * worth trying if enabling path B IQK improves things. */
+	u32 i;
+	u8 a_ok;
+
+	rtw_dbg(rtwdev, RTW_DBG_RFK,
+		"[IQK] IQ Calibration for 1T1R_S0/S1 for %d times\n", t);
+
+	rtw8723x_iqk_path_adda_on(rtwdev, ADDA_ON_VAL);
+	rtw8703b_iqk_config_mac(rtwdev, backup);
+	rtw_write32_mask(rtwdev, REG_CCK_ANT_SEL_11N, 0x0f000000, 0xf);
+	rtw_write32(rtwdev, REG_BB_RX_PATH_11N, 0x03a05600);
+	rtw_write32(rtwdev, REG_TRMUX_11N, 0x000800e4);
+	rtw_write32(rtwdev, REG_BB_PWR_SAV1_11N, 0x25204000);
+
+	for (i = 0; i < PATH_IQK_RETRY; i++) {
+		a_ok = rtw8703b_iqk_tx_path(rtwdev, backup);
+		if (a_ok == IQK_TX_OK) {
+			rtw_dbg(rtwdev, RTW_DBG_RFK,
+				"[IQK] path A TX IQK success!\n");
+			result[t][IQK_S1_TX_X] =
+				rtw_read32_mask(rtwdev, REG_IQK_RES_TX,
+						BIT_MASK_RES_TX);
+			result[t][IQK_S1_TX_Y] =
+				rtw_read32_mask(rtwdev, REG_IQK_RES_TY,
+						BIT_MASK_RES_TY);
+			break;
+		}
+
+		rtw_dbg(rtwdev, RTW_DBG_RFK, "[IQK] path A TX IQK fail!\n");
+		result[t][IQK_S1_TX_X] = 0x100;
+		result[t][IQK_S1_TX_Y] = 0x0;
+	}
+
+	for (i = 0; i < PATH_IQK_RETRY; i++) {
+		a_ok = rtw8703b_iqk_rx_path(rtwdev, backup);
+		if (a_ok == (IQK_TX_OK | IQK_RX_OK)) {
+			rtw_dbg(rtwdev, RTW_DBG_RFK,
+				"[IQK] path A RX IQK success!\n");
+			result[t][IQK_S1_RX_X] =
+				rtw_read32_mask(rtwdev, REG_IQK_RES_RX,
+						BIT_MASK_RES_RX);
+			result[t][IQK_S1_RX_Y] =
+				rtw_read32_mask(rtwdev, REG_IQK_RES_RY,
+						BIT_MASK_RES_RY);
+			break;
+		}
+
+		rtw_dbg(rtwdev, RTW_DBG_RFK, "[IQK] path A RX IQK fail!\n");
+		result[t][IQK_S1_RX_X] = 0x100;
+		result[t][IQK_S1_RX_Y] = 0x0;
+	}
+
+	if (a_ok == 0x0)
+		rtw_dbg(rtwdev, RTW_DBG_RFK, "[IQK] path A IQK fail!\n");
+
+	rtw_write32_mask(rtwdev, REG_FPGA0_IQK_11N, BIT_MASK_IQK_MOD, RST_IQK);
+	mdelay(1);
+}
+
+static
+void rtw8703b_iqk_fill_a_matrix(struct rtw_dev *rtwdev, const s32 result[])
+{
+	s32 oldval_1;
+	s32 x, y;
+	s32 tx1_a, tx1_a_ext;
+	s32 tx1_c, tx1_c_ext;
+	u32 tmp_rx_iqi = 0x40000100 & GENMASK(31, 16);
+
+	if (result[IQK_S1_TX_X] == 0)
+		return;
+
+	oldval_1 = rtw_read32_mask(rtwdev, REG_OFDM_0_XA_TX_IQ_IMBALANCE,
+				   BIT_MASK_TXIQ_ELM_D);
+
+	x = iqkxy_to_s32(result[IQK_S1_TX_X]);
+	tx1_a = iqk_mult(x, oldval_1, &tx1_a_ext);
+	rtw_write32_mask(rtwdev, REG_OFDM_0_XA_TX_IQ_IMBALANCE,
+			 BIT_MASK_TXIQ_ELM_A, tx1_a);
+	rtw_write32_mask(rtwdev, REG_OFDM_0_ECCA_THRESHOLD,
+			 BIT_MASK_OFDM0_EXT_A, tx1_a_ext);
+
+	y = iqkxy_to_s32(result[IQK_S1_TX_Y]);
+	tx1_c = iqk_mult(y, oldval_1, &tx1_c_ext);
+	rtw_write32_mask(rtwdev, REG_TXIQK_MATRIXA_LSB2_11N, MASKH4BITS,
+			 BIT_SET_TXIQ_ELM_C1(tx1_c));
+	rtw_write32_mask(rtwdev, REG_OFDM_0_XA_TX_IQ_IMBALANCE,
+			 BIT_MASK_TXIQ_ELM_C, BIT_SET_TXIQ_ELM_C2(tx1_c));
+	rtw_write32_mask(rtwdev, REG_OFDM_0_ECCA_THRESHOLD,
+			 BIT_MASK_OFDM0_EXT_C, tx1_c_ext);
+
+	rtw_dbg(rtwdev, RTW_DBG_RFK,
+		"[IQK] X = 0x%x, TX1_A = 0x%x, oldval_1 0x%x\n",
+		x, tx1_a, oldval_1);
+	rtw_dbg(rtwdev, RTW_DBG_RFK,
+		"[IQK] Y = 0x%x, TX1_C = 0x%x\n", y, tx1_c);
+
+	if (result[IQK_S1_RX_X] == 0)
+		return;
+
+	tmp_rx_iqi |= FIELD_PREP(BIT_MASK_RXIQ_S1_X, result[IQK_S1_RX_X]);
+	tmp_rx_iqi |= FIELD_PREP(BIT_MASK_RXIQ_S1_Y1, result[IQK_S1_RX_X]);
+	rtw_write32(rtwdev, REG_A_RXIQI, tmp_rx_iqi);
+	rtw_write32_mask(rtwdev, REG_RXIQK_MATRIX_LSB_11N, BIT_MASK_RXIQ_S1_Y2,
+			 BIT_SET_RXIQ_S1_Y2(result[IQK_S1_RX_Y]));
 }
 
 static void rtw8703b_phy_calibration(struct rtw_dev *rtwdev)
 {
-	rtw_dbg(rtwdev, RTW_DBG_DEBUGFS,
-		"%s: not implemented yet\n", __func__);
-	/* stub: ensure it's clear no calibration happened */
+	/* For some reason path A is called S1 and B S0 in shared
+	 * rtw88 calibration data. */
 	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
-	dm_info->iqk.done = false;
+	s32 result[IQK_ROUND_SIZE][IQK_NR];
+	struct rtw8723x_iqk_backup_regs backup;
+	u8 i, j;
+	u8 final_candidate = IQK_ROUND_INVALID;
+	bool good;
+
+	rtw_dbg(rtwdev, RTW_DBG_RFK, "[IQK] Start!\n");
+
+	memset(result, 0, sizeof(result));
+
+	// vendor driver checks if BT IQK is going on
+
+	rtw8723x_iqk_backup_path_ctrl(rtwdev, &backup);
+	rtw8723x_iqk_backup_lte_path_gnt(rtwdev, &backup);
+	rtw8723x_iqk_backup_regs(rtwdev, &backup);
+
+	for (i = IQK_ROUND_0; i <= IQK_ROUND_2; i++) {
+		rtw8723x_iqk_config_path_ctrl(rtwdev);
+		rtw8723x_iqk_config_lte_path_gnt(rtwdev, IQK_LTE_WRITE_VAL);
+
+		rtw8703b_iqk_one_round(rtwdev, result, i, &backup);
+
+		rtw_dbg(rtwdev, RTW_DBG_RFK,
+			"[IQK] back to BB mode, load original values!\n");
+		if (i > IQK_ROUND_0)
+			rtw8723x_iqk_restore_regs(rtwdev, &backup);
+		rtw8723x_iqk_restore_lte_path_gnt(rtwdev, &backup);
+		rtw8723x_iqk_restore_path_ctrl(rtwdev, &backup);
+
+		for (j = IQK_ROUND_0; j < i; j++) {
+			good = rtw8723x_iqk_similarity_cmp(rtwdev, result, j, i);
+
+			if (good) {
+				final_candidate = j;
+				rtw_dbg(rtwdev, RTW_DBG_RFK,
+					"[IQK] cmp %d:%d final_candidate is %x\n",
+					j, i, final_candidate);
+				goto iqk_done;
+			}
+		}
+	}
+
+	if (final_candidate == IQK_ROUND_INVALID) {
+		s32 reg_tmp = 0;
+
+		for (i = 0; i < IQK_NR; i++)
+			reg_tmp += result[IQK_ROUND_HYBRID][i];
+
+		if (reg_tmp != 0) {
+			final_candidate = IQK_ROUND_HYBRID;
+		} else {
+			WARN(1, "IQK failed\n");
+			goto out;
+		}
+	}
+
+iqk_done:
+	/* only path A is calibrated in rtl8703b */
+	rtw8703b_iqk_fill_a_matrix(rtwdev, result[final_candidate]);
+
+	dm_info->iqk.result.s1_x = result[final_candidate][IQK_S1_TX_X];
+	dm_info->iqk.result.s1_y = result[final_candidate][IQK_S1_TX_Y];
+	dm_info->iqk.result.s0_x = result[final_candidate][IQK_S0_TX_X];
+	dm_info->iqk.result.s0_y = result[final_candidate][IQK_S0_TX_Y];
+	dm_info->iqk.done = true;
+
+out:
+	rtw_write32(rtwdev, REG_BB_SEL_BTG, backup.bb_sel_btg);
+
+	rtw_dbg(rtwdev, RTW_DBG_RFK, "[IQK] final_candidate is %x\n",
+		final_candidate);
+
+	for (i = IQK_ROUND_0; i < IQK_ROUND_SIZE; i++)
+		rtw_dbg(rtwdev, RTW_DBG_RFK,
+			"[IQK] Result %u: rege94_s1=%x rege9c_s1=%x "
+			"regea4_s1=%x regeac_s1=%x rege94_s0=%x "
+			"rege9c_s0=%x regea4_s0=%x regeac_s0=%x %s\n",
+			i,
+			result[i][0], result[i][1], result[i][2], result[i][3],
+			result[i][4], result[i][5], result[i][6], result[i][7],
+			final_candidate == i ? "(final candidate)" : "");
+
+	rtw_dbg(rtwdev, RTW_DBG_RFK,
+		"[IQK] 0xc80 = 0x%x 0xc94 = 0x%x 0xc14 = 0x%x 0xca0 = 0x%x\n",
+		rtw_read32(rtwdev, REG_OFDM_0_XA_TX_IQ_IMBALANCE),
+		rtw_read32(rtwdev, REG_TXIQK_MATRIXA_LSB2_11N),
+		rtw_read32(rtwdev, REG_A_RXIQI),
+		rtw_read32(rtwdev, REG_RXIQK_MATRIX_LSB_11N));
+	rtw_dbg(rtwdev, RTW_DBG_RFK,
+		"[IQK] 0xcd0 = 0x%x 0xcd4 = 0x%x 0xcd8 = 0x%x\n",
+		rtw_read32(rtwdev, REG_TXIQ_AB_S0),
+		rtw_read32(rtwdev, REG_TXIQ_CD_S0),
+		rtw_read32(rtwdev, REG_RXIQ_AB_S0));
+
+	rtw_dbg(rtwdev, RTW_DBG_RFK, "[IQK] Finished.\n");
+}
+
+static void rtw8703b_set_iqk_matrix_by_result(struct rtw_dev *rtwdev,
+					      u32 ofdm_swing, u8 rf_path)
+{
+	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
+	s32 ele_A, ele_D, ele_C;
+	s32 ele_A_ext, ele_C_ext, ele_D_ext;
+	s32 iqk_result_x;
+	s32 iqk_result_y;
+	s32 value32;
+
+	switch (rf_path) {
+	default:
+	case RF_PATH_A:
+		iqk_result_x = dm_info->iqk.result.s1_x;
+		iqk_result_y = dm_info->iqk.result.s1_y;
+		break;
+	case RF_PATH_B:
+		iqk_result_x = dm_info->iqk.result.s0_x;
+		iqk_result_y = dm_info->iqk.result.s0_y;
+		break;
+	}
+
+	/* new element D */
+	ele_D = OFDM_SWING_D(ofdm_swing);
+	iqk_mult(iqk_result_x, ele_D, &ele_D_ext);
+	/* new element A */
+	iqk_result_x = iqkxy_to_s32(iqk_result_x);
+	ele_A = iqk_mult(iqk_result_x, ele_D, &ele_A_ext);
+	/* new element C */
+	iqk_result_y = iqkxy_to_s32(iqk_result_y);
+	ele_C = iqk_mult(iqk_result_y, ele_D, &ele_C_ext);
+
+	switch (rf_path) {
+	case RF_PATH_A:
+	default:
+		/* write new elements A, C, D, and element B is always 0 */
+		value32 = BIT_SET_TXIQ_ELM_ACD(ele_A, ele_C, ele_D);
+		rtw_write32(rtwdev, REG_OFDM_0_XA_TX_IQ_IMBALANCE, value32);
+		value32 = BIT_SET_TXIQ_ELM_C1(ele_C);
+		rtw_write32_mask(rtwdev, REG_TXIQK_MATRIXA_LSB2_11N, MASKH4BITS,
+				 value32);
+		value32 = rtw_read32(rtwdev, REG_OFDM_0_ECCA_THRESHOLD);
+		value32 &= ~BIT_MASK_OFDM0_EXTS;
+		value32 |= BIT_SET_OFDM0_EXTS(ele_A_ext, ele_C_ext, ele_D_ext);
+		rtw_write32(rtwdev, REG_OFDM_0_ECCA_THRESHOLD, value32);
+		break;
+
+	case RF_PATH_B:
+		/* write new elements A, C, D, and element B is always 0 */
+		value32 = BIT_SET_TXIQ_ELM_ACD(ele_A, ele_C, ele_D);
+		rtw_write32(rtwdev, REG_OFDM_0_XB_TX_IQ_IMBALANCE, value32);
+		value32 = BIT_SET_TXIQ_ELM_C1(ele_C);
+		rtw_write32_mask(rtwdev, REG_TXIQK_MATRIXB_LSB2_11N, MASKH4BITS,
+				 value32);
+		value32 = rtw_read32(rtwdev, REG_OFDM_0_ECCA_THRESHOLD);
+		value32 &= ~BIT_MASK_OFDM0_EXTS_B;
+		value32 |= BIT_SET_OFDM0_EXTS_B(ele_A_ext, ele_C_ext, ele_D_ext);
+		rtw_write32(rtwdev, REG_OFDM_0_ECCA_THRESHOLD, value32);
+		break;
+	}
 }
 
 static void rtw8703b_set_iqk_matrix(struct rtw_dev *rtwdev, s8 ofdm_index,
@@ -1000,8 +1521,7 @@ static void rtw8703b_set_iqk_matrix(struct rtw_dev *rtwdev, s8 ofdm_index,
 	ofdm_swing = rtw8703b_ofdm_swing_table[ofdm_index];
 
 	if (dm_info->iqk.done) {
-		/* TODO, not implemented yet */
-		// rtw8703b_set_iqk_matrix_by_result(rtwdev, ofdm_swing, rf_path);
+		rtw8703b_set_iqk_matrix_by_result(rtwdev, ofdm_swing, rf_path);
 		return;
 	}
 
@@ -1036,8 +1556,8 @@ static void rtw8703b_pwrtrack_set_ofdm_pwr(struct rtw_dev *rtwdev, s8 swing_idx,
 
 	dm_info->txagc_remnant_ofdm = txagc_idx;
 
+	/* Only path A is calibrated for rtl8703b */
 	rtw8703b_set_iqk_matrix(rtwdev, swing_idx, RF_PATH_A);
-	rtw8703b_set_iqk_matrix(rtwdev, swing_idx, RF_PATH_B);
 }
 
 static void rtw8703b_pwrtrack_set_cck_pwr(struct rtw_dev *rtwdev, s8 swing_idx,
@@ -1383,7 +1903,7 @@ static struct rtw_chip_ops rtw8703b_ops = {
 	.set_antenna		= NULL,
 	.cfg_ldo25		= rtw8723x_cfg_ldo25,
 	.efuse_grant		= rtw8723x_efuse_grant,
-	.false_alarm_statistics	= rtw8703b_false_alarm_statistics,
+	.false_alarm_statistics	= rtw8723x_false_alarm_statistics,
 	.phy_calibration	= rtw8703b_phy_calibration,
 	.dpk_track		= NULL,
 	/* 8723d uses REG_CSRATIO to set dm_info.cck_pd_default, which

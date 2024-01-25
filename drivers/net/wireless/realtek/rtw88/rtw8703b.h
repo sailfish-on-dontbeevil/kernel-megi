@@ -59,6 +59,8 @@ extern const struct rtw_chip_info rtw8703b_hw_spec;
 #define BIT_MASK_OFDM0_EXTS_A (BIT(31) | BIT(29) | BIT(28))
 #define BIT_MASK_OFDM0_EXTS_B (BIT(27) | BIT(25) | BIT(24))
 #define REG_OFDM0_TX_PSD_NOISE 0x0ce4  /* TX pseudo noise weighting */
+/* is != 0 when IQK is done */
+#define REG_IQK_RDY 0x0e90
 
 /* RF registers */
 #define RF_RCK1 0x1E
