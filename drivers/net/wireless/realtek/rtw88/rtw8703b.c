@@ -369,6 +369,32 @@ static const struct rtw_pwr_seq_cmd trans_act_to_cardemu_8703b[] = {
 	TRANS_SEQ_END,
 };
 
+static const struct rtw_pwr_seq_cmd trans_act_to_reset_mcu_8703b[] = {
+	{REG_SYS_FUNC_EN + 1,
+	 RTW_PWR_CUT_ALL_MSK,
+	 RTW_PWR_INTF_SDIO_MSK,
+	 RTW_PWR_ADDR_MAC,
+	 RTW_PWR_CMD_WRITE, BIT_FEN_CPUEN, 0},
+	/* reset MCU ready */
+	{REG_MCUFW_CTRL,
+	 RTW_PWR_CUT_ALL_MSK,
+	 RTW_PWR_INTF_SDIO_MSK,
+	 RTW_PWR_ADDR_MAC,
+	 RTW_PWR_CMD_WRITE, 0xff, 0},
+	/* reset MCU IO wrapper */
+	{REG_RSV_CTRL + 1,
+	 RTW_PWR_CUT_ALL_MSK,
+	 RTW_PWR_INTF_SDIO_MSK,
+	 RTW_PWR_ADDR_MAC,
+	 RTW_PWR_CMD_WRITE, BIT(0), 0},
+	{REG_RSV_CTRL + 1,
+	 RTW_PWR_CUT_ALL_MSK,
+	 RTW_PWR_INTF_SDIO_MSK,
+	 RTW_PWR_ADDR_MAC,
+	 RTW_PWR_CMD_WRITE, BIT(0), 1},
+	TRANS_SEQ_END,
+};
+
 static const struct rtw_pwr_seq_cmd trans_act_to_lps_8703b[] = {
 	{0x0301,
 	 RTW_PWR_CUT_ALL_MSK,
@@ -446,6 +472,7 @@ static const struct rtw_pwr_seq_cmd *card_enable_flow_8703b[] = {
 
 static const struct rtw_pwr_seq_cmd *card_disable_flow_8703b[] = {
 	trans_act_to_lps_8703b,
+	trans_act_to_reset_mcu_8703b,
 	trans_act_to_cardemu_8703b,
 	trans_cardemu_to_carddis_8703b,
 	NULL
@@ -467,8 +494,6 @@ static const struct rtw_page_table page_table_8703b[] = {
 	{12, 2, 2, 0, 1},
 };
 
-// can't find anything similar in the vendor driver, but it's the same
-// for all the other rtw88 chipsets...
 static const struct rtw_rqpn rqpn_table_8703b[] = {
 	{RTW_DMA_MAPPING_NORMAL, RTW_DMA_MAPPING_NORMAL,
 	 RTW_DMA_MAPPING_LOW, RTW_DMA_MAPPING_LOW,
@@ -2007,8 +2032,6 @@ const struct rtw_chip_info rtw8703b_hw_spec = {
 	.iqk_threshold = 8,
 	.pwr_track_tbl = &rtw8703b_rtw_pwr_track_tbl,
 
-	/* leaving this commented because I don't want any part of the
-	   stack to assume wowlan is supported yet */
 	.wow_fw_name = "rtw88/rtw8703b_wow_fw.bin",
 	// .wowlan_stub = NULL,
 	.max_scan_ie_len = IEEE80211_MAX_DATA_LEN,
