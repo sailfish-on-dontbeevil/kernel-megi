@@ -4,12 +4,6 @@
 #ifndef __RTW8703B_H__
 #define __RTW8703B_H__
 
-// TODO: rtw8723d.h already as 13 and 14, to be shared
-#define FREQ_CH5 0xfccd
-#define FREQ_CH6 0xfc4d
-#define FREQ_CH7 0xffcd
-#define FREQ_CH8 0xff4d
-
 extern const struct rtw_chip_info rtw8703b_hw_spec;
 
 /* phy status parsing */
