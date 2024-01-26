@@ -287,13 +287,6 @@ static int rtw_mac_power_switch(struct rtw_dev *rtwdev, bool pwr_on)
 			rpwm = (rpwm ^ BIT_RPWM_TOGGLE) & BIT_RPWM_TOGGLE;
 			rtw_write8(rtwdev, rtwdev->hci.rpwm_addr, rpwm);
 		}
-	} else if (rtwdev->chip->id == RTW_CHIP_TYPE_8703B) {
-		/* Check FW still exist or not, reset if it does */
-		if (rtw_read8(rtwdev, REG_MCUFW_CTRL) & BIT_RAM_DL_SEL) {
-			rtw_write8(rtwdev, REG_MCUFW_CTRL, 0x00);
-			wlan_cpu_enable(rtwdev, false);
-			wlan_cpu_enable(rtwdev, true);
-		}
 	}
 
 	if (rtw_read8(rtwdev, REG_CR) == 0xea)
@@ -951,6 +944,12 @@ static int __rtw_download_firmware_legacy(struct rtw_dev *rtwdev,
 					  struct rtw_fw_state *fw)
 {
 	int ret = 0;
+
+	/* reset firmware if still present */
+	if (rtwdev->chip->id == RTW_CHIP_TYPE_8703B
+	    && rtw_read8(rtwdev, REG_MCUFW_CTRL) & BIT_RAM_DL_SEL) {
+		rtw_write8(rtwdev, REG_MCUFW_CTRL, 0x00);
+	}
 
 	en_download_firmware_legacy(rtwdev, true);
 	ret = download_firmware_legacy(rtwdev, fw->firmware->data, fw->firmware->size);
