@@ -555,6 +555,15 @@ static int rtw8703b_read_efuse(struct rtw_dev *rtwdev, u8 *log_map)
 		for (int i = 0; i < RTW8703B_TXPWR_IDX_TABLE_LEN; i++)
 			pwr[i] = rtw8703b_txpwr_idx_table[i];
 
+	/* Check if EFUSE BT coex settings are valid, load defaults if
+	 * not */
+	if (rtwdev->efuse.bt_setting == 0xff) {
+		/* shared antenna */
+		rtwdev->efuse.bt_setting |= BIT(0);
+		/* RF path A */
+		rtwdev->efuse.bt_setting &= ~BIT(6);
+	}
+
 	return 0;
 }
 
