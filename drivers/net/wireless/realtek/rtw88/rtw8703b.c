@@ -172,6 +172,28 @@ static const u8 rtw8703b_cck_swing_table[][16] = {
 #define RTW_OFDM_SWING_TABLE_SIZE	ARRAY_SIZE(rtw8703b_ofdm_swing_table)
 #define RTW_CCK_SWING_TABLE_SIZE	ARRAY_SIZE(rtw8703b_cck_swing_table)
 
+static const struct rtw_pwr_seq_cmd trans_pre_enable_8703b[] = {
+	/* set up external crystal (XTAL) */
+	{REG_PAD_CTRL1 + 2,
+	 RTW_PWR_CUT_ALL_MSK,
+	 RTW_PWR_INTF_ALL_MSK,
+	 RTW_PWR_ADDR_MAC,
+	 RTW_PWR_CMD_WRITE, BIT(7), BIT(7)},
+	/* set CLK_REQ to high active */
+	{0x0069,
+	 RTW_PWR_CUT_ALL_MSK,
+	 RTW_PWR_INTF_ALL_MSK,
+	 RTW_PWR_ADDR_MAC,
+	 RTW_PWR_CMD_WRITE, BIT(5), BIT(5)},
+	/* unlock ISO/CLK/power control register */
+	{REG_RSV_CTRL,
+	 RTW_PWR_CUT_ALL_MSK,
+	 RTW_PWR_INTF_ALL_MSK,
+	 RTW_PWR_ADDR_MAC,
+	 RTW_PWR_CMD_WRITE, 0xff, 0},
+	TRANS_SEQ_END,
+};
+
 static const struct rtw_pwr_seq_cmd trans_carddis_to_cardemu_8703b[] = {
 	{0x0005,
 	 RTW_PWR_CUT_ALL_MSK,
@@ -465,6 +487,7 @@ static const struct rtw_pwr_seq_cmd trans_act_to_lps_8703b[] = {
 };
 
 static const struct rtw_pwr_seq_cmd *card_enable_flow_8703b[] = {
+	trans_pre_enable_8703b,
 	trans_carddis_to_cardemu_8703b,
 	trans_cardemu_to_act_8703b,
 	NULL
