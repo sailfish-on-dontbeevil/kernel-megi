@@ -552,25 +552,30 @@ static const u8 rtw8703b_txpwr_idx_table[] = {
 		# name "=0x%x\n", rtwdev->efuse.name)
 static int rtw8703b_read_efuse(struct rtw_dev *rtwdev, u8 *log_map)
 {
+	struct rtw_efuse *efuse = &rtwdev->efuse;
 	/* include/hal_pg.h lists the eeprom/efuse offsets, the
 	 * structure is the same as for 8723d. */
 	int ret = rtw8723x_read_efuse(rtwdev, log_map);
 	if (ret != 0)
 		return ret;
 
+#ifdef CONFIG_OF
 	/* Prefer MAC from DT, if available. On some devices like my
 	 * Pinephone that might be the only way to get a valid MAC. */
 	struct device_node *node = rtwdev->dev->of_node;
 	const u8 *addr;
 	int len;
-	if (node && (addr = of_get_property(node, "local-mac-address", &len)) && len == ETH_ALEN) {
-		ether_addr_copy(rtwdev->efuse.addr, addr);
-		rtw_dbg(rtwdev, RTW_DBG_EFUSE, "got wifi mac address from DT: %pM\n", rtwdev->efuse.addr);
+	if (node && (addr = of_get_property(node, "local-mac-address", &len))
+	    && len == ETH_ALEN) {
+		ether_addr_copy(efuse->addr, addr);
+		rtw_dbg(rtwdev, RTW_DBG_EFUSE,
+			"got wifi mac address from DT: %pM\n", efuse->addr);
 	}
+#endif /* CONFIG_OF */
 
 	/* If TX power index table in EFUSE is invalid, fall back to
 	 * built-in table. */
-	u8 *pwr = (u8*) rtwdev->efuse.txpwr_idx_table;
+	u8 *pwr = (u8*) efuse->txpwr_idx_table;
 	bool valid = false;
 	for (int i = 0; i < RTW8703B_TXPWR_IDX_TABLE_LEN; i++)
 		if (pwr[i] != 0xff) {
@@ -583,24 +588,33 @@ static int rtw8703b_read_efuse(struct rtw_dev *rtwdev, u8 *log_map)
 		rtw_dbg(rtwdev, RTW_DBG_EFUSE,
 			"Replaced invalid EFUSE TX power index table.");
 		rtw8723x_debug_txpwr_limit(rtwdev,
-					   rtwdev->efuse.txpwr_idx_table, 2);
+					   efuse->txpwr_idx_table, 2);
 	}
 
 	/* Override invalid antenna settings. */
-	if (rtwdev->efuse.bt_setting == 0xff) {
+	if (efuse->bt_setting == 0xff) {
 		/* shared antenna */
-		rtwdev->efuse.bt_setting |= BIT(0);
+		efuse->bt_setting |= BIT(0);
 		/* RF path A */
-		rtwdev->efuse.bt_setting &= ~BIT(6);
+		efuse->bt_setting &= ~BIT(6);
 		DBG_EFUSE_FIX(bt_setting);
 	}
 
 	/* Override invalid board options: The coex code incorrectly
 	 * assumes that if bits 6 & 7 are set the board doesn't
-	 * support coex. */
-	if (rtwdev->efuse.rf_board_option == 0xff) {
-		rtwdev->efuse.rf_board_option &= GENMASK(5, 0);
+	 * support coex. Regd is also derived from rf_board_option and
+	 * should be 0 if there's no valid data. */
+	if (efuse->rf_board_option == 0xff) {
+		efuse->regd = 0;
+		efuse->rf_board_option &= GENMASK(5, 0);
 		DBG_EFUSE_FIX(rf_board_option);
+	}
+
+	/* Override invalid crystal cap setting, default comes from
+	 * vendor driver. Chip specific. */
+	if (efuse->crystal_cap == 0xff) {
+		efuse->crystal_cap = 0x20;
+		DBG_EFUSE_FIX(crystal_cap);
 	}
 
 	return 0;
