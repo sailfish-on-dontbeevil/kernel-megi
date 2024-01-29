@@ -59,4 +59,9 @@ extern const struct rtw_chip_info rtw8703b_hw_spec;
 /* RF registers */
 #define RF_RCK1 0x1E
 
+#define AGG_BURST_NUM 3
+#define AGG_BURST_SIZE 0 /* 1K */
+#define BIT_MASK_AGG_BURST_NUM (GENMASK(3, 2))
+#define BIT_MASK_AGG_BURST_SIZE (GENMASK(5, 4))
+
 #endif /* __RTW8703B_H__ */

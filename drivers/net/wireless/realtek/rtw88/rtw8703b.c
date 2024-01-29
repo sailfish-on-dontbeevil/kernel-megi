@@ -685,16 +685,29 @@ static void rtw8703b_phy_set_param(struct rtw_dev *rtwdev)
 	rtw_write32_mask(rtwdev, REG_AFE_CTRL3, BIT_MASK_XTAL,
 			 xtal_cap | (xtal_cap << 6));
 	rtw_write32_set(rtwdev, REG_FPGA0_RFMOD, BIT_CCKEN | BIT_OFDMEN);
-	/* 8723d conditionally does AFE config here, depending on
-	 * EFUSE. 8703b doesn't seem to support it. */
 
-	rtw_write8(rtwdev, REG_SLOT, WLAN_SLOT_TIME);
-	rtw_write8_clr(rtwdev, REG_FWHW_TXQ_CTRL, BIT_MASK_TXQ_INIT);
-	rtw_write16(rtwdev, REG_RETRY_LIMIT, WLAN_RL_VAL);
-	rtw_write32(rtwdev, REG_BAR_MODE_CTRL, WLAN_BAR_VAL);
-	rtw_write16(rtwdev, REG_ATIMWND, 0x2);
-	// Vendor driver doesn't enable BIT_EN_TXBCN_RPT, but defines
-	// the same meaning.
+	/* Init EDCA */
+	rtw_write16(rtwdev, REG_SPEC_SIFS, WLAN_SPEC_SIFS);
+	rtw_write16(rtwdev, REG_MAC_SPEC_SIFS, WLAN_SPEC_SIFS);
+	rtw_write16(rtwdev, REG_SIFS, WLAN_SPEC_SIFS); /* CCK */
+	rtw_write16(rtwdev, REG_SIFS + 2, WLAN_SPEC_SIFS); /* OFDM */
+	/* TXOP */
+	rtw_write32(rtwdev, REG_EDCA_VO_PARAM, 0x002FA226);
+	rtw_write32(rtwdev, REG_EDCA_VI_PARAM, 0x005EA324);
+	rtw_write32(rtwdev, REG_EDCA_BE_PARAM, 0x005EA42B);
+	rtw_write32(rtwdev, REG_EDCA_BK_PARAM, 0x0000A44F);
+
+	/* Init retry */
+	rtw_write8(rtwdev, REG_ACKTO, 0x40);
+
+	/* Set up RX aggregation. sdio.c also sets DMA mode, but not
+	 * the burst parameters. */
+	rtw_write8(rtwdev, REG_RXDMA_MODE,
+		   BIT_DMA_MODE |
+		   FIELD_PREP_CONST(BIT_MASK_AGG_BURST_NUM, AGG_BURST_NUM) |
+		   FIELD_PREP_CONST(BIT_MASK_AGG_BURST_SIZE, AGG_BURST_SIZE));
+
+	/* Init beacon parameters */
 	rtw_write8(rtwdev, REG_BCN_CTRL,
 		   BIT_DIS_TSF_UDT | BIT_EN_BCN_FUNCTION | BIT_EN_TXBCN_RPT);
 	rtw_write8(rtwdev, REG_TBTT_PROHIBIT, TBTT_PROHIBIT_SETUP_TIME);
@@ -704,16 +717,18 @@ static void rtw8703b_phy_set_param(struct rtw_dev *rtwdev)
 		   (rtw_read8(rtwdev, REG_TBTT_PROHIBIT + 2) & 0xF0)
 		   | (TBTT_PROHIBIT_HOLD_TIME_STOP_BCN >> 8));
 
-	rtw_write8(rtwdev, REG_PIFS, WLAN_PIFS_VAL);
-	//rtw_write8(rtwdev, REG_AGGR_BREAK_TIME, WLAN_AGG_BRK_TIME);
-	//rtw_write16(rtwdev, REG_NAV_PROT_LEN, WLAN_NAV_PROT_LEN);
-	rtw_write16(rtwdev, REG_MAC_SPEC_SIFS, WLAN_SPEC_SIFS);
-	rtw_write16(rtwdev, REG_SIFS, WLAN_SPEC_SIFS);
-	rtw_write16(rtwdev, REG_SIFS + 2, WLAN_SPEC_SIFS);
+	/* configure packet burst */
 	rtw_write8_set(rtwdev, REG_SINGLE_AMPDU_CTRL, BIT_EN_SINGLE_APMDU);
 	rtw_write8(rtwdev, REG_RX_PKT_LIMIT, WLAN_RX_PKT_LIMIT);
 	rtw_write8(rtwdev, REG_MAX_AGGR_NUM, WLAN_MAX_AGG_NR);
+	rtw_write8(rtwdev, REG_PIFS, WLAN_PIFS_VAL);
+	rtw_write8_clr(rtwdev, REG_FWHW_TXQ_CTRL, BIT_MASK_TXQ_INIT);
 	rtw_write8(rtwdev, REG_AMPDU_MAX_TIME, WLAN_AMPDU_MAX_TIME);
+
+	rtw_write8(rtwdev, REG_SLOT, WLAN_SLOT_TIME);
+	rtw_write16(rtwdev, REG_RETRY_LIMIT, WLAN_RL_VAL);
+	rtw_write32(rtwdev, REG_BAR_MODE_CTRL, WLAN_BAR_VAL);
+	rtw_write16(rtwdev, REG_ATIMWND, 0x2);
 
 	rtw_phy_init(rtwdev);
 
