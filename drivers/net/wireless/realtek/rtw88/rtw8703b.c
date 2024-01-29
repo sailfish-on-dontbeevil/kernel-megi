@@ -562,7 +562,7 @@ static int rtw8703b_read_efuse(struct rtw_dev *rtwdev, u8 *log_map)
 	int len;
 	if (node && (addr = of_get_property(node, "local-mac-address", &len)) && len == ETH_ALEN) {
 		ether_addr_copy(rtwdev->efuse.addr, addr);
-		rtw_dbg(rtwdev, RTW_DBG_PHY, "got wifi mac address from DT: %pM\n", rtwdev->efuse.addr);
+		rtw_dbg(rtwdev, RTW_DBG_EFUSE, "got wifi mac address from DT: %pM\n", rtwdev->efuse.addr);
 	}
 
 	/* If power index table in EFUSE is invalid, fall back to
@@ -580,12 +580,22 @@ static int rtw8703b_read_efuse(struct rtw_dev *rtwdev, u8 *log_map)
 
 	/* Check if EFUSE BT coex settings are valid, load defaults if
 	 * not */
+	rtw_dbg(rtwdev, RTW_DBG_EFUSE, "EFUSE BT setting: 0x%x",
+		rtwdev->efuse.bt_setting);
 	if (rtwdev->efuse.bt_setting == 0xff) {
 		/* shared antenna */
 		rtwdev->efuse.bt_setting |= BIT(0);
 		/* RF path A */
 		rtwdev->efuse.bt_setting &= ~BIT(6);
 	}
+
+	/* Override invalid board options: The coex code incorrectly
+	 * assumes that if bits 6 & 7 are set the board doesn't
+	 * support coex. */
+	rtw_dbg(rtwdev, RTW_DBG_EFUSE, "EFUSE RF board option: 0x%x",
+		rtwdev->efuse.rf_board_option);
+	if (rtwdev->efuse.rf_board_option == 0xff)
+		rtwdev->efuse.rf_board_option &= GENMASK(5, 0);
 
 	return 0;
 }
@@ -2114,8 +2124,8 @@ const struct rtw_chip_info rtw8703b_hw_spec = {
 	 * (by address, 0x0067), comment: "0x67[0] = 0 to disable
 	 * BT_GPS_SEL pins" That seems to fit? */
 	.btg_reg = NULL,
-	/* Whatever this is seems to be only informational? At least
-	 * its use in coex.c handles the count of 0. */
+	/* These registers are used to read (and print) from if
+	 * CONFIG_RTW88_DEBUGFS is enabled. */
 	.coex_info_hw_regs_num = 0,
 	.coex_info_hw_regs = NULL,
 };
