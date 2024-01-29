@@ -54,7 +54,8 @@ static const u8 wl_rssi_step_8703b[] = {60, 50, 44, 30};
 static const u8 bt_rssi_step_8703b[] = {30, 30, 30, 30};
 static const struct coex_5g_afh_map afh_5g_8703b[] = { {0, 0, 0} };
 
-/* wl_tx_dec_power, bt_tx_dec_power, wl_rx_gain, bt_rx_lna_constrain */
+/* Actually decreasing wifi TX power/RX gain isn't implemented in
+ * rtw8703b, but hopefully adjusting the BT side helps. */
 static const struct coex_rf_para rf_para_tx_8703b[] = {
 	{0, 0, false, 7},  /* for normal */
 	{0, 10, false, 7}, /* for WL-CPT */
@@ -556,7 +557,7 @@ static int rtw8703b_read_efuse(struct rtw_dev *rtwdev, u8 *log_map)
 		return ret;
 
 	/* Prefer MAC from DT, if available. On some devices like my
-	   Pinephone that might be the only way to get a valid MAC. */
+	 * Pinephone that might be the only way to get a valid MAC. */
 	struct device_node *node = rtwdev->dev->of_node;
 	const u8 *addr;
 	int len;
@@ -1770,10 +1771,8 @@ static void rtw8703b_coex_set_gnt_debug(struct rtw_dev *rtwdev)
 
 static void rtw8703b_coex_set_rfe_type(struct rtw_dev *rtwdev)
 {
-	struct rtw_efuse *efuse = &rtwdev->efuse;
 	struct rtw_coex *coex = &rtwdev->coex;
 	struct rtw_coex_rfe *coex_rfe = &coex->rfe;
-	bool aux = efuse->bt_setting & BIT(6);
 
 	coex_rfe->rfe_module_type = rtwdev->efuse.rfe_option;
 	coex_rfe->ant_switch_polarity = 0;
@@ -1782,12 +1781,7 @@ static void rtw8703b_coex_set_rfe_type(struct rtw_dev *rtwdev)
 	coex_rfe->ant_switch_diversity = false;
 	coex_rfe->wlg_at_btg = true;
 
-	/* TODO: 8723d sets REG_BB_SEL_BTG depending on antenna here */
-	rtw_dbg(rtwdev, RTW_DBG_COEX, "shared antenna: %s, aux: %s",
-		efuse->share_ant ? "true" : "false",
-		aux ? "true" : "false");
-
-	/* disable LTE coex in wifi side */
+	/* disable LTE coex on wifi side */
 	rtw_coex_write_indirect_reg(rtwdev, LTE_COEX_CTRL, BIT_LTE_COEX_EN, 0x0);
 	rtw_coex_write_indirect_reg(rtwdev, LTE_WL_TRX_CTRL, MASKLWORD, 0xffff);
 	rtw_coex_write_indirect_reg(rtwdev, LTE_BT_TRX_CTRL, MASKLWORD, 0xffff);
@@ -1795,14 +1789,10 @@ static void rtw8703b_coex_set_rfe_type(struct rtw_dev *rtwdev)
 
 static void rtw8703b_coex_set_wl_tx_power(struct rtw_dev *rtwdev, u8 wl_pwr)
 {
-	rtw_dbg(rtwdev, RTW_DBG_DEBUGFS,
-		"%s: not implemented yet\n", __func__);
 }
 
 static void rtw8703b_coex_set_wl_rx_gain(struct rtw_dev *rtwdev, bool low_gain)
 {
-	rtw_dbg(rtwdev, RTW_DBG_DEBUGFS,
-		"%s: not implemented yet\n", __func__);
 }
 
 static const u8 rtw8703b_pwrtrk_2gb_n[] = {
