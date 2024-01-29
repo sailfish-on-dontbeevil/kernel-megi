@@ -40,15 +40,15 @@ enum rtw8723x_iqk_result {
 
 struct rtw8723xe_efuse {
 	u8 mac_addr[ETH_ALEN];		/* 0xd0 */
-	u8 vender_id[2];
+	u8 vendor_id[2];
 	u8 device_id[2];
-	u8 sub_vender_id[2];
+	u8 sub_vendor_id[2];
 	u8 sub_device_id[2];
 };
 
 struct rtw8723xu_efuse {
 	u8 res4[48];                    /* 0xd0 */
-	u8 vender_id[2];                /* 0x100 */
+	u8 vendor_id[2];                /* 0x100 */
 	u8 product_id[2];               /* 0x102 */
 	u8 usb_option;                  /* 0x104 */
 	u8 res5[2];			/* 0x105 */
@@ -327,6 +327,9 @@ static inline s32 iqk_mult(s32 x, s32 y, s32 *ext)
 }
 
 void rtw8723x_lck(struct rtw_dev *rtwdev);
+void rtw8723x_debug_txpwr_limit(struct rtw_dev *rtwdev,
+				struct rtw_txpwr_idx *table,
+				int tx_path_count);
 int rtw8723x_read_efuse(struct rtw_dev *rtwdev, u8 *log_map);
 int rtw8723x_mac_init(struct rtw_dev *rtwdev);
 void rtw8723x_cfg_ldo25(struct rtw_dev *rtwdev, bool enable);

@@ -547,7 +547,9 @@ static const u8 rtw8703b_txpwr_idx_table[] = {
 };
 #define RTW8703B_TXPWR_IDX_TABLE_LEN ARRAY_SIZE(rtw8703b_txpwr_idx_table)
 
-
+#define DBG_EFUSE_FIX(name)					     \
+	rtw_dbg(rtwdev, RTW_DBG_EFUSE, "Fixed invalid EFUSE value: " \
+		# name "=0x%x\n", rtwdev->efuse.name)
 static int rtw8703b_read_efuse(struct rtw_dev *rtwdev, u8 *log_map)
 {
 	/* include/hal_pg.h lists the eeprom/efuse offsets, the
@@ -566,37 +568,40 @@ static int rtw8703b_read_efuse(struct rtw_dev *rtwdev, u8 *log_map)
 		rtw_dbg(rtwdev, RTW_DBG_EFUSE, "got wifi mac address from DT: %pM\n", rtwdev->efuse.addr);
 	}
 
-	/* If power index table in EFUSE is invalid, fall back to
+	/* If TX power index table in EFUSE is invalid, fall back to
 	 * built-in table. */
-	u8 *pwr = (u8*) &rtwdev->efuse.txpwr_idx_table[RF_PATH_A];
+	u8 *pwr = (u8*) rtwdev->efuse.txpwr_idx_table;
 	bool valid = false;
 	for (int i = 0; i < RTW8703B_TXPWR_IDX_TABLE_LEN; i++)
 		if (pwr[i] != 0xff) {
 			valid = true;
 			break;
 		}
-	if (!valid)
+	if (!valid) {
 		for (int i = 0; i < RTW8703B_TXPWR_IDX_TABLE_LEN; i++)
 			pwr[i] = rtw8703b_txpwr_idx_table[i];
+		rtw_dbg(rtwdev, RTW_DBG_EFUSE,
+			"Replaced invalid EFUSE TX power index table.");
+		rtw8723x_debug_txpwr_limit(rtwdev,
+					   rtwdev->efuse.txpwr_idx_table, 2);
+	}
 
-	/* Check if EFUSE BT coex settings are valid, load defaults if
-	 * not */
-	rtw_dbg(rtwdev, RTW_DBG_EFUSE, "EFUSE BT setting: 0x%x",
-		rtwdev->efuse.bt_setting);
+	/* Override invalid antenna settings. */
 	if (rtwdev->efuse.bt_setting == 0xff) {
 		/* shared antenna */
 		rtwdev->efuse.bt_setting |= BIT(0);
 		/* RF path A */
 		rtwdev->efuse.bt_setting &= ~BIT(6);
+		DBG_EFUSE_FIX(bt_setting);
 	}
 
 	/* Override invalid board options: The coex code incorrectly
 	 * assumes that if bits 6 & 7 are set the board doesn't
 	 * support coex. */
-	rtw_dbg(rtwdev, RTW_DBG_EFUSE, "EFUSE RF board option: 0x%x",
-		rtwdev->efuse.rf_board_option);
-	if (rtwdev->efuse.rf_board_option == 0xff)
+	if (rtwdev->efuse.rf_board_option == 0xff) {
 		rtwdev->efuse.rf_board_option &= GENMASK(5, 0);
+		DBG_EFUSE_FIX(rf_board_option);
+	}
 
 	return 0;
 }
