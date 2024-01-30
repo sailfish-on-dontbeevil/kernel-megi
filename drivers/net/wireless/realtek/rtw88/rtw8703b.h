@@ -25,7 +25,7 @@ extern const struct rtw_chip_info rtw8703b_hw_spec;
 #define GET_PHY_STAT_CFO_TAIL_A(phy_stat)                                   \
 	(le32_get_bits(*((__le32 *)(phy_stat) + 0x02), GENMASK(15, 8)))
 #define GET_PHY_STAT_RXEVM_A(phy_stat)                                      \
-	(le32_get_bits(*((__le32 *)(phy_stat) + 0x02), GENMASK(31, 24)))
+	(le32_get_bits(*((__le32 *)(phy_stat) + 0x03), GENMASK(15, 8)))
 #define GET_PHY_STAT_RXSNR_A(phy_stat)                                      \
 	(le32_get_bits(*((__le32 *)(phy_stat) + 0x03), GENMASK(31, 24)))
 

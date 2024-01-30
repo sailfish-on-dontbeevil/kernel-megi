@@ -1026,8 +1026,10 @@ static void query_phy_status_ofdm(struct rtw_dev *rtwdev, u8 *phy_status,
 	dm_info->rx_snr[RF_PATH_A] = pkt_stat->rx_snr[RF_PATH_A] >> 1;
 	dm_info->cfo_tail[RF_PATH_A] = (pkt_stat->cfo_tail[RF_PATH_A] * 5) >> 1;
 
+	/* (EVM value as s8 / 2) is dbm, should usually be in -33 to 0
+	 * range. rx_evm_dbm needs the absolute (positive) value. */
 	s8 rx_evm = clamp_t(s8, -pkt_stat->rx_evm[RF_PATH_A] >> 1, 0, 64);
-	rx_evm &= 0x3F;	/* 64->0: second path of 1SS rate is 64 */
+	rx_evm &= 0x3F; /* 64->0: second path of 1SS rate is 64 */
 	dm_info->rx_evm_dbm[RF_PATH_A] = rx_evm;
 }
 
