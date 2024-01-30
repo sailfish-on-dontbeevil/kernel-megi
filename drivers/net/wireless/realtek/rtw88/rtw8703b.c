@@ -651,22 +651,6 @@ static void rtw8703b_phy_set_param(struct rtw_dev *rtwdev)
 			BIT_FEN_EN_25_1 | BIT_FEN_BB_GLB_RST | BIT_FEN_BB_RSTB);
 	rtw_write8_set(rtwdev, REG_RF_CTRL,
 		       BIT_RF_EN | BIT_RF_RSTB | BIT_RF_SDM_RSTB);
-	/*
-	 * Translated from vendor driver doing this in PHY_BBConfig8703B:
-	 * phy_set_rf_reg(Adapter, RF_PATH_A, 0x1, 0xfffff, 0x780);
-	 *
-	 * Meaning of 0x0780 is unclear, 8723d uses a different value
-	 * by path in its iqk functions (but not during setup).
-	 *
-	 * Side note, the following comment in
-	 * hal/phydm/halrf/halrf_powertracking_ce.h seems related to
-	 * the PATH_S* things. The vendor driver equivalents to
-	 * PATH_S0 and PATH_S1 seem to be idx_0xc94 and idx_0xc80,
-	 * oddly.
-	 *
-	 * // { {S1: 0xc14, 0xca0} , {S0: 0xc14, 0xca0}}
-	 * u32 rx_iqc_8703b[2][2];
-	 */
 	rtw_write_rf(rtwdev, RF_PATH_A, RF_WLINT, RFREG_MASK, 0x0780);
 	rtw_write8(rtwdev, REG_AFE_CTRL1 + 1, 0x80);
 
@@ -1016,7 +1000,7 @@ static void query_phy_status_ofdm(struct rtw_dev *rtwdev, u8 *phy_status,
 
 	/* signal power reported by HW */
 	val_s8 = GET_PHY_STAT_PWDB(phy_status) >> 1;
-	pkt_stat->signal_power = (val_s8  & 0x7f) - 110;
+	pkt_stat->signal_power = (val_s8 & 0x7f) - 110;
 
 	pkt_stat->rx_evm[RF_PATH_A] = GET_PHY_STAT_RXEVM_A(phy_status);
 	pkt_stat->cfo_tail[RF_PATH_A] = GET_PHY_STAT_CFO_TAIL_A(phy_status);
@@ -1024,6 +1008,7 @@ static void query_phy_status_ofdm(struct rtw_dev *rtwdev, u8 *phy_status,
 	dm_info->curr_rx_rate = pkt_stat->rate;
 	dm_info->rssi[RF_PATH_A] = pkt_stat->rssi;
 	dm_info->rx_snr[RF_PATH_A] = pkt_stat->rx_snr[RF_PATH_A] >> 1;
+	/* convert to KHz (used only for debugfs) */
 	dm_info->cfo_tail[RF_PATH_A] = (pkt_stat->cfo_tail[RF_PATH_A] * 5) >> 1;
 
 	/* (EVM value as s8 / 2) is dbm, should usually be in -33 to 0
@@ -2037,8 +2022,6 @@ const struct rtw_chip_info rtw8703b_hw_spec = {
 	.ampdu_density = IEEE80211_HT_MPDU_DENSITY_16,
 
 	.path_div_supported = false,
-	/* Maybe switch to false for first tries, if that simplifies
-	 * things. */
 	.ht_supported = true,
 	.vht_supported = false,
 	.lps_deep_mode_supported = 0,
