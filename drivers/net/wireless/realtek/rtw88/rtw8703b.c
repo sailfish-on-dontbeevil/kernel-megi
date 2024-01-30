@@ -1629,12 +1629,12 @@ static void rtw8703b_set_iqk_matrix(struct rtw_dev *rtwdev, s8 ofdm_index,
 				 0x00);
 
 		value32 = rtw_read32(rtwdev, REG_OFDM_0_ECCA_THRESHOLD);
-		value32 &= ~BIT_MASK_OFDM0_EXTS_A;
+		value32 &= ~BIT_MASK_OFDM0_EXTS;
 		rtw_write32(rtwdev, REG_OFDM_0_ECCA_THRESHOLD, value32);
 		break;
 
 	case RF_PATH_B:
-		rtw_write32(rtwdev, REG_OFDM0_XB_TX_IQ_IMBALANCE, ofdm_swing);
+		rtw_write32(rtwdev, REG_OFDM_0_XB_TX_IQ_IMBALANCE, ofdm_swing);
 		rtw_write32_mask(rtwdev, REG_TXIQK_MATRIXB_LSB2_11N, MASKH4BITS,
 				 0x00);
 
