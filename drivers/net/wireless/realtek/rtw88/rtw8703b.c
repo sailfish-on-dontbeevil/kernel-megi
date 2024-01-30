@@ -507,9 +507,6 @@ static const struct rtw_rfe_def rtw8703b_rfe_defs[] = {
 		.txpwr_lmt_tbl	= &rtw8703b_txpwr_lmt_tbl,},
 };
 
-
-// I can't find an equivalent to gapq in the vendor driver, the rest
-// is the same there. See NORMAL_PAGE_NUM_* in include/rtl8703b_hal.h
 static const struct rtw_page_table page_table_8703b[] = {
 	{12, 2, 2, 0, 1},
 	{12, 2, 2, 0, 1},
@@ -553,8 +550,6 @@ static const u8 rtw8703b_txpwr_idx_table[] = {
 static int rtw8703b_read_efuse(struct rtw_dev *rtwdev, u8 *log_map)
 {
 	struct rtw_efuse *efuse = &rtwdev->efuse;
-	/* include/hal_pg.h lists the eeprom/efuse offsets, the
-	 * structure is the same as for 8723d. */
 	int ret = rtw8723x_read_efuse(rtwdev, log_map);
 	if (ret != 0)
 		return ret;
@@ -658,9 +653,9 @@ static void rtw8703b_phy_set_param(struct rtw_dev *rtwdev)
 
 	/* post init after header files config */
 	rtw_write32_clr(rtwdev, REG_RCR, BIT_RCR_ADF);
-	/* 0xFF if from vendor driver, 8723d uses
+	/* 0xff is from vendor driver, rtw8723d uses
 	 * BIT_HIQ_NO_LMT_EN_ROOT.  Comment in vendor driver: "Packet
-	 * in Hi Queue Tx immediately". I wonder if setting all bytes
+	 * in Hi Queue Tx immediately". I wonder if setting all bits
 	 * is really necessary. */
 	rtw_write8_set(rtwdev, REG_HIQ_NO_LMT_EN, 0xff);
 	rtw_write16_set(rtwdev, REG_AFE_CTRL_4, BIT_CK320M_AFE_EN | BIT_EN_SYN);
@@ -723,16 +718,8 @@ static void rtw8703b_phy_set_param(struct rtw_dev *rtwdev)
 		rtw_warn(rtwdev, "unexpected cck agc report type");
 	}
 
-	/* We can reuse rtw8723d_lck, equivalent is
-	 * _phy_lc_calibrate_8703b in
-	 * hal/phydm/halrf/rtl8703b/halrf_8703b.c */
 	rtw8723x_lck(rtwdev);
 
-	/* Vendor driver describes setting the register to 0x50 (with
-	 * the same mask) as "initial gain" in
-	 * _phy_iq_calibrate_8703b(). It then restores a previously
-	 * read value. I guess it won't hurt to start lower like
-	 * 8723d does. */
 	rtw_write32_mask(rtwdev, REG_OFDM0_XAAGC1, MASKBYTE0, 0x50);
 	rtw_write32_mask(rtwdev, REG_OFDM0_XAAGC1, MASKBYTE0, 0x20);
 
@@ -1051,16 +1038,11 @@ static void rtw8703b_query_rx_desc(struct rtw_dev *rtwdev, u8 *rx_desc,
 	pkt_stat->ppdu_cnt = 0;
 	pkt_stat->tsf_low = GET_RX_DESC_TSFL(rx_desc);
 
-	/* functionally the same as for 8723D (just macro instead of
-	 * literal 8) */
 	pkt_stat->drv_info_sz *= RX_DRV_INFO_SZ_UNIT_8703B;
 
-	/* c2h cmd pkt's rx/phy status is not interesting */
 	if (pkt_stat->is_c2h)
 		return;
 
-	/* hdr is also the right value for pkt_stat->hdr, but oddly
-	 * only rtw8822c.c sets that. */
 	hdr = (struct ieee80211_hdr *)(rx_desc + desc_sz + pkt_stat->shift +
 				       pkt_stat->drv_info_sz);
 
@@ -1073,14 +1055,9 @@ static void rtw8703b_query_rx_desc(struct rtw_dev *rtwdev, u8 *rx_desc,
 
 	rtw_rx_fill_rx_status(rtwdev, pkt_stat, hdr, rx_status, phy_status);
 
-	/* Old 8723cs driver checked for size < 14 or size > 8192 and
-	 * simply dropped the packet. Maybe this should go into
-	 * rtw_rx_fill_rx_status()?
-	 *
-	 * Looking at dmesg the zero length packets appear/disappear
-	 * after BT coex change (BT on/idle), so maybe they're
-	 * actually BT artifacts and implementing coex would fix the
-	 * issue. */
+	/* Rtl8723cs driver checks for size < 14 or size > 8192 and
+	 * simply drops the packet. Maybe this should go into
+	 * rtw_rx_fill_rx_status()? */
 	if (pkt_stat->pkt_len == 0) {
 		rx_status->flag |= RX_FLAG_NO_PSDU;
 		rtw_dbg(rtwdev, RTW_DBG_RX, "zero length packet");
@@ -2026,29 +2003,18 @@ const struct rtw_chip_info rtw8703b_hw_spec = {
 	.vht_supported = false,
 	.lps_deep_mode_supported = 0,
 
-	/* This is written to the *second* byte of SYS_FUNC_EN, the
-	 * value taken from rtw8723d. Bit definitions in the vendor
-	 * driver are in include/hal_com_reg.h, the value seems
-	 * plausible. */
 	.sys_func_en = 0xFD,
-	// Power sequences:
-	// include/Hal8703BPwrSeq.h hal/rtl8703b/Hal8703BPwrSeq.c
 	.pwr_on_seq = card_enable_flow_8703b,
 	.pwr_off_seq = card_disable_flow_8703b,
 	.rqpn_table = rqpn_table_8703b,
-	// The "available" addresses are exactly the same in the
-	// vendor driver, it doesn't seem to have an equivalent for
-	// the "reserved" part.
 	.prioq_addrs = &rtw8723x_spec.prioq_addrs,
 	.page_table = page_table_8703b,
-	// used only in pci.c, probably don't need
+	/* used only in pci.c, not needed for SDIO devices */
 	.intf_table = NULL,
 
 	.dig = rtw8723x_spec.dig,
 	.dig_cck = rtw8723x_spec.dig_cck,
 
-	/* this is just not set for 8723d */
-	// .rf_base_addr
 	.rf_sipi_addr = {0x840, 0x844},
 	.rf_sipi_read_addr = rtw8723x_spec.rf_sipi_addr,
 	.fix_rf_phy_num = 2,
@@ -2101,8 +2067,7 @@ const struct rtw_chip_info rtw8703b_hw_spec = {
 	.afh_5g_num = ARRAY_SIZE(afh_5g_8703b),
 	.afh_5g = afh_5g_8703b,
 	/* REG_BTG_SEL doesn't seem to have a counterpart in the
-	 * vendor driver. Mathematically it's REG_PAD_CTRL1 + 3
-	 * though.
+	 * vendor driver. Mathematically it's REG_PAD_CTRL1 + 3.
 	 *
 	 * It is used in the cardemu_to_act power sequence by though
 	 * (by address, 0x0067), comment: "0x67[0] = 0 to disable
