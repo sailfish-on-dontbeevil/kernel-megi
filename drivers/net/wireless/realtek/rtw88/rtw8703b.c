@@ -1093,9 +1093,9 @@ static
 void rtw8703b_iqk_config_mac(struct rtw_dev *rtwdev,
 			     const struct rtw8723x_iqk_backup_regs *backup)
 {
-	rtw_write8(rtwdev, rtw8723x_iqk_mac8_regs[0], 0x3F);
+	rtw_write8(rtwdev, rtw8723x_spec.iqk_mac8_regs[0], 0x3F);
 	for (int i = 1; i < RTW8723X_IQK_MAC8_REG_NUM; i++)
-		rtw_write8(rtwdev, rtw8723x_iqk_mac8_regs[i],
+		rtw_write8(rtwdev, rtw8723x_spec.iqk_mac8_regs[i],
 			   backup->mac8[i] & (~BIT(3)));
 }
 
@@ -2039,20 +2039,20 @@ const struct rtw_chip_info rtw8703b_hw_spec = {
 	// The "available" addresses are exactly the same in the
 	// vendor driver, it doesn't seem to have an equivalent for
 	// the "reserved" part.
-	.prioq_addrs = &prioq_addrs_8723x,
+	.prioq_addrs = &rtw8723x_spec.prioq_addrs,
 	.page_table = page_table_8703b,
 	// used only in pci.c, probably don't need
 	.intf_table = NULL,
 
-	.dig = rtw8723x_dig,
-	.dig_cck = rtw8723x_dig_cck,
+	.dig = rtw8723x_spec.dig,
+	.dig_cck = rtw8723x_spec.dig_cck,
 
 	/* this is just not set for 8723d */
 	// .rf_base_addr
 	.rf_sipi_addr = {0x840, 0x844},
-	.rf_sipi_read_addr = rtw8723x_rf_sipi_addr,
+	.rf_sipi_read_addr = rtw8723x_spec.rf_sipi_addr,
 	.fix_rf_phy_num = 2,
-	.ltecoex_addr = &rtw8723x_ltecoex_addr,
+	.ltecoex_addr = &rtw8723x_spec.ltecoex_addr,
 
 	.mac_tbl = &rtw8703b_mac_tbl,
 	.agc_tbl = &rtw8703b_agc_tbl,

@@ -100,8 +100,6 @@ struct rtw8723x_efuse {
 #define RTW8723X_IQK_MAC32_REG_NUM	1
 #define RTW8723X_IQK_BB_REG_NUM		9
 
-extern const u32 rtw8723x_iqk_mac8_regs[RTW8723X_IQK_MAC8_REG_NUM];
-
 struct rtw8723x_iqk_backup_regs {
 	u32 adda[RTW8723X_IQK_ADDA_REG_NUM];
 	u8 mac8[RTW8723X_IQK_MAC8_REG_NUM];
@@ -118,6 +116,23 @@ struct rtw8723x_iqk_backup_regs {
 	u8 igib;
 };
 
+struct rtw8723x_spec_tables {
+	/* registers that must be backed up before IQK and restored after */
+	u32 iqk_adda_regs[RTW8723X_IQK_ADDA_REG_NUM];
+	u32 iqk_mac8_regs[RTW8723X_IQK_MAC8_REG_NUM];
+	u32 iqk_mac32_regs[RTW8723X_IQK_MAC32_REG_NUM];
+	u32 iqk_bb_regs[RTW8723X_IQK_BB_REG_NUM];
+
+	/* chip register definitions */
+	struct rtw_ltecoex_addr ltecoex_addr;
+	struct rtw_rf_sipi_addr rf_sipi_addr[2];
+	struct rtw_hw_reg dig[2];
+	struct rtw_hw_reg dig_cck[1];
+	struct rtw_prioq_addrs prioq_addrs;
+};
+
+extern const struct rtw8723x_spec_tables rtw8723x_spec;
+
 #define PATH_IQK_RETRY	2
 #define MAX_TOLERANCE	5
 #define IQK_TX_X_ERR	0x142
@@ -129,12 +144,6 @@ struct rtw8723x_iqk_backup_regs {
 #define IQK_RX_Y_LMT	0x1a
 #define IQK_TX_OK	BIT(0)
 #define IQK_RX_OK	BIT(1)
-
-extern const struct rtw_ltecoex_addr rtw8723x_ltecoex_addr;
-extern const struct rtw_rf_sipi_addr rtw8723x_rf_sipi_addr[];
-extern const struct rtw_hw_reg rtw8723x_dig[];
-extern const struct rtw_hw_reg rtw8723x_dig_cck[];
-extern const struct rtw_prioq_addrs prioq_addrs_8723x;
 
 #define WLAN_TXQ_RPT_EN		0x1F
 
