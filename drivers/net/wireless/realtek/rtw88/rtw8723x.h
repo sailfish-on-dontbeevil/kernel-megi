@@ -9,6 +9,9 @@
 #define __RTW8723X_H__
 
 #include "main.h"
+#include "debug.h"
+#include "phy.h"
+#include "reg.h"
 
 enum rtw8723x_path {
 	PATH_S1,
@@ -346,18 +349,6 @@ void rtw8723x_iqk_backup_regs(struct rtw_dev *rtwdev,
 			      struct rtw8723x_iqk_backup_regs *backup);
 void rtw8723x_iqk_restore_regs(struct rtw_dev *rtwdev,
 			       const struct rtw8723x_iqk_backup_regs *backup);
-void rtw8723x_iqk_backup_path_ctrl(struct rtw_dev *rtwdev,
-				   struct rtw8723x_iqk_backup_regs *backup);
-void rtw8723x_iqk_config_path_ctrl(struct rtw_dev *rtwdev);
-void rtw8723x_iqk_restore_path_ctrl(struct rtw_dev *rtwdev,
-				    const struct rtw8723x_iqk_backup_regs *backup);
-void rtw8723x_iqk_backup_lte_path_gnt(struct rtw_dev *rtwdev,
-				      struct rtw8723x_iqk_backup_regs *backup);
-void rtw8723x_iqk_config_lte_path_gnt(struct rtw_dev *rtwdev,
-				      u32 write_data);
-void rtw8723x_iqk_restore_lte_path_gnt(struct rtw_dev *rtwdev,
-				       const struct rtw8723x_iqk_backup_regs *bak);
-void rtw8723x_iqk_path_adda_on(struct rtw_dev *rtwdev, u32 value);
 bool rtw8723x_iqk_similarity_cmp(struct rtw_dev *rtwdev, s32 result[][IQK_NR],
 				 u8 c1, u8 c2);
 u8 rtw8723x_pwrtrack_get_limit_ofdm(struct rtw_dev *rtwdev);
@@ -367,5 +358,69 @@ void rtw8723x_coex_cfg_init(struct rtw_dev *rtwdev);
 void rtw8723x_fill_txdesc_checksum(struct rtw_dev *rtwdev,
 				   struct rtw_tx_pkt_info *pkt_info,
 				   u8 *txdesc);
+
+/* IQK helper functions, defined as inline so they can be shared
+ * without needing an EXPORT_SYMBOL each. */
+inline void
+rtw8723x_iqk_backup_path_ctrl(struct rtw_dev *rtwdev,
+			      struct rtw8723x_iqk_backup_regs *backup)
+{
+	backup->btg_sel = rtw_read8(rtwdev, REG_BTG_SEL);
+	rtw_dbg(rtwdev, RTW_DBG_RFK, "[IQK] original 0x67 = 0x%x\n",
+		backup->btg_sel);
+}
+
+inline void rtw8723x_iqk_config_path_ctrl(struct rtw_dev *rtwdev)
+{
+	rtw_write32_mask(rtwdev, REG_PAD_CTRL1, BIT_BT_BTG_SEL, 0x1);
+	rtw_dbg(rtwdev, RTW_DBG_RFK, "[IQK] set 0x67 = 0x%x\n",
+		rtw_read32_mask(rtwdev, REG_PAD_CTRL1, MASKBYTE3));
+}
+
+inline void
+rtw8723x_iqk_restore_path_ctrl(struct rtw_dev *rtwdev,
+			       const struct rtw8723x_iqk_backup_regs *backup)
+{
+	rtw_write8(rtwdev, REG_BTG_SEL, backup->btg_sel);
+	rtw_dbg(rtwdev, RTW_DBG_RFK, "[IQK] restore 0x67 = 0x%x\n",
+		rtw_read32_mask(rtwdev, REG_PAD_CTRL1, MASKBYTE3));
+}
+
+inline void
+rtw8723x_iqk_backup_lte_path_gnt(struct rtw_dev *rtwdev,
+				 struct rtw8723x_iqk_backup_regs *backup)
+{
+	backup->lte_path = rtw_read32(rtwdev, REG_LTECOEX_PATH_CONTROL);
+	rtw_write32(rtwdev, REG_LTECOEX_CTRL, 0x800f0038);
+	mdelay(1);
+	backup->lte_gnt = rtw_read32(rtwdev, REG_LTECOEX_READ_DATA);
+	rtw_dbg(rtwdev, RTW_DBG_RFK, "[IQK] OriginalGNT = 0x%x\n",
+		backup->lte_gnt);
+}
+
+inline void rtw8723x_iqk_config_lte_path_gnt(struct rtw_dev *rtwdev,
+					     u32 write_data)
+{
+	rtw_write32(rtwdev, REG_LTECOEX_WRITE_DATA, write_data);
+	rtw_write32(rtwdev, REG_LTECOEX_CTRL, 0xc0020038);
+	rtw_write32_mask(rtwdev, REG_LTECOEX_PATH_CONTROL,
+			 BIT_LTE_MUX_CTRL_PATH, 0x1);
+}
+
+inline void
+rtw8723x_iqk_restore_lte_path_gnt(struct rtw_dev *rtwdev,
+				  const struct rtw8723x_iqk_backup_regs *bak)
+{
+	rtw_write32(rtwdev, REG_LTECOEX_WRITE_DATA, bak->lte_gnt);
+	rtw_write32(rtwdev, REG_LTECOEX_CTRL, 0xc00f0038);
+	rtw_write32(rtwdev, REG_LTECOEX_PATH_CONTROL, bak->lte_path);
+}
+
+/* set all ADDA registers to the given value */
+inline void rtw8723x_iqk_path_adda_on(struct rtw_dev *rtwdev, u32 value)
+{
+	for (int i = 0; i < RTW8723X_IQK_ADDA_REG_NUM; i++)
+		rtw_write32(rtwdev, rtw8723x_spec.iqk_adda_regs[i], value);
+}
 
 #endif /* __RTW8723X_H__ */
