@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
+/* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
 /* Copyright Fiona Klute <fiona.klute@gmx.de> */
 
 #ifndef __RTW8703B_H__
@@ -37,7 +37,8 @@ extern const struct rtw_chip_info rtw8703b_hw_spec;
  *
  * Purpose of other parts of this register is unknown, 8723cs driver
  * code indicates some other chips use certain bits for antenna
- * diversity. */
+ * diversity.
+ */
 #define REG_BB_AMP 0x0950
 #define BIT_MASK_RX_LNA (BIT(11))
 

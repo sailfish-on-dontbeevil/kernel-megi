@@ -4,7 +4,6 @@
 #include "main.h"
 #include "phy.h"
 
-// Data array_mp_8703b_phy_reg_pg in hal/phydm/rtl8703b/halhwimg8703b_bb.c
 static const struct rtw_phy_pg_cfg_pair rtw8703b_bb_pg[] = {
 	{ 0, 0, 0, 0x00000e08, 0x0000ff00, 0x00003200, },
 	{ 0, 0, 0, 0x0000086c, 0xffffff00, 0x32323200, },
@@ -16,11 +15,7 @@ static const struct rtw_phy_pg_cfg_pair rtw8703b_bb_pg[] = {
 
 RTW_DECL_TABLE_BB_PG(rtw8703b_bb_pg);
 
-// Converted from array_mp_8703b_txpwr_lmt in
-// hal/phydm/rtl8703b/halhwimg8703b_rf.c, and dropped the 5G parts.
-// Strings are (mostly) parsed in hal/hal_com_phycfg.c
-/*
- * Regd: FCC -> 0, ETSI -> 2, MKK -> 1
+/* Regd: FCC -> 0, ETSI -> 2, MKK -> 1
  * Band: 2.4G -> 0, 5G -> 1
  * Bandwidth (bw): 20M -> 0, 40M -> 1, 80M -> 2, 160M -> 3
  * Rate Section (rs): CCK -> 0, OFDM -> 1, HT -> 2, VHT -> 3

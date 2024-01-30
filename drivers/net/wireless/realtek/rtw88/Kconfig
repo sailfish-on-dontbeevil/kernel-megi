@@ -139,7 +139,10 @@ config RTW88_8723CS
 	help
 	  Select this option to enable support for 8723CS chipset (EXPERIMENTAL)
 
-	  802.11n SDIO wireless network adapter
+	  This module adds support for the 8723CS 802.11n SDIO
+	  wireless network adapter.
+
+	  If you choose to build a module, it'll be called rtw88_8723cs.
 
 config RTW88_8723DU
 	tristate "Realtek 8723DU USB wireless network adapter"

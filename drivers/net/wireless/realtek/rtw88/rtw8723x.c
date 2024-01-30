@@ -113,10 +113,10 @@ EXPORT_SYMBOL(rtw8723x_lck);
 
 #define DBG_EFUSE_VAL(map, name)			 \
 	rtw_dbg(rtwdev, RTW_DBG_EFUSE, # name "=0x%x\n", \
-		map->name)
+		(map)->name)
 #define DBG_EFUSE_2BYTE(map, name)			   \
 	rtw_dbg(rtwdev, RTW_DBG_EFUSE, # name "=0x%x%x\n", \
-		map->name[0], map->name[1])
+		(map)->name[0], (map)->name[1])
 
 static void rtw8723xe_efuse_debug(struct rtw_dev *rtwdev,
 				  struct rtw8723x_efuse *map)
@@ -230,7 +230,7 @@ static void efuse_debug_dump(struct rtw_dev *rtwdev,
 
 	rtw_dbg(rtwdev, RTW_DBG_EFUSE, "EFUSE raw logical map:\n");
 	print_hex_dump(KERN_DEBUG, "", DUMP_PREFIX_OFFSET, 16, 1,
-		       (u8*) map, sizeof(struct rtw8723x_efuse), false);
+		       (u8 *)map, sizeof(struct rtw8723x_efuse), false);
 	rtw_dbg(rtwdev, RTW_DBG_EFUSE, "Parsed rtw8723x EFUSE data:\n");
 	DBG_EFUSE_VAL(map, rtl_id);
 	DBG_EFUSE_VAL(map, afe);
@@ -265,7 +265,7 @@ static void efuse_debug_dump(struct rtw_dev *rtwdev,
 		break;
 	default:
 		/* unsupported now */
-		;
+		break;
 	}
 }
 
@@ -293,7 +293,7 @@ int rtw8723x_read_efuse(struct rtw_dev *rtwdev, u8 *log_map)
 	struct rtw8723x_efuse *map;
 	int i;
 
-	map = (struct rtw8723x_efuse *) log_map;
+	map = (struct rtw8723x_efuse *)log_map;
 	efuse_debug_dump(rtwdev, map);
 
 	efuse->rfe_option = 0;
@@ -325,7 +325,7 @@ int rtw8723x_read_efuse(struct rtw_dev *rtwdev, u8 *log_map)
 		break;
 	default:
 		/* unsupported now */
-		return -ENOTSUPP;
+		return -EOPNOTSUPP;
 	}
 
 	return 0;

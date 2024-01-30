@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
+/* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
 /* Copyright 2024 Fiona Klute
  *
  * Based on code originally in rtw8723d.[ch],
@@ -360,7 +360,8 @@ void rtw8723x_fill_txdesc_checksum(struct rtw_dev *rtwdev,
 				   u8 *txdesc);
 
 /* IQK helper functions, defined as inline so they can be shared
- * without needing an EXPORT_SYMBOL each. */
+ * without needing an EXPORT_SYMBOL each.
+ */
 inline void
 rtw8723x_iqk_backup_path_ctrl(struct rtw_dev *rtwdev,
 			      struct rtw8723x_iqk_backup_regs *backup)

@@ -122,7 +122,6 @@ static void rtw8723d_phy_set_param(struct rtw_dev *rtwdev)
 	val32 = rtw_read32(rtwdev, REG_TBTT_PROHIBIT);
 	val32 &= ~BIT_MASK_TBTT_MASK;
 	val32 |= WLAN_TBTT_TIME_STOP_BCN;
-	// 8 bit write from val32? I wonder if that's a bug
 	rtw_write8(rtwdev, REG_TBTT_PROHIBIT, val32);
 	rtw_write8(rtwdev, REG_PIFS, WLAN_PIFS_VAL);
 	rtw_write8(rtwdev, REG_AGGR_BREAK_TIME, WLAN_AGG_BRK_TIME);

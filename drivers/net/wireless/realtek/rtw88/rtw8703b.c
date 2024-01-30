@@ -46,16 +46,17 @@
 		0, \
 		RTW_PWR_CMD_END, 0, 0}
 
-
 /* rssi in percentage % (dbm = % - 100) */
 /* These are used to select simple signal quality levels, might need
- * tweaking. Same for rf_para tables below. */
+ * tweaking. Same for rf_para tables below.
+ */
 static const u8 wl_rssi_step_8703b[] = {60, 50, 44, 30};
 static const u8 bt_rssi_step_8703b[] = {30, 30, 30, 30};
 static const struct coex_5g_afh_map afh_5g_8703b[] = { {0, 0, 0} };
 
 /* Actually decreasing wifi TX power/RX gain isn't implemented in
- * rtw8703b, but hopefully adjusting the BT side helps. */
+ * rtw8703b, but hopefully adjusting the BT side helps.
+ */
 static const struct coex_rf_para rf_para_tx_8703b[] = {
 	{0, 0, false, 7},  /* for normal */
 	{0, 10, false, 7}, /* for WL-CPT */
@@ -533,8 +534,7 @@ static const struct rtw_rqpn rqpn_table_8703b[] = {
 	 RTW_DMA_MAPPING_EXTRA, RTW_DMA_MAPPING_HIGH},
 };
 
-/*
- * Default power index table for RTL8703B, used if EFUSE does not
+/* Default power index table for RTL8703B, used if EFUSE does not
  * contain valid data. Replaces EFUSE data from offset 0x10 (start of
  * txpwr_idx_table).
  */
@@ -542,6 +542,7 @@ static const u8 rtw8703b_txpwr_idx_table[] = {
 	0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x2D,
 	0x2D, 0x2D, 0x2D, 0x2D, 0x2D, 0x02
 };
+
 #define RTW8703B_TXPWR_IDX_TABLE_LEN ARRAY_SIZE(rtw8703b_txpwr_idx_table)
 
 #define DBG_EFUSE_FIX(name)					     \
@@ -551,15 +552,18 @@ static int rtw8703b_read_efuse(struct rtw_dev *rtwdev, u8 *log_map)
 {
 	struct rtw_efuse *efuse = &rtwdev->efuse;
 	int ret = rtw8723x_read_efuse(rtwdev, log_map);
+
 	if (ret != 0)
 		return ret;
 
 #ifdef CONFIG_OF
 	/* Prefer MAC from DT, if available. On some devices like my
-	 * Pinephone that might be the only way to get a valid MAC. */
+	 * Pinephone that might be the only way to get a valid MAC.
+	 */
 	struct device_node *node = rtwdev->dev->of_node;
 	const u8 *addr;
 	int len;
+
 	if (node && (addr = of_get_property(node, "local-mac-address", &len))
 	    && len == ETH_ALEN) {
 		ether_addr_copy(efuse->addr, addr);
@@ -569,9 +573,11 @@ static int rtw8703b_read_efuse(struct rtw_dev *rtwdev, u8 *log_map)
 #endif /* CONFIG_OF */
 
 	/* If TX power index table in EFUSE is invalid, fall back to
-	 * built-in table. */
-	u8 *pwr = (u8*) efuse->txpwr_idx_table;
+	 * built-in table.
+	 */
+	u8 *pwr = (u8 *)efuse->txpwr_idx_table;
 	bool valid = false;
+
 	for (int i = 0; i < RTW8703B_TXPWR_IDX_TABLE_LEN; i++)
 		if (pwr[i] != 0xff) {
 			valid = true;
@@ -598,7 +604,8 @@ static int rtw8703b_read_efuse(struct rtw_dev *rtwdev, u8 *log_map)
 	/* Override invalid board options: The coex code incorrectly
 	 * assumes that if bits 6 & 7 are set the board doesn't
 	 * support coex. Regd is also derived from rf_board_option and
-	 * should be 0 if there's no valid data. */
+	 * should be 0 if there's no valid data.
+	 */
 	if (efuse->rf_board_option == 0xff) {
 		efuse->regd = 0;
 		efuse->rf_board_option &= GENMASK(5, 0);
@@ -606,7 +613,8 @@ static int rtw8703b_read_efuse(struct rtw_dev *rtwdev, u8 *log_map)
 	}
 
 	/* Override invalid crystal cap setting, default comes from
-	 * vendor driver. Chip specific. */
+	 * vendor driver. Chip specific.
+	 */
 	if (efuse->crystal_cap == 0xff) {
 		efuse->crystal_cap = 0x20;
 		DBG_EFUSE_FIX(crystal_cap);
@@ -624,7 +632,8 @@ static void rtw8703b_pwrtrack_init(struct rtw_dev *rtwdev)
 	 * halrf_powertracking_ce.c, functions are called
 	 * get_swing_index and get_cck_swing_index. There the current
 	 * fixed values are only the defaults in case no match is
-	 * found. */
+	 * found.
+	 */
 	dm_info->default_ofdm_index = 30;
 	dm_info->default_cck_index = 20;
 
@@ -641,6 +650,8 @@ static void rtw8703b_pwrtrack_init(struct rtw_dev *rtwdev)
 
 static void rtw8703b_phy_set_param(struct rtw_dev *rtwdev)
 {
+	u8 xtal_cap = rtwdev->efuse.crystal_cap & 0x3F;
+
 	/* power on BB/RF domain */
 	rtw_write16_set(rtwdev, REG_SYS_FUNC_EN,
 			BIT_FEN_EN_25_1 | BIT_FEN_BB_GLB_RST | BIT_FEN_BB_RSTB);
@@ -651,16 +662,15 @@ static void rtw8703b_phy_set_param(struct rtw_dev *rtwdev)
 
 	rtw_phy_load_tables(rtwdev);
 
-	/* post init after header files config */
 	rtw_write32_clr(rtwdev, REG_RCR, BIT_RCR_ADF);
 	/* 0xff is from vendor driver, rtw8723d uses
 	 * BIT_HIQ_NO_LMT_EN_ROOT.  Comment in vendor driver: "Packet
 	 * in Hi Queue Tx immediately". I wonder if setting all bits
-	 * is really necessary. */
+	 * is really necessary.
+	 */
 	rtw_write8_set(rtwdev, REG_HIQ_NO_LMT_EN, 0xff);
 	rtw_write16_set(rtwdev, REG_AFE_CTRL_4, BIT_CK320M_AFE_EN | BIT_EN_SYN);
 
-	u8 xtal_cap = rtwdev->efuse.crystal_cap & 0x3F;
 	rtw_write32_mask(rtwdev, REG_AFE_CTRL3, BIT_MASK_XTAL,
 			 xtal_cap | (xtal_cap << 6));
 	rtw_write32_set(rtwdev, REG_FPGA0_RFMOD, BIT_CCKEN | BIT_OFDMEN);
@@ -680,7 +690,8 @@ static void rtw8703b_phy_set_param(struct rtw_dev *rtwdev)
 	rtw_write8(rtwdev, REG_ACKTO, 0x40);
 
 	/* Set up RX aggregation. sdio.c also sets DMA mode, but not
-	 * the burst parameters. */
+	 * the burst parameters.
+	 */
 	rtw_write8(rtwdev, REG_RXDMA_MODE,
 		   BIT_DMA_MODE |
 		   FIELD_PREP_CONST(BIT_MASK_AGG_BURST_NUM, AGG_BURST_NUM) |
@@ -711,9 +722,9 @@ static void rtw8703b_phy_set_param(struct rtw_dev *rtwdev)
 
 	rtw_phy_init(rtwdev);
 
-	if (rtw_read32_mask(rtwdev, REG_BB_AMP, BIT_MASK_RX_LNA) != 0)
+	if (rtw_read32_mask(rtwdev, REG_BB_AMP, BIT_MASK_RX_LNA) != 0) {
 		rtwdev->dm_info.rx_cck_agc_report_type = 1;
-	else {
+	} else {
 		rtwdev->dm_info.rx_cck_agc_report_type = 0;
 		rtw_warn(rtwdev, "unexpected cck agc report type");
 	}
@@ -759,7 +770,8 @@ static void rtw8703b_cfg_notch(struct rtw_dev *rtwdev, u8 channel, bool notch)
 	}
 
 	switch (channel) {
-	case 5:	/* fallthrough */
+	case 5:
+		fallthrough;
 	case 13:
 		rtw_write32_mask(rtwdev, REG_OFDM0_RXDSP, BIT_MASK_RXDSP, 0xb);
 		rtw_write32_mask(rtwdev, REG_OFDM0_RXDSP, BIT_EN_RXDSP, 0x1);
@@ -820,19 +832,19 @@ static void rtw8703b_spur_cal(struct rtw_dev *rtwdev, u8 channel)
 	bool notch;
 	u32 freq;
 
-	if (channel == 5)
+	if (channel == 5) {
 		freq = FREQ_CH5;
-	else if (channel == 6)
+	} else if (channel == 6) {
 		freq = FREQ_CH6;
-	else if (channel == 7)
+	} else if (channel == 7) {
 		freq = FREQ_CH7;
-	else if (channel == 8)
+	} else if (channel == 8) {
 		freq = FREQ_CH8;
-	else if (channel == 13)
+	} else if (channel == 13) {
 		freq = FREQ_CH13;
-	else if (channel == 14)
+	} else if (channel == 14) {
 		freq = FREQ_CH14;
-	else {
+	} else {
 		rtw8703b_cfg_notch(rtwdev, channel, false);
 		return;
 	}
@@ -915,9 +927,11 @@ static void rtw8703b_set_channel_bb(struct rtw_dev *rtwdev, u8 channel, u8 bw,
 		rtw_write32(rtwdev, REG_OFDM0_A_TX_AFE, 0x51F60000);
 		rtw_write32_mask(rtwdev, REG_CCK0_SYS, BIT_CCK_SIDE_BAND,
 				 (primary_ch_idx == RTW_SC_20_UPPER ? 1 : 0));
-		rtw_write32_mask(rtwdev, REG_OFDM_FA_RSTD_11N, 0xC00, primary_ch_idx == RTW_SC_20_UPPER ? 2 : 1);
+		rtw_write32_mask(rtwdev, REG_OFDM_FA_RSTD_11N, 0xC00,
+				 primary_ch_idx == RTW_SC_20_UPPER ? 2 : 1);
 
-		rtw_write32_mask(rtwdev, REG_BB_PWR_SAV5_11N, GENMASK(27, 26), primary_ch_idx == RTW_SC_20_UPPER ? 1 : 2);
+		rtw_write32_mask(rtwdev, REG_BB_PWR_SAV5_11N, GENMASK(27, 26),
+				 primary_ch_idx == RTW_SC_20_UPPER ? 1 : 2);
 		break;
 	default:
 		break;
@@ -933,7 +947,8 @@ static void rtw8703b_set_channel(struct rtw_dev *rtwdev, u8 channel,
 }
 
 /* Not all indices are valid, based on available data. None of the
- * known valid values are positive, so use 0x7f as "invalid". */
+ * known valid values are positive, so use 0x7f as "invalid".
+ */
 #define LNA_IDX_INVALID 0x7f
 static const s8 lna_gain_table[16] = {
 	-2, LNA_IDX_INVALID, LNA_IDX_INVALID, LNA_IDX_INVALID,
@@ -945,6 +960,7 @@ static const s8 lna_gain_table[16] = {
 static s8 get_cck_rx_pwr(struct rtw_dev *rtwdev, u8 lna_idx, u8 vga_idx)
 {
 	s8 lna_gain = 0;
+
 	if (lna_idx < ARRAY_SIZE(lna_gain_table))
 		lna_gain = lna_gain_table[lna_idx];
 
@@ -961,12 +977,14 @@ static void query_phy_status_cck(struct rtw_dev *rtwdev, u8 *phy_status,
 {
 	u8 vga_idx = GET_PHY_STAT_VGA(phy_status);
 	u8 lna_idx;
+	s8 rx_power;
+
 	if (rtwdev->dm_info.rx_cck_agc_report_type == 1)
 		lna_idx = FIELD_PREP(BIT_LNA_H_MASK, GET_PHY_STAT_LNA_H(phy_status))
 			| FIELD_PREP(BIT_LNA_L_MASK, GET_PHY_STAT_LNA_L(phy_status));
 	else
 		lna_idx = FIELD_PREP(BIT_LNA_L_MASK, GET_PHY_STAT_LNA_L(phy_status));
-	s8 rx_power = get_cck_rx_pwr(rtwdev, lna_idx, vga_idx);
+	rx_power = get_cck_rx_pwr(rtwdev, lna_idx, vga_idx);
 
 	pkt_stat->rx_power[RF_PATH_A] = rx_power;
 	pkt_stat->rssi = rtw_phy_rf_power_2_rssi(pkt_stat->rx_power, 1);
@@ -999,10 +1017,11 @@ static void query_phy_status_ofdm(struct rtw_dev *rtwdev, u8 *phy_status,
 	dm_info->cfo_tail[RF_PATH_A] = (pkt_stat->cfo_tail[RF_PATH_A] * 5) >> 1;
 
 	/* (EVM value as s8 / 2) is dbm, should usually be in -33 to 0
-	 * range. rx_evm_dbm needs the absolute (positive) value. */
-	s8 rx_evm = clamp_t(s8, -pkt_stat->rx_evm[RF_PATH_A] >> 1, 0, 64);
-	rx_evm &= 0x3F; /* 64->0: second path of 1SS rate is 64 */
-	dm_info->rx_evm_dbm[RF_PATH_A] = rx_evm;
+	 * range. rx_evm_dbm needs the absolute (positive) value.
+	 */
+	val_s8 = clamp_t(s8, -pkt_stat->rx_evm[RF_PATH_A] >> 1, 0, 64);
+	val_s8 &= 0x3F; /* 64->0: second path of 1SS rate is 64 */
+	dm_info->rx_evm_dbm[RF_PATH_A] = val_s8;
 }
 
 static void query_phy_status(struct rtw_dev *rtwdev, u8 *phy_status,
@@ -1057,7 +1076,8 @@ static void rtw8703b_query_rx_desc(struct rtw_dev *rtwdev, u8 *rx_desc,
 
 	/* Rtl8723cs driver checks for size < 14 or size > 8192 and
 	 * simply drops the packet. Maybe this should go into
-	 * rtw_rx_fill_rx_status()? */
+	 * rtw_rx_fill_rx_status()?
+	 */
 	if (pkt_stat->pkt_len == 0) {
 		rx_status->flag |= RX_FLAG_NO_PSDU;
 		rtw_dbg(rtwdev, RTW_DBG_RX, "zero length packet");
@@ -1091,7 +1111,8 @@ static void rtw8703b_iqk_one_shot(struct rtw_dev *rtwdev, bool tx)
 	rtw_write32(rtwdev, REG_IQK_AGC_PTS_11N, 0xf8000000);
 
 	/* This is very similar to check_hw_ready, but the exact
-	 * "done" value isn't known, just != 0 */
+	 * "done" value isn't known, just != 0
+	 */
 	mdelay(IQK_DELAY_TIME_8703B);
 	for (int wait = 0; wait < 20; wait++) {
 		mdelay(IQK_DELAY_STEP);
@@ -1310,9 +1331,6 @@ static
 void rtw8703b_iqk_one_round(struct rtw_dev *rtwdev, s32 result[][IQK_NR], u8 t,
 			    const struct rtw8723x_iqk_backup_regs *backup)
 {
-	/* 8723cs has all code for path B calibration behind "#if 0",
-	 * I'm trying to keep this code flexible though. Might be
-	 * worth trying if enabling path B IQK improves things. */
 	u32 i;
 	u8 a_ok;
 
@@ -1421,7 +1439,8 @@ void rtw8703b_iqk_fill_a_matrix(struct rtw_dev *rtwdev, const s32 result[])
 static void rtw8703b_phy_calibration(struct rtw_dev *rtwdev)
 {
 	/* For some reason path A is called S1 and B S0 in shared
-	 * rtw88 calibration data. */
+	 * rtw88 calibration data.
+	 */
 	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
 	s32 result[IQK_ROUND_SIZE][IQK_NR];
 	struct rtw8723x_iqk_backup_regs backup;
@@ -1432,8 +1451,6 @@ static void rtw8703b_phy_calibration(struct rtw_dev *rtwdev)
 	rtw_dbg(rtwdev, RTW_DBG_RFK, "[IQK] Start!\n");
 
 	memset(result, 0, sizeof(result));
-
-	// vendor driver checks if BT IQK is going on
 
 	rtw8723x_iqk_backup_path_ctrl(rtwdev, &backup);
 	rtw8723x_iqk_backup_lte_path_gnt(rtwdev, &backup);
@@ -1497,9 +1514,7 @@ out:
 
 	for (i = IQK_ROUND_0; i < IQK_ROUND_SIZE; i++)
 		rtw_dbg(rtwdev, RTW_DBG_RFK,
-			"[IQK] Result %u: rege94_s1=%x rege9c_s1=%x "
-			"regea4_s1=%x regeac_s1=%x rege94_s0=%x "
-			"rege9c_s0=%x regea4_s0=%x regeac_s0=%x %s\n",
+			"[IQK] Result %u: rege94_s1=%x rege9c_s1=%x regea4_s1=%x regeac_s1=%x rege94_s0=%x rege9c_s0=%x regea4_s0=%x regeac_s0=%x %s\n",
 			i,
 			result[i][0], result[i][1], result[i][2], result[i][3],
 			result[i][4], result[i][5], result[i][6], result[i][7],
@@ -1856,8 +1871,7 @@ static const struct rtw_pwr_track_tbl rtw8703b_rtw_pwr_track_tbl = {
 	.pwrtrk_xtal_p = rtw8703b_pwrtrk_xtal_p,
 };
 
-/* Shared-Antenna Coex Table
- * BT is table0, WL is table1 */
+/* Shared-Antenna Coex Table */
 static const struct coex_table_para table_sant_8703b[] = {
 	{0xffffffff, 0xffffffff}, /* case-0 */
 	{0x55555555, 0x55555555},
@@ -1947,7 +1961,8 @@ static struct rtw_chip_ops rtw8703b_ops = {
 	 * is used in its cck_pd_set function. According to comments
 	 * in the vendor driver code it doesn't exist in this chip
 	 * generation, only 0xa0a ("ODM_CCK_PD_THRESH", which is only
-	 * *written* to). */
+	 * *written* to).
+	 */
 	.cck_pd_set		= NULL,
 	.pwr_track		= rtw8703b_pwr_track,
 	.config_bfee		= NULL,
@@ -2031,12 +2046,14 @@ const struct rtw_chip_info rtw8703b_hw_spec = {
 	.iqk_threshold = 8,
 	.pwr_track_tbl = &rtw8703b_rtw_pwr_track_tbl,
 
+	/* WOWLAN firmware exists, but not implemented yet */
 	.wow_fw_name = "rtw88/rtw8703b_wow_fw.bin",
-	// .wowlan_stub = NULL,
+	.wowlan_stub = NULL,
 	.max_scan_ie_len = IEEE80211_MAX_DATA_LEN,
 
 	/* Vendor driver has a time-based format, converted from
-	 * 20180330 */
+	 * 20180330
+	 */
 	.coex_para_ver = 0x0133ed6a,
 	.bt_desired_ver = 0x1c,
 	.scbd_support = true,
@@ -2050,7 +2067,8 @@ const struct rtw_chip_info rtw8703b_hw_spec = {
 	.bt_rssi_step = bt_rssi_step_8703b,
 	.wl_rssi_step = wl_rssi_step_8703b,
 	/* sant -> shared antenna, nsant -> non-shared antenna
-	 * Not sure if 8703b versions with non-shard antenna even exist. */
+	 * Not sure if 8703b versions with non-shard antenna even exist.
+	 */
 	.table_sant_num = ARRAY_SIZE(table_sant_8703b),
 	.table_sant = table_sant_8703b,
 	.table_nsant_num = 0,
@@ -2071,10 +2089,12 @@ const struct rtw_chip_info rtw8703b_hw_spec = {
 	 *
 	 * It is used in the cardemu_to_act power sequence by though
 	 * (by address, 0x0067), comment: "0x67[0] = 0 to disable
-	 * BT_GPS_SEL pins" That seems to fit? */
+	 * BT_GPS_SEL pins" That seems to fit.
+	 */
 	.btg_reg = NULL,
 	/* These registers are used to read (and print) from if
-	 * CONFIG_RTW88_DEBUGFS is enabled. */
+	 * CONFIG_RTW88_DEBUGFS is enabled.
+	 */
 	.coex_info_hw_regs_num = 0,
 	.coex_info_hw_regs = NULL,
 };
