@@ -448,22 +448,19 @@ EXPORT_SYMBOL(rtw8723x_false_alarm_statistics);
 
 /* IQK (IQ calibration) */
 
-const u32 rtw8723x_iqk_adda_regs[] = {
+static const u32 rtw8723x_iqk_adda_regs[] = {
 	0x85c, 0xe6c, 0xe70, 0xe74, 0xe78, 0xe7c, 0xe80, 0xe84,
 	0xe88, 0xe8c, 0xed0, 0xed4, 0xed8, 0xedc, 0xee0, 0xeec
 };
-EXPORT_SYMBOL(rtw8723x_iqk_adda_regs);
 
 const u32 rtw8723x_iqk_mac8_regs[] = {0x522, 0x550, 0x551};
 EXPORT_SYMBOL(rtw8723x_iqk_mac8_regs);
 
-const u32 rtw8723x_iqk_mac32_regs[] = {0x40};
-EXPORT_SYMBOL(rtw8723x_iqk_mac32_regs);
+static const u32 rtw8723x_iqk_mac32_regs[] = {0x40};
 
-const u32 rtw8723x_iqk_bb_regs[] = {
+static const u32 rtw8723x_iqk_bb_regs[] = {
 	0xc04, 0xc08, 0x874, 0xb68, 0xb6c, 0x870, 0x860, 0x864, 0xa04
 };
-EXPORT_SYMBOL(rtw8723x_iqk_bb_regs);
 
 void rtw8723x_iqk_backup_regs(struct rtw_dev *rtwdev,
 			      struct rtw8723x_iqk_backup_regs *backup)

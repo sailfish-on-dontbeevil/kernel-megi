@@ -948,7 +948,7 @@ static void rtw8703b_set_channel(struct rtw_dev *rtwdev, u8 channel,
 /* Not all indices are valid, based on available data. None of the
  * known valid values are positive, so use 0x7f as "invalid". */
 #define LNA_IDX_INVALID 0x7f
-static s8 lna_gain_table[16] = {
+static const s8 lna_gain_table[16] = {
 	-2, LNA_IDX_INVALID, LNA_IDX_INVALID, LNA_IDX_INVALID,
 	-6, LNA_IDX_INVALID, LNA_IDX_INVALID, -19,
 	-32, LNA_IDX_INVALID, -36, -42,

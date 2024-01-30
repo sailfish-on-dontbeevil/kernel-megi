@@ -100,10 +100,7 @@ struct rtw8723x_efuse {
 #define RTW8723X_IQK_MAC32_REG_NUM	1
 #define RTW8723X_IQK_BB_REG_NUM		9
 
-extern const u32 rtw8723x_iqk_adda_regs[RTW8723X_IQK_ADDA_REG_NUM];
 extern const u32 rtw8723x_iqk_mac8_regs[RTW8723X_IQK_MAC8_REG_NUM];
-extern const u32 rtw8723x_iqk_mac32_regs[RTW8723X_IQK_MAC32_REG_NUM];
-extern const u32 rtw8723x_iqk_bb_regs[RTW8723X_IQK_BB_REG_NUM];
 
 struct rtw8723x_iqk_backup_regs {
 	u32 adda[RTW8723X_IQK_ADDA_REG_NUM];
