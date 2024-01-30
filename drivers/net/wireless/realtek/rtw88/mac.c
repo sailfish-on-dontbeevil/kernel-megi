@@ -9,8 +9,6 @@
 #include "debug.h"
 #include "sdio.h"
 
-static void wlan_cpu_enable(struct rtw_dev *rtwdev, bool enable);
-
 void rtw_set_channel_mac(struct rtw_dev *rtwdev, u8 channel, u8 bw,
 			 u8 primary_ch_idx)
 {
