@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /* Copyright Fiona Klute <fiona.klute@gmx.de> */
 
-#include <linux/device.h>
-#include <linux/of.h>
-#include <linux/module.h>
-#include <net/mac80211.h>
+#include <linux/of_net.h>
 #include "main.h"
 #include "coex.h"
 #include "debug.h"
@@ -557,17 +554,14 @@ static int rtw8703b_read_efuse(struct rtw_dev *rtwdev, u8 *log_map)
 		return ret;
 
 #ifdef CONFIG_OF
-	/* Prefer MAC from DT, if available. On some devices like my
+	/* Prefer MAC from DT, if available. On some devices like the
 	 * Pinephone that might be the only way to get a valid MAC.
 	 */
 	struct device_node *node = rtwdev->dev->of_node;
-	const u8 *addr;
-	int len;
 
 	if (node) {
-		addr = of_get_property(node, "local-mac-address", &len);
-		if (addr && len == ETH_ALEN) {
-			ether_addr_copy(efuse->addr, addr);
+		ret = of_get_mac_address(node, efuse->addr);
+		if (ret == 0) {
 			rtw_dbg(rtwdev, RTW_DBG_EFUSE,
 				"got wifi mac address from DT: %pM\n",
 				efuse->addr);
