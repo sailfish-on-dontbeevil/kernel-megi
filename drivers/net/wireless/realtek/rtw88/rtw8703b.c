@@ -2104,6 +2104,7 @@ const struct rtw_chip_info rtw8703b_hw_spec = {
 EXPORT_SYMBOL(rtw8703b_hw_spec);
 
 MODULE_FIRMWARE("rtw88/rtw8703b_fw.bin");
+MODULE_FIRMWARE("rtw88/rtw8703b_wow_fw.bin");
 
 MODULE_AUTHOR("Fiona Klute <fiona.klute@gmx.de>");
 MODULE_DESCRIPTION("Realtek 802.11n wireless 8703b driver");
