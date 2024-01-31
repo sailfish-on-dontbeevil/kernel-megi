@@ -564,11 +564,14 @@ static int rtw8703b_read_efuse(struct rtw_dev *rtwdev, u8 *log_map)
 	const u8 *addr;
 	int len;
 
-	if (node && (addr = of_get_property(node, "local-mac-address", &len))
-	    && len == ETH_ALEN) {
-		ether_addr_copy(efuse->addr, addr);
-		rtw_dbg(rtwdev, RTW_DBG_EFUSE,
-			"got wifi mac address from DT: %pM\n", efuse->addr);
+	if (node) {
+		addr = of_get_property(node, "local-mac-address", &len);
+		if (addr && len == ETH_ALEN) {
+			ether_addr_copy(efuse->addr, addr);
+			rtw_dbg(rtwdev, RTW_DBG_EFUSE,
+				"got wifi mac address from DT: %pM\n",
+				efuse->addr);
+		}
 	}
 #endif /* CONFIG_OF */
 
