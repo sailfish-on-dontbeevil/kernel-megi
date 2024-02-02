@@ -95,9 +95,9 @@ static void rtw8723xs_efuse_debug(struct rtw_dev *rtwdev,
 	rtw_dbg(rtwdev, RTW_DBG_EFUSE, "mac_addr=%pM\n", map->s.mac_addr);
 }
 
-void rtw8723x_debug_txpwr_limit(struct rtw_dev *rtwdev,
-				struct rtw_txpwr_idx *table,
-				int tx_path_count)
+static void __rtw8723x_debug_txpwr_limit(struct rtw_dev *rtwdev,
+					 struct rtw_txpwr_idx *table,
+					 int tx_path_count)
 {
 	if (!rtw_dbg_is_enabled(rtwdev, RTW_DBG_EFUSE))
 		return;
@@ -172,7 +172,6 @@ void rtw8723x_debug_txpwr_limit(struct rtw_dev *rtwdev,
 			table[i].pwr_idx_2g.ht_3s_diff.bw40,
 			table[i].pwr_idx_2g.ht_4s_diff.bw40);
 }
-EXPORT_SYMBOL(rtw8723x_debug_txpwr_limit);
 
 static void efuse_debug_dump(struct rtw_dev *rtwdev,
 			     struct rtw8723x_efuse *map)
@@ -712,6 +711,7 @@ const struct rtw8723x_common rtw8723x_common = {
 	.pwrtrack_set_xtal = __rtw8723x_pwrtrack_set_xtal,
 	.coex_cfg_init = __rtw8723x_coex_cfg_init,
 	.fill_txdesc_checksum = __rtw8723x_fill_txdesc_checksum,
+	.debug_txpwr_limit = __rtw8723x_debug_txpwr_limit,
 };
 EXPORT_SYMBOL(rtw8723x_common);
 
