@@ -29,6 +29,9 @@ extern const struct rtw_chip_info rtw8703b_hw_spec;
 #define GET_PHY_STAT_RXSNR_A(phy_stat)                                      \
 	(le32_get_bits(*((__le32 *)(phy_stat) + 0x03), GENMASK(31, 24)))
 
+/* value mask (and maximum) for crystal cap setting */
+#define XCAP_MASK_8703B 0x3f
+
 /* Baseband registers */
 #define REG_BB_PWR_SAV5_11N 0x0818
 /* BIT(11) should be 1 for 8703B *and* 8723D, which means LNA uses 4
