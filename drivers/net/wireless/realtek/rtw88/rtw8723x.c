@@ -311,7 +311,7 @@ static int __rtw8723x_mac_init(struct rtw_dev *rtwdev)
 	return 0;
 }
 
-void __rtw8723x_cfg_ldo25(struct rtw_dev *rtwdev, bool enable)
+static void __rtw8723x_cfg_ldo25(struct rtw_dev *rtwdev, bool enable)
 {
 	u8 ldo_pwr;
 
