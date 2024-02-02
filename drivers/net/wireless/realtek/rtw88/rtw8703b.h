@@ -70,6 +70,9 @@ struct phy_status_8703b {
 #endif
 } __packed;
 
+/* value mask (and maximum) for crystal cap setting */
+#define XCAP_MASK_8703B 0x3f
+
 /* Baseband registers */
 #define REG_BB_PWR_SAV5_11N 0x0818
 /* BIT(11) should be 1 for 8703B *and* 8723D, which means LNA uses 4
