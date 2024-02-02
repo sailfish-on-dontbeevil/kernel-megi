@@ -284,6 +284,7 @@ extern const struct rtw8723x_common rtw8723x_common;
 #define REG_CTX			0x0d03
 #define BIT_MASK_CTX_TYPE	GENMASK(6, 4)
 #define REG_OFDM1_CFOTRK	0x0d2c
+#define BIT_EN_ATC		BIT(11)
 #define BIT_EN_CFOTRK		BIT(28)
 #define REG_OFDM1_CSI1		0x0d40
 #define REG_OFDM1_CSI2		0x0d44
