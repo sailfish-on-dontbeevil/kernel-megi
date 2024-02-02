@@ -91,6 +91,8 @@ struct phy_status_8703b {
 #define REG_OFDM0_TX_PSD_NOISE 0x0ce4  /* TX pseudo noise weighting */
 #define REG_IQK_RDY 0x0e90  /* is != 0 when IQK is done */
 
+#define	REG_EDCCA_DCNF 0x0e24
+
 /* RF registers */
 #define RF_RCK1 0x1E
 
