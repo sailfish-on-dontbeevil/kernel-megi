@@ -35,54 +35,7 @@ static const struct rtw_hw_reg rtw8723x_txagc[] = {
 	[DESC_RATEMCS7]	= { .addr = 0xe14, .mask = 0xff000000 },
 };
 
-const struct rtw8723x_spec_tables rtw8723x_spec = {
-	.iqk_adda_regs = {
-		0x85c, 0xe6c, 0xe70, 0xe74, 0xe78, 0xe7c, 0xe80, 0xe84,
-		0xe88, 0xe8c, 0xed0, 0xed4, 0xed8, 0xedc, 0xee0, 0xeec
-	},
-	.iqk_mac8_regs = {0x522, 0x550, 0x551},
-	.iqk_mac32_regs = {0x40},
-	.iqk_bb_regs = {
-		0xc04, 0xc08, 0x874, 0xb68, 0xb6c, 0x870, 0x860, 0x864, 0xa04
-	},
-
-	.ltecoex_addr = {
-		.ctrl = REG_LTECOEX_CTRL,
-		.wdata = REG_LTECOEX_WRITE_DATA,
-		.rdata = REG_LTECOEX_READ_DATA,
-	},
-	.rf_sipi_addr = {
-		[RF_PATH_A] = { .hssi_1 = 0x820, .lssi_read    = 0x8a0,
-				.hssi_2 = 0x824, .lssi_read_pi = 0x8b8},
-		[RF_PATH_B] = { .hssi_1 = 0x828, .lssi_read    = 0x8a4,
-				.hssi_2 = 0x82c, .lssi_read_pi = 0x8bc},
-	},
-	.dig = {
-		[0] = { .addr = 0xc50, .mask = 0x7f },
-		[1] = { .addr = 0xc50, .mask = 0x7f },
-	},
-	.dig_cck = {
-		[0] = { .addr = 0xa0c, .mask = 0x3f00 },
-	},
-	.prioq_addrs = {
-		.prio[RTW_DMA_MAPPING_EXTRA] = {
-			.rsvd = REG_RQPN_NPQ + 2, .avail = REG_RQPN_NPQ + 3,
-		},
-		.prio[RTW_DMA_MAPPING_LOW] = {
-			.rsvd = REG_RQPN + 1, .avail = REG_FIFOPAGE_CTRL_2 + 1,
-		},
-		.prio[RTW_DMA_MAPPING_NORMAL] = {
-			.rsvd = REG_RQPN_NPQ, .avail = REG_RQPN_NPQ + 1,
-		},
-		.prio[RTW_DMA_MAPPING_HIGH] = {
-			.rsvd = REG_RQPN, .avail = REG_FIFOPAGE_CTRL_2,
-		},
-		.wsize = false,
-	},
-};
-EXPORT_SYMBOL(rtw8723x_spec);
-
-void rtw8723x_lck(struct rtw_dev *rtwdev)
+static void __rtw8723x_lck(struct rtw_dev *rtwdev)
 {
 	u32 lc_cal;
 	u8 val_ctx, rf_val;
@@ -109,7 +62,6 @@ void rtw8723x_lck(struct rtw_dev *rtwdev)
 	else
 		rtw_write8(rtwdev, REG_TXPAUSE, 0x00);
 }
-EXPORT_SYMBOL(rtw8723x_lck);
 
 #define DBG_EFUSE_VAL(map, name)			 \
 	rtw_dbg(rtwdev, RTW_DBG_EFUSE, # name "=0x%x\n", \
@@ -287,7 +239,7 @@ static void rtw8723xs_efuse_parsing(struct rtw_efuse *efuse,
 	ether_addr_copy(efuse->addr, map->s.mac_addr);
 }
 
-int rtw8723x_read_efuse(struct rtw_dev *rtwdev, u8 *log_map)
+static int __rtw8723x_read_efuse(struct rtw_dev *rtwdev, u8 *log_map)
 {
 	struct rtw_efuse *efuse = &rtwdev->efuse;
 	struct rtw8723x_efuse *map;
@@ -330,7 +282,6 @@ int rtw8723x_read_efuse(struct rtw_dev *rtwdev, u8 *log_map)
 
 	return 0;
 }
-EXPORT_SYMBOL(rtw8723x_read_efuse);
 
 #define BIT_CFENDFORM		BIT(9)
 #define BIT_WMAC_TCR_ERR0	BIT(12)
@@ -342,7 +293,7 @@ EXPORT_SYMBOL(rtw8723x_read_efuse);
 #define WLAN_RX_FILTER2		0xFFFF
 #define WLAN_RCR_CFG		0x700060CE
 
-int rtw8723x_mac_init(struct rtw_dev *rtwdev)
+static int __rtw8723x_mac_init(struct rtw_dev *rtwdev)
 {
 	rtw_write8(rtwdev, REG_FWHW_TXQ_CTRL + 1, WLAN_TXQ_RPT_EN);
 	rtw_write32(rtwdev, REG_TCR, BIT_TCR_CFG);
@@ -360,9 +311,8 @@ int rtw8723x_mac_init(struct rtw_dev *rtwdev)
 
 	return 0;
 }
-EXPORT_SYMBOL(rtw8723x_mac_init);
 
-void rtw8723x_cfg_ldo25(struct rtw_dev *rtwdev, bool enable)
+void __rtw8723x_cfg_ldo25(struct rtw_dev *rtwdev, bool enable)
 {
 	u8 ldo_pwr;
 
@@ -375,7 +325,6 @@ void rtw8723x_cfg_ldo25(struct rtw_dev *rtwdev, bool enable)
 	}
 	rtw_write8(rtwdev, REG_LDO_EFUSE_CTRL + 3, ldo_pwr);
 }
-EXPORT_SYMBOL(rtw8723x_cfg_ldo25);
 
 static void
 rtw8723x_set_tx_power_index_by_rate(struct rtw_dev *rtwdev, u8 path, u8 rs)
@@ -403,7 +352,7 @@ rtw8723x_set_tx_power_index_by_rate(struct rtw_dev *rtwdev, u8 path, u8 rs)
 	}
 }
 
-void rtw8723x_set_tx_power_index(struct rtw_dev *rtwdev)
+static void __rtw8723x_set_tx_power_index(struct rtw_dev *rtwdev)
 {
 	struct rtw_hal *hal = &rtwdev->hal;
 	int rs, path;
@@ -413,9 +362,8 @@ void rtw8723x_set_tx_power_index(struct rtw_dev *rtwdev)
 			rtw8723x_set_tx_power_index_by_rate(rtwdev, path, rs);
 	}
 }
-EXPORT_SYMBOL(rtw8723x_set_tx_power_index);
 
-void rtw8723x_efuse_grant(struct rtw_dev *rtwdev, bool on)
+static void __rtw8723x_efuse_grant(struct rtw_dev *rtwdev, bool on)
 {
 	if (on) {
 		rtw_write8(rtwdev, REG_EFUSE_ACCESS, EFUSE_ACCESS_ON);
@@ -426,9 +374,8 @@ void rtw8723x_efuse_grant(struct rtw_dev *rtwdev, bool on)
 		rtw_write8(rtwdev, REG_EFUSE_ACCESS, EFUSE_ACCESS_OFF);
 	}
 }
-EXPORT_SYMBOL(rtw8723x_efuse_grant);
 
-void rtw8723x_false_alarm_statistics(struct rtw_dev *rtwdev)
+static void __rtw8723x_false_alarm_statistics(struct rtw_dev *rtwdev)
 {
 	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
 	u32 cck_fa_cnt;
@@ -491,55 +438,55 @@ void rtw8723x_false_alarm_statistics(struct rtw_dev *rtwdev)
 	rtw_write32_mask(rtwdev, REG_PAGE_F_RST_11N, BIT_MASK_F_RST_ALL, 1);
 	rtw_write32_mask(rtwdev, REG_PAGE_F_RST_11N, BIT_MASK_F_RST_ALL, 0);
 }
-EXPORT_SYMBOL(rtw8723x_false_alarm_statistics);
 
 /* IQK (IQ calibration) */
 
-void rtw8723x_iqk_backup_regs(struct rtw_dev *rtwdev,
-			      struct rtw8723x_iqk_backup_regs *backup)
+static
+void __rtw8723x_iqk_backup_regs(struct rtw_dev *rtwdev,
+				struct rtw8723x_iqk_backup_regs *backup)
 {
 	int i;
 
 	for (i = 0; i < RTW8723X_IQK_ADDA_REG_NUM; i++)
 		backup->adda[i] = rtw_read32(rtwdev,
-					     rtw8723x_spec.iqk_adda_regs[i]);
+					     rtw8723x_common.iqk_adda_regs[i]);
 
 	for (i = 0; i < RTW8723X_IQK_MAC8_REG_NUM; i++)
 		backup->mac8[i] = rtw_read8(rtwdev,
-					    rtw8723x_spec.iqk_mac8_regs[i]);
+					    rtw8723x_common.iqk_mac8_regs[i]);
 	for (i = 0; i < RTW8723X_IQK_MAC32_REG_NUM; i++)
 		backup->mac32[i] = rtw_read32(rtwdev,
-					      rtw8723x_spec.iqk_mac32_regs[i]);
+					      rtw8723x_common.iqk_mac32_regs[i]);
 
 	for (i = 0; i < RTW8723X_IQK_BB_REG_NUM; i++)
 		backup->bb[i] = rtw_read32(rtwdev,
-					   rtw8723x_spec.iqk_bb_regs[i]);
+					   rtw8723x_common.iqk_bb_regs[i]);
 
 	backup->igia = rtw_read32_mask(rtwdev, REG_OFDM0_XAAGC1, MASKBYTE0);
 	backup->igib = rtw_read32_mask(rtwdev, REG_OFDM0_XBAGC1, MASKBYTE0);
 
 	backup->bb_sel_btg = rtw_read32(rtwdev, REG_BB_SEL_BTG);
 }
-EXPORT_SYMBOL(rtw8723x_iqk_backup_regs);
 
-void rtw8723x_iqk_restore_regs(struct rtw_dev *rtwdev,
-			       const struct rtw8723x_iqk_backup_regs *backup)
+static
+void __rtw8723x_iqk_restore_regs(struct rtw_dev *rtwdev,
+				 const struct rtw8723x_iqk_backup_regs *backup)
 {
 	int i;
 
 	for (i = 0; i < RTW8723X_IQK_ADDA_REG_NUM; i++)
-		rtw_write32(rtwdev, rtw8723x_spec.iqk_adda_regs[i],
+		rtw_write32(rtwdev, rtw8723x_common.iqk_adda_regs[i],
 			    backup->adda[i]);
 
 	for (i = 0; i < RTW8723X_IQK_MAC8_REG_NUM; i++)
-		rtw_write8(rtwdev, rtw8723x_spec.iqk_mac8_regs[i],
+		rtw_write8(rtwdev, rtw8723x_common.iqk_mac8_regs[i],
 			   backup->mac8[i]);
 	for (i = 0; i < RTW8723X_IQK_MAC32_REG_NUM; i++)
-		rtw_write32(rtwdev, rtw8723x_spec.iqk_mac32_regs[i],
+		rtw_write32(rtwdev, rtw8723x_common.iqk_mac32_regs[i],
 			    backup->mac32[i]);
 
 	for (i = 0; i < RTW8723X_IQK_BB_REG_NUM; i++)
-		rtw_write32(rtwdev, rtw8723x_spec.iqk_bb_regs[i],
+		rtw_write32(rtwdev, rtw8723x_common.iqk_bb_regs[i],
 			    backup->bb[i]);
 
 	rtw_write32_mask(rtwdev, REG_OFDM0_XAAGC1, MASKBYTE0, 0x50);
@@ -551,10 +498,11 @@ void rtw8723x_iqk_restore_regs(struct rtw_dev *rtwdev,
 	rtw_write32(rtwdev, REG_TXIQK_TONE_A_11N, 0x01008c00);
 	rtw_write32(rtwdev, REG_RXIQK_TONE_A_11N, 0x01008c00);
 }
-EXPORT_SYMBOL(rtw8723x_iqk_restore_regs);
 
-bool rtw8723x_iqk_similarity_cmp(struct rtw_dev *rtwdev, s32 result[][IQK_NR],
-				 u8 c1, u8 c2)
+static
+bool __rtw8723x_iqk_similarity_cmp(struct rtw_dev *rtwdev,
+				   s32 result[][IQK_NR],
+				   u8 c1, u8 c2)
 {
 	u32 i, j, diff;
 	u32 bitmap = 0;
@@ -609,9 +557,8 @@ check_sim:
 
 	return false;
 }
-EXPORT_SYMBOL(rtw8723x_iqk_similarity_cmp);
 
-u8 rtw8723x_pwrtrack_get_limit_ofdm(struct rtw_dev *rtwdev)
+static u8 __rtw8723x_pwrtrack_get_limit_ofdm(struct rtw_dev *rtwdev)
 {
 	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
 	u8 tx_rate = dm_info->tx_rate;
@@ -643,10 +590,10 @@ u8 rtw8723x_pwrtrack_get_limit_ofdm(struct rtw_dev *rtwdev)
 
 	return limit_ofdm;
 }
-EXPORT_SYMBOL(rtw8723x_pwrtrack_get_limit_ofdm);
 
-void rtw8723x_pwrtrack_set_xtal(struct rtw_dev *rtwdev, u8 therm_path,
-				u8 delta)
+static
+void __rtw8723x_pwrtrack_set_xtal(struct rtw_dev *rtwdev, u8 therm_path,
+				  u8 delta)
 {
 	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
 	const struct rtw_pwr_track_tbl *tbl = rtwdev->chip->pwr_track_tbl;
@@ -664,11 +611,11 @@ void rtw8723x_pwrtrack_set_xtal(struct rtw_dev *rtwdev, u8 therm_path,
 	rtw_write32_mask(rtwdev, REG_AFE_CTRL3, BIT_MASK_XTAL,
 			 xtal_cap | (xtal_cap << 6));
 }
-EXPORT_SYMBOL(rtw8723x_pwrtrack_set_xtal);
 
-void rtw8723x_fill_txdesc_checksum(struct rtw_dev *rtwdev,
-				   struct rtw_tx_pkt_info *pkt_info,
-				   u8 *txdesc)
+static
+void __rtw8723x_fill_txdesc_checksum(struct rtw_dev *rtwdev,
+				     struct rtw_tx_pkt_info *pkt_info,
+				     u8 *txdesc)
 {
 	size_t words = 32 / 2; /* calculate the first 32 bytes (16 words) */
 	__le16 chksum = 0;
@@ -685,10 +632,8 @@ void rtw8723x_fill_txdesc_checksum(struct rtw_dev *rtwdev,
 	le32p_replace_bits(&tx_desc->w7, __le16_to_cpu(chksum),
 			   RTW_TX_DESC_W7_TXDESC_CHECKSUM);
 }
-EXPORT_SYMBOL(rtw8723x_fill_txdesc_checksum);
 
-/* for BT coex */
-void rtw8723x_coex_cfg_init(struct rtw_dev *rtwdev)
+static void __rtw8723x_coex_cfg_init(struct rtw_dev *rtwdev)
 {
 	/* enable TBTT nterrupt */
 	rtw_write8_set(rtwdev, REG_BCN_CTRL, BIT_EN_BCN_FUNCTION);
@@ -707,7 +652,68 @@ void rtw8723x_coex_cfg_init(struct rtw_dev *rtwdev)
 	/* enable PTA (tx/rx signal form WiFi side) */
 	rtw_write8_set(rtwdev, REG_QUEUE_CTRL, BIT_PTA_WL_TX_EN);
 }
-EXPORT_SYMBOL(rtw8723x_coex_cfg_init);
+
+const struct rtw8723x_common rtw8723x_common = {
+	.iqk_adda_regs = {
+		0x85c, 0xe6c, 0xe70, 0xe74, 0xe78, 0xe7c, 0xe80, 0xe84,
+		0xe88, 0xe8c, 0xed0, 0xed4, 0xed8, 0xedc, 0xee0, 0xeec
+	},
+	.iqk_mac8_regs = {0x522, 0x550, 0x551},
+	.iqk_mac32_regs = {0x40},
+	.iqk_bb_regs = {
+		0xc04, 0xc08, 0x874, 0xb68, 0xb6c, 0x870, 0x860, 0x864, 0xa04
+	},
+
+	.ltecoex_addr = {
+		.ctrl = REG_LTECOEX_CTRL,
+		.wdata = REG_LTECOEX_WRITE_DATA,
+		.rdata = REG_LTECOEX_READ_DATA,
+	},
+	.rf_sipi_addr = {
+		[RF_PATH_A] = { .hssi_1 = 0x820, .lssi_read    = 0x8a0,
+				.hssi_2 = 0x824, .lssi_read_pi = 0x8b8},
+		[RF_PATH_B] = { .hssi_1 = 0x828, .lssi_read    = 0x8a4,
+				.hssi_2 = 0x82c, .lssi_read_pi = 0x8bc},
+	},
+	.dig = {
+		[0] = { .addr = 0xc50, .mask = 0x7f },
+		[1] = { .addr = 0xc50, .mask = 0x7f },
+	},
+	.dig_cck = {
+		[0] = { .addr = 0xa0c, .mask = 0x3f00 },
+	},
+	.prioq_addrs = {
+		.prio[RTW_DMA_MAPPING_EXTRA] = {
+			.rsvd = REG_RQPN_NPQ + 2, .avail = REG_RQPN_NPQ + 3,
+		},
+		.prio[RTW_DMA_MAPPING_LOW] = {
+			.rsvd = REG_RQPN + 1, .avail = REG_FIFOPAGE_CTRL_2 + 1,
+		},
+		.prio[RTW_DMA_MAPPING_NORMAL] = {
+			.rsvd = REG_RQPN_NPQ, .avail = REG_RQPN_NPQ + 1,
+		},
+		.prio[RTW_DMA_MAPPING_HIGH] = {
+			.rsvd = REG_RQPN, .avail = REG_FIFOPAGE_CTRL_2,
+		},
+		.wsize = false,
+	},
+
+	.lck = __rtw8723x_lck,
+	.read_efuse = __rtw8723x_read_efuse,
+	.mac_init = __rtw8723x_mac_init,
+	.cfg_ldo25 = __rtw8723x_cfg_ldo25,
+	.set_tx_power_index = __rtw8723x_set_tx_power_index,
+	.efuse_grant = __rtw8723x_efuse_grant,
+	.false_alarm_statistics = __rtw8723x_false_alarm_statistics,
+	.iqk_backup_regs = __rtw8723x_iqk_backup_regs,
+	.iqk_restore_regs = __rtw8723x_iqk_restore_regs,
+	.iqk_similarity_cmp = __rtw8723x_iqk_similarity_cmp,
+	.pwrtrack_get_limit_ofdm = __rtw8723x_pwrtrack_get_limit_ofdm,
+	.pwrtrack_set_xtal = __rtw8723x_pwrtrack_set_xtal,
+	.coex_cfg_init = __rtw8723x_coex_cfg_init,
+	.fill_txdesc_checksum = __rtw8723x_fill_txdesc_checksum,
+};
+EXPORT_SYMBOL(rtw8723x_common);
 
 MODULE_AUTHOR("Fiona Klute <fiona.klute@gmx.de>");
 MODULE_DESCRIPTION("Common functions for Realtek 802.11n wireless 8723x drivers");

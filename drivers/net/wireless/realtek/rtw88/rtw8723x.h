@@ -119,7 +119,7 @@ struct rtw8723x_iqk_backup_regs {
 	u8 igib;
 };
 
-struct rtw8723x_spec_tables {
+struct rtw8723x_common {
 	/* registers that must be backed up before IQK and restored after */
 	u32 iqk_adda_regs[RTW8723X_IQK_ADDA_REG_NUM];
 	u32 iqk_mac8_regs[RTW8723X_IQK_MAC8_REG_NUM];
@@ -132,9 +132,31 @@ struct rtw8723x_spec_tables {
 	struct rtw_hw_reg dig[2];
 	struct rtw_hw_reg dig_cck[1];
 	struct rtw_prioq_addrs prioq_addrs;
+
+	/* common functions */
+	void (*lck)(struct rtw_dev *rtwdev);
+	int (*read_efuse)(struct rtw_dev *rtwdev, u8 *log_map);
+	int (*mac_init)(struct rtw_dev *rtwdev);
+	void (*cfg_ldo25)(struct rtw_dev *rtwdev, bool enable);
+	void (*set_tx_power_index)(struct rtw_dev *rtwdev);
+	void (*efuse_grant)(struct rtw_dev *rtwdev, bool on);
+	void (*false_alarm_statistics)(struct rtw_dev *rtwdev);
+	void (*iqk_backup_regs)(struct rtw_dev *rtwdev,
+				struct rtw8723x_iqk_backup_regs *backup);
+	void (*iqk_restore_regs)(struct rtw_dev *rtwdev,
+				 const struct rtw8723x_iqk_backup_regs *backup);
+	bool (*iqk_similarity_cmp)(struct rtw_dev *rtwdev, s32 result[][IQK_NR],
+				   u8 c1, u8 c2);
+	u8 (*pwrtrack_get_limit_ofdm)(struct rtw_dev *rtwdev);
+	void (*pwrtrack_set_xtal)(struct rtw_dev *rtwdev, u8 therm_path,
+				  u8 delta);
+	void (*coex_cfg_init)(struct rtw_dev *rtwdev);
+	void (*fill_txdesc_checksum)(struct rtw_dev *rtwdev,
+				     struct rtw_tx_pkt_info *pkt_info,
+				     u8 *txdesc);
 };
 
-extern const struct rtw8723x_spec_tables rtw8723x_spec;
+extern const struct rtw8723x_common rtw8723x_common;
 
 #define PATH_IQK_RETRY	2
 #define MAX_TOLERANCE	5
@@ -335,29 +357,90 @@ static inline s32 iqk_mult(s32 x, s32 y, s32 *ext)
 	return (t >> 8);	/* Q.16 --> Q.8 */
 }
 
-void rtw8723x_lck(struct rtw_dev *rtwdev);
 void rtw8723x_debug_txpwr_limit(struct rtw_dev *rtwdev,
 				struct rtw_txpwr_idx *table,
 				int tx_path_count);
-int rtw8723x_read_efuse(struct rtw_dev *rtwdev, u8 *log_map);
-int rtw8723x_mac_init(struct rtw_dev *rtwdev);
-void rtw8723x_cfg_ldo25(struct rtw_dev *rtwdev, bool enable);
-void rtw8723x_set_tx_power_index(struct rtw_dev *rtwdev);
-void rtw8723x_efuse_grant(struct rtw_dev *rtwdev, bool on);
-void rtw8723x_false_alarm_statistics(struct rtw_dev *rtwdev);
+
+static inline void rtw8723x_lck(struct rtw_dev *rtwdev)
+{
+	rtw8723x_common.lck(rtwdev);
+}
+
+static inline int rtw8723x_read_efuse(struct rtw_dev *rtwdev, u8 *log_map)
+{
+	return rtw8723x_common.read_efuse(rtwdev, log_map);
+}
+
+static inline int rtw8723x_mac_init(struct rtw_dev *rtwdev)
+{
+	return rtw8723x_common.mac_init(rtwdev);
+}
+
+static inline void rtw8723x_cfg_ldo25(struct rtw_dev *rtwdev, bool enable)
+{
+	rtw8723x_common.cfg_ldo25(rtwdev, enable);
+}
+
+static inline void rtw8723x_set_tx_power_index(struct rtw_dev *rtwdev)
+{
+	rtw8723x_common.set_tx_power_index(rtwdev);
+}
+
+static inline void rtw8723x_efuse_grant(struct rtw_dev *rtwdev, bool on)
+{
+	rtw8723x_common.efuse_grant(rtwdev, on);
+}
+
+static inline void rtw8723x_false_alarm_statistics(struct rtw_dev *rtwdev)
+{
+	rtw8723x_common.false_alarm_statistics(rtwdev);
+}
+
+static inline
 void rtw8723x_iqk_backup_regs(struct rtw_dev *rtwdev,
-			      struct rtw8723x_iqk_backup_regs *backup);
+			      struct rtw8723x_iqk_backup_regs *backup)
+{
+	rtw8723x_common.iqk_backup_regs(rtwdev, backup);
+}
+
+static inline
 void rtw8723x_iqk_restore_regs(struct rtw_dev *rtwdev,
-			       const struct rtw8723x_iqk_backup_regs *backup);
+			       const struct rtw8723x_iqk_backup_regs *backup)
+{
+	rtw8723x_common.iqk_restore_regs(rtwdev, backup);
+}
+
+static inline
 bool rtw8723x_iqk_similarity_cmp(struct rtw_dev *rtwdev, s32 result[][IQK_NR],
-				 u8 c1, u8 c2);
-u8 rtw8723x_pwrtrack_get_limit_ofdm(struct rtw_dev *rtwdev);
+				 u8 c1, u8 c2)
+{
+	return rtw8723x_common.iqk_similarity_cmp(rtwdev, result, c1, c2);
+}
+
+static inline u8 rtw8723x_pwrtrack_get_limit_ofdm(struct rtw_dev *rtwdev)
+{
+	return rtw8723x_common.pwrtrack_get_limit_ofdm(rtwdev);
+}
+
+static inline
 void rtw8723x_pwrtrack_set_xtal(struct rtw_dev *rtwdev, u8 therm_path,
-				u8 delta);
-void rtw8723x_coex_cfg_init(struct rtw_dev *rtwdev);
+				u8 delta)
+{
+	rtw8723x_common.pwrtrack_set_xtal(rtwdev, therm_path, delta);
+}
+
+static inline void rtw8723x_coex_cfg_init(struct rtw_dev *rtwdev)
+{
+	rtw8723x_common.coex_cfg_init(rtwdev);
+}
+
+static inline
 void rtw8723x_fill_txdesc_checksum(struct rtw_dev *rtwdev,
 				   struct rtw_tx_pkt_info *pkt_info,
-				   u8 *txdesc);
+				   u8 *txdesc)
+{
+	rtw8723x_common.fill_txdesc_checksum(rtwdev, pkt_info, txdesc);
+}
 
 /* IQK helper functions, defined as inline so they can be shared
  * without needing an EXPORT_SYMBOL each.
@@ -421,7 +504,7 @@ rtw8723x_iqk_restore_lte_path_gnt(struct rtw_dev *rtwdev,
 inline void rtw8723x_iqk_path_adda_on(struct rtw_dev *rtwdev, u32 value)
 {
 	for (int i = 0; i < RTW8723X_IQK_ADDA_REG_NUM; i++)
-		rtw_write32(rtwdev, rtw8723x_spec.iqk_adda_regs[i], value);
+		rtw_write32(rtwdev, rtw8723x_common.iqk_adda_regs[i], value);
 }
 
 #endif /* __RTW8723X_H__ */
