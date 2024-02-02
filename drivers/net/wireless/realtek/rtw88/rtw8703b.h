@@ -51,6 +51,8 @@ extern const struct rtw_chip_info rtw8703b_hw_spec;
 /* is != 0 when IQK is done */
 #define REG_IQK_RDY 0x0e90
 
+#define	REG_EDCCA_DCNF 0x0e24
+
 /* RF registers */
 #define RF_RCK1 0x1E
 
