@@ -452,7 +452,7 @@ void rtw8723x_fill_txdesc_checksum(struct rtw_dev *rtwdev,
 /* IQK helper functions, defined as inline so they can be shared
  * without needing an EXPORT_SYMBOL each.
  */
-inline void
+static inline void
 rtw8723x_iqk_backup_path_ctrl(struct rtw_dev *rtwdev,
 			      struct rtw8723x_iqk_backup_regs *backup)
 {
@@ -461,14 +461,14 @@ rtw8723x_iqk_backup_path_ctrl(struct rtw_dev *rtwdev,
 		backup->btg_sel);
 }
 
-inline void rtw8723x_iqk_config_path_ctrl(struct rtw_dev *rtwdev)
+static inline void rtw8723x_iqk_config_path_ctrl(struct rtw_dev *rtwdev)
 {
 	rtw_write32_mask(rtwdev, REG_PAD_CTRL1, BIT_BT_BTG_SEL, 0x1);
 	rtw_dbg(rtwdev, RTW_DBG_RFK, "[IQK] set 0x67 = 0x%x\n",
 		rtw_read32_mask(rtwdev, REG_PAD_CTRL1, MASKBYTE3));
 }
 
-inline void
+static inline void
 rtw8723x_iqk_restore_path_ctrl(struct rtw_dev *rtwdev,
 			       const struct rtw8723x_iqk_backup_regs *backup)
 {
@@ -477,7 +477,7 @@ rtw8723x_iqk_restore_path_ctrl(struct rtw_dev *rtwdev,
 		rtw_read32_mask(rtwdev, REG_PAD_CTRL1, MASKBYTE3));
 }
 
-inline void
+static inline void
 rtw8723x_iqk_backup_lte_path_gnt(struct rtw_dev *rtwdev,
 				 struct rtw8723x_iqk_backup_regs *backup)
 {
@@ -489,8 +489,9 @@ rtw8723x_iqk_backup_lte_path_gnt(struct rtw_dev *rtwdev,
 		backup->lte_gnt);
 }
 
-inline void rtw8723x_iqk_config_lte_path_gnt(struct rtw_dev *rtwdev,
-					     u32 write_data)
+static inline void
+rtw8723x_iqk_config_lte_path_gnt(struct rtw_dev *rtwdev,
+				 u32 write_data)
 {
 	rtw_write32(rtwdev, REG_LTECOEX_WRITE_DATA, write_data);
 	rtw_write32(rtwdev, REG_LTECOEX_CTRL, 0xc0020038);
@@ -498,7 +499,7 @@ inline void rtw8723x_iqk_config_lte_path_gnt(struct rtw_dev *rtwdev,
 			 BIT_LTE_MUX_CTRL_PATH, 0x1);
 }
 
-inline void
+static inline void
 rtw8723x_iqk_restore_lte_path_gnt(struct rtw_dev *rtwdev,
 				  const struct rtw8723x_iqk_backup_regs *bak)
 {
@@ -508,7 +509,7 @@ rtw8723x_iqk_restore_lte_path_gnt(struct rtw_dev *rtwdev,
 }
 
 /* set all ADDA registers to the given value */
-inline void rtw8723x_iqk_path_adda_on(struct rtw_dev *rtwdev, u32 value)
+static inline void rtw8723x_iqk_path_adda_on(struct rtw_dev *rtwdev, u32 value)
 {
 	for (int i = 0; i < RTW8723X_IQK_ADDA_REG_NUM; i++)
 		rtw_write32(rtwdev, rtw8723x_common.iqk_adda_regs[i], value);
