@@ -465,6 +465,10 @@ static int set_dmic_clk(struct snd_soc_dapm_widget *w,
 	rate = rt5640->sysclk / rl6231_get_pre_div(rt5640->regmap,
 		RT5640_ADDA_CLK1, RT5640_I2S_PD1_SFT);
 	idx = rl6231_calc_dmic_clk(rate);
+
+        dev_err(component->dev, "set_dmic_clk rate=%d sysclk=%d pd=%d idx=%d\n", rate, rt5640->sysclk, rl6231_get_pre_div(rt5640->regmap,
+		RT5640_ADDA_CLK1, RT5640_I2S_PD1_SFT), rl6231_calc_dmic_clk(rate));
+
 	if (idx < 0)
 		dev_err(component->dev, "Failed to set DMIC clock\n");
 	else
