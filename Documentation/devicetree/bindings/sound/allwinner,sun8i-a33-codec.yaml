@@ -44,6 +44,15 @@ properties:
       - const: bus
       - const: mod
 
+  jack-type:
+    enum:
+      - headset
+      - headphone
+    description:
+      Type of jack connector connected to the codec. This can be either
+      a 3-pin headphone connector or 4-pin headset connector. If not
+      specified, jack detection is disabled.
+
 required:
   - "#sound-dai-cells"
   - compatible
