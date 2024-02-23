@@ -1541,6 +1541,13 @@ static int sun8i_codec_enable_jack_detect(struct snd_soc_component *component,
 	if (ret)
 		return ret;
 
+	if (jack->jack->type & SND_JACK_MICROPHONE) {
+		snd_jack_set_key(jack->jack, SND_JACK_BTN_0, KEY_PLAYPAUSE);
+		snd_jack_set_key(jack->jack, SND_JACK_BTN_1, KEY_VOLUMEUP);
+		snd_jack_set_key(jack->jack, SND_JACK_BTN_2, KEY_VOLUMEDOWN);
+		snd_jack_set_key(jack->jack, SND_JACK_BTN_3, KEY_VOICECOMMAND);
+	}
+
 	return 0;
 }
 
