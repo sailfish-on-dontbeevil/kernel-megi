@@ -469,6 +469,7 @@
 &codec {
 	pinctrl-names = "default";
 	pinctrl-0 = <&aif2_pins>, <&aif3_pins>;
+	jack-type = "headset";
 	status = "okay";
 };
 
@@ -949,7 +950,7 @@
 &sound {
 	status = "okay";
 	simple-audio-card,name = "PinePhone";
-	simple-audio-card,aux-devs = <&codec_analog>, <&speaker_amp>;
+	simple-audio-card,aux-devs = <&codec_analog>, <&codec>, <&speaker_amp>;
 	simple-audio-card,widgets = "Microphone", "Headset Microphone",
 				    "Microphone", "Internal Microphone",
 				    "Headphone", "Headphone Jack",
