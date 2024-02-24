@@ -311,21 +311,9 @@ static void sun8i_mixer_commit(struct sunxi_engine *engine,
 		pipe_en |= SUN8I_MIXER_BLEND_PIPE_CTL_EN(zpos);
 	}
 
-	regmap_update_bits(mixer->engine.regs,
-			   SUN8I_MIXER_BLEND_ROUTE(bld_base),
-			   SUN8I_MIXER_BLEND_ROUTE_PIPE_MSK(0) |
-			   SUN8I_MIXER_BLEND_ROUTE_PIPE_MSK(1) |
-			   SUN8I_MIXER_BLEND_ROUTE_PIPE_MSK(2) |
-			   SUN8I_MIXER_BLEND_ROUTE_PIPE_MSK(3),
-			   route);
-
-	regmap_update_bits(mixer->engine.regs,
-			   SUN8I_MIXER_BLEND_PIPE_CTL(bld_base),
-			   SUN8I_MIXER_BLEND_PIPE_CTL_EN(0) |
-			   SUN8I_MIXER_BLEND_PIPE_CTL_EN(1) |
-			   SUN8I_MIXER_BLEND_PIPE_CTL_EN(2) |
-			   SUN8I_MIXER_BLEND_PIPE_CTL_EN(3),
-			   pipe_en);
+	regmap_write(mixer->engine.regs, SUN8I_MIXER_BLEND_ROUTE(bld_base), route);
+	regmap_write(mixer->engine.regs, SUN8I_MIXER_BLEND_PIPE_CTL(bld_base),
+		     pipe_en | SUN8I_MIXER_BLEND_PIPE_CTL_FC_EN(0));
 
 	regmap_write(engine->regs, SUN8I_MIXER_GLOBAL_DBUFF,
 		     SUN8I_MIXER_GLOBAL_DBUFF_ENABLE);
