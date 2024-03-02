@@ -26,6 +26,16 @@
 #ifndef __PHYDM_PHYSTATUS_H__
 #define __PHYDM_PHYSTATUS_H__
 
+/* Clangd compatibility fixes: I can't include phydm_precomp.h here
+ * because it includes this file. All definitions of __PACK in
+ * phydm_precomp.h are literally the same as this, and without
+ * phydm_types.h types like u8 are missing.
+ */
+#ifndef __PACK
+#define __PACK
+#endif
+#include "phydm_types.h"
+
 /* 2020.07.03 fix cck report bug due to 8723F coding error*/
 #define PHYSTS_VERSION "1.2"
 
@@ -675,7 +685,7 @@ __PACK struct phy_sts_rpt_jgr3_type6 {
 	u8 hw_antsw_occur_keep_cck : 1;
 	u8 gnt_bt_keep_cck : 1;
 	u8 rssi_msb : 3;
-	u8 rsvd_2 : 2;	
+	u8 rsvd_2 : 2;
 #else
 	u8 rsvd_2 : 2;
 	u8 rssi_msb : 3;
@@ -704,7 +714,7 @@ __PACK struct phy_sts_rpt_jgr3_type6 {
 /* @DW3 : Offset 12 */
 	u16 rsvd_4_2;
 	u8 rsvd_5_1;
-	u8 avg_cfo;	
+	u8 avg_cfo;
 /* @DW4 : Offset 16 */
 	u8 coarse_cfo;
 #if (ODM_ENDIAN_TYPE == ODM_ENDIAN_LITTLE)
