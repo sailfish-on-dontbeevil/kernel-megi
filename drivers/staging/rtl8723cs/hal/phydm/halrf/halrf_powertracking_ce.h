@@ -26,6 +26,8 @@
 #ifndef __HALRF_POWERTRACKING_H__
 #define __HALRF_POWERTRACKING_H__
 
+#include "phydm_types.h"
+
 #define DPK_DELTA_MAPPING_NUM 13
 #define index_mapping_HP_NUM 15
 #define OFDM_TABLE_SIZE 43
