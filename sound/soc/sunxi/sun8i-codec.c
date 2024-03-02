@@ -1563,6 +1563,18 @@ static void sun8i_codec_disable_jack_detect(struct snd_soc_component *component)
 	scodec->jack = NULL;
 }
 
+static int sun8i_codec_component_get_jack_type(struct snd_soc_component *component)
+{
+	struct device_node *node = component->dev->of_node;
+
+	if (of_property_match_string(node, "jack-type", "headset") >= 0)
+		return SND_JACK_HEADSET | SUN8I_CODEC_BUTTONS;
+	else if (of_property_match_string(node, "jack-type", "headphone") >= 0)
+		return SND_JACK_HEADPHONE;
+
+	return 0;
+}
+
 static int sun8i_codec_component_set_jack(struct snd_soc_component *component,
 					  struct snd_soc_jack *jack, void *data)
 {
@@ -1584,6 +1596,7 @@ static const struct snd_soc_component_driver sun8i_soc_component = {
 	.dapm_routes		= sun8i_codec_dapm_routes,
 	.num_dapm_routes	= ARRAY_SIZE(sun8i_codec_dapm_routes),
 	.set_jack		= sun8i_codec_component_set_jack,
+	.get_jack_type		= sun8i_codec_component_get_jack_type,
 	.probe			= sun8i_codec_component_probe,
 	.idle_bias_on		= 1,
 	.suspend_bias_off	= 1,
