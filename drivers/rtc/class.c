@@ -66,7 +66,8 @@ static void rtc_hctosys(struct rtc_device *rtc)
 	err = rtc_read_time(rtc, &tm);
 	if (err) {
 		dev_err(rtc->dev.parent,
-			"hctosys: unable to read the hardware clock\n");
+			"hctosys: unable to read the hardware clock %pe\n",
+			ERR_PTR(err));
 		goto err_read;
 	}
 
