@@ -985,4 +985,12 @@ config FUEL_GAUGE_MM8013
 	  the state of charge, temperature, cycle count, actual and design
 	  capacity, etc.
 
+config CHARGER_RK818
+	bool "RK818 Charger driver"
+	depends on MFD_RK8XX
+	default n
+	help
+	  If you say yes here you will get support for the charger of RK818 PMIC.
+	  This driver can give support for Rk818 Charger Interface.
+
 endif # POWER_SUPPLY
