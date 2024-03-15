@@ -463,6 +463,13 @@ static const char * const axp22x_irq_names[] = {
 	"VBUS_REMOVAL",
 };
 
+static const char * const axp813_irq_names[] = {
+	"VBUS_PLUGIN",
+	"VBUS_REMOVAL",
+	"BC_USB_CHNG",
+	"MV_CHNG",
+};
+
 static int axp192_usb_curr_lim_table[] = {
 	-1,
 	-1,
@@ -540,8 +547,8 @@ static const struct axp_data axp223_data = {
 
 static const struct axp_data axp813_data = {
 	.power_desc	= &axp813_usb_power_desc,
-	.irq_names	= axp22x_irq_names,
-	.num_irq_names	= ARRAY_SIZE(axp22x_irq_names),
+	.irq_names	= axp813_irq_names,
+	.num_irq_names	= ARRAY_SIZE(axp813_irq_names),
 	.curr_lim_table = axp813_usb_curr_lim_table,
 	.curr_lim_table_size = ARRAY_SIZE(axp813_usb_curr_lim_table),
 	.curr_lim_fld	= REG_FIELD(AXP22X_CHRG_CTRL3, 4, 7),
