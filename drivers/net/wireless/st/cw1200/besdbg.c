@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
+// Written by Ondrej Jirman <megi@xff.cz> 2023-2024
 
 #include <linux/module.h>
 #include <linux/interrupt.h>
@@ -13,6 +14,7 @@
 #include <linux/of.h>
 #include <linux/of_irq.h>
 #include <linux/of_net.h>
+#include <linux/regulator/consumer.h>
 #include <net/mac80211.h>
 
 #include "cw1200.h"
@@ -28,13 +30,23 @@ struct besdbg_data {
 	__u64 data;
 };
 
+struct besdbg_gpio {
+	__u32 gpio;
+	__u32 val;
+};
+
 #define BESDBG_MAGIC 0xEE
+
+#define BESDBG_GPIO_WAKEUP_DEV	1
+#define BESDBG_GPIO_WAKEUP_HOST 2
+#define BESDBG_GPIO_REGON	3
 
 #define BESDBG_IOCTL_RESET	_IO(BESDBG_MAGIC, 0x10)
 #define BESDBG_IOCTL_REG_READ	_IOR(BESDBG_MAGIC, 0x11, struct besdbg_data)
 #define BESDBG_IOCTL_REG_WRITE	_IOW(BESDBG_MAGIC, 0x12, struct besdbg_data)
 #define BESDBG_IOCTL_MEM_READ	_IOR(BESDBG_MAGIC, 0x13, struct besdbg_data)
 #define BESDBG_IOCTL_MEM_WRITE	_IOW(BESDBG_MAGIC, 0x14, struct besdbg_data)
+#define BESDBG_IOCTL_GPIO	_IOR(BESDBG_MAGIC, 0x15, struct besdbg_gpio)
 
 #define SDIO_BLOCK_SIZE (512)
 
@@ -43,6 +55,8 @@ static struct class *besdbg_class;
 struct besdbg_priv {
 	struct sdio_func	*func;
 	struct gpio_desc	*wakeup_device_gpio;
+	struct gpio_desc	*wakeup_host_gpio;
+	struct gpio_desc	*regon_gpio;
 	struct cdev		cdev;
 	dev_t			major;
 };
@@ -105,7 +119,7 @@ static int bes2600_sdio_mem_helper(struct besdbg_priv *self, u8 *data, int count
 
 		off += size;
 	}
-	
+
 	return 0;
 }
 #endif
@@ -142,7 +156,7 @@ static int besdbg_release(struct inode *ip, struct file *fp)
 	return 0;
 }
 
-long besdbg_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
+static long besdbg_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 {
 	struct besdbg_priv* self = fp->private_data;
 	struct device *dev = &self->func->dev;
@@ -150,32 +164,35 @@ long besdbg_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 	long ret;
 
 	switch (cmd) {
-	case BESDBG_IOCTL_RESET:
-		/* Disable the card */
-		gpiod_direction_output(self->wakeup_device_gpio, 0);
+	case BESDBG_IOCTL_GPIO: {
+		struct besdbg_gpio r;
 
-		sdio_claim_host(self->func);
+		if (copy_from_user(&r, argp, sizeof(r)))
+			return -EFAULT;
 
-		ret = mmc_hw_reset(self->func->card);
-		if (ret)
-			dev_warn(dev, "unable to reset sdio: %ld\n", ret);
+		switch (r.gpio) {
+		case BESDBG_GPIO_WAKEUP_DEV:
+			gpiod_set_value(self->wakeup_device_gpio, r.val);
+			break;
+		case BESDBG_GPIO_REGON:
+			gpiod_set_value(self->regon_gpio, r.val);
+			break;
+		case BESDBG_GPIO_WAKEUP_HOST:
+			r.val = gpiod_get_value(self->wakeup_host_gpio);
 
-		gpiod_direction_output(self->wakeup_device_gpio, 1);
-		msleep(10);
+			if (copy_to_user(argp, &r, sizeof(r)))
+				return -EFAULT;
 
-		ret = sdio_enable_func(self->func);
-		if (ret) {
-			sdio_release_host(self->func);
-			return ret;
+			break;
+		default:
+			return -EINVAL;
 		}
-
-		sdio_release_host(self->func);
-
 		return 0;
+	}
 
 	case BESDBG_IOCTL_REG_READ: {
 		struct besdbg_data r;
-	
+
 		if (copy_from_user(&r, argp, sizeof(r)))
 			return -EFAULT;
 
@@ -189,7 +206,7 @@ long besdbg_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 		sdio_claim_host(self->func);
 		ret = bes2600_sdio_reg_read(self, r.reg, data, r.len);
 		sdio_release_host(self->func);
-		
+
 		if (ret) {
 			dev_err(dev, "read failed\n");
 			kfree(data);
@@ -207,7 +224,7 @@ long besdbg_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 
 	case BESDBG_IOCTL_REG_WRITE: {
 		struct besdbg_data r;
-	
+
 		if (copy_from_user(&r, argp, sizeof(r)))
 			return -EFAULT;
 
@@ -224,7 +241,7 @@ long besdbg_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 		sdio_claim_host(self->func);
 		ret = bes2600_sdio_reg_write(self, r.reg, data, r.len);
 		sdio_release_host(self->func);
-		
+
 		kfree(data);
 
 		if (ret) {
@@ -237,7 +254,7 @@ long besdbg_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 
 	case BESDBG_IOCTL_MEM_READ: {
 		struct besdbg_data r;
-	
+
 		if (copy_from_user(&r, argp, sizeof(r)))
 			return -EFAULT;
 
@@ -249,10 +266,9 @@ long besdbg_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 			return -ENOMEM;
 
 		sdio_claim_host(self->func);
-		//ret = bes2600_sdio_mem_helper(self, data, r.len, 0);
 		ret = sdio_memcpy_fromio(self->func, data, r.reg, r.len);
 		sdio_release_host(self->func);
-		
+
 		if (ret) {
 			dev_err(dev, "read failed\n");
 			kfree(data);
@@ -270,7 +286,7 @@ long besdbg_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 
 	case BESDBG_IOCTL_MEM_WRITE: {
 		struct besdbg_data r;
-	
+
 		if (copy_from_user(&r, argp, sizeof(r)))
 			return -EFAULT;
 
@@ -285,10 +301,9 @@ long besdbg_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 			return -EFAULT;
 
 		sdio_claim_host(self->func);
-		//ret = bes2600_sdio_mem_helper(self, data, r.len, 1);
 		ret = sdio_memcpy_toio(self->func, r.reg, data, r.len);
 		sdio_release_host(self->func);
-		
+
 		kfree(data);
 
 		if (ret) {
@@ -319,10 +334,10 @@ static int besdbg_probe(struct sdio_func *func, const struct sdio_device_id *id)
 	struct besdbg_priv *self;
 	int ret;
 
+	dev_info(dev, "probe start %d\n", func->num);
+
 	if (func->num != 0x01)
 		return -ENODEV;
-
-	dev_info(dev, "probe start\n");
 
 	if (!of_device_is_compatible(dev->of_node, "bestechnic,bes2600")) {
 		dev_err(dev, "OF node for function 1 is missing\n");
@@ -343,15 +358,20 @@ static int besdbg_probe(struct sdio_func *func, const struct sdio_device_id *id)
 		return dev_err_probe(dev, PTR_ERR(self->wakeup_device_gpio),
 				     "can't get device-wakeup gpio\n");
 
-	if (self->wakeup_device_gpio) {
-		gpiod_direction_output(self->wakeup_device_gpio, 1);
-		msleep(10);
-	}
+	self->wakeup_host_gpio = devm_gpiod_get(dev, "host-wakeup", GPIOD_IN);
+	if (IS_ERR(self->wakeup_host_gpio))
+		return dev_err_probe(dev, PTR_ERR(self->wakeup_host_gpio),
+				     "can't get host-wakeup gpio\n");
+
+	self->regon_gpio = devm_gpiod_get(dev, "regon", GPIOD_OUT_LOW);
+	if (IS_ERR(self->regon_gpio))
+		return dev_err_probe(dev, PTR_ERR(self->regon_gpio),
+				     "can't get regon gpio\n");
 
 	ret = alloc_chrdev_region(&self->major, 0, 1, "besdbg");
 	if (ret) {
 		dev_err(dev, "can't allocate chrdev region");
-		goto err_sleep;
+		return ret;
 	}
 
 	cdev_init(&self->cdev, &besdbg_fops);
@@ -392,9 +412,6 @@ err_cdev:
 	cdev_del(&self->cdev);
 err_unreg_chrev_region:
 	unregister_chrdev(self->major, "besdbg");
-err_sleep:
-	gpiod_direction_output(self->wakeup_device_gpio, 0);
-
 	return ret;
 }
 
@@ -415,13 +432,15 @@ static void besdbg_disconnect(struct sdio_func *func)
 
 	sdio_set_drvdata(func, NULL);
 
-	gpiod_direction_output(self->wakeup_device_gpio, 0);
+	gpiod_set_value(self->wakeup_device_gpio, 0);
+	gpiod_set_value(self->regon_gpio, 0);
 }
 
 static const struct sdio_device_id besdbg_ids[] = {
 	{ SDIO_DEVICE(0xbe57, 0x2002), },
 	{ },
 };
+MODULE_DEVICE_TABLE(sdio, besdbg_ids);
 
 static struct sdio_driver besdbg_sdio_driver = {
 	.name		= "besdbg_sdio",
