@@ -862,7 +862,7 @@
 	pinctrl-0 = <&sdmmc1_bus4
 		     &sdmmc1_cmd
 		     &sdmmc1_clk>;
-	sd-uhs-sdr104;
+	//sd-uhs-sdr104;
 	vqmmc-supply = <&vcca1v8_pmu>;
 	status = "okay";
 };
