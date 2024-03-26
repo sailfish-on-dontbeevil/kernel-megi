@@ -280,6 +280,7 @@ struct sun8i_codec {
 	struct delayed_work		jack_work;
 	int				jack_irq;
 	int				jack_status;
+	int				jack_type;
 	int				jack_last_sample;
 	unsigned			jack_last_btn;
 	ktime_t				jack_hbias_ready;
@@ -1436,7 +1437,6 @@ static void sun8i_codec_jack_work(struct work_struct *work)
 						  jack_work.work);
 	struct device *dev = scodec->component->dev;
 	unsigned int mdata;
-	int type_mask = scodec->jack->jack->type;
 	int type;
 
 	guard(mutex)(&scodec->jack_mutex);
@@ -1448,7 +1448,7 @@ static void sun8i_codec_jack_work(struct work_struct *work)
 		scodec->jack_last_sample = -1;
 		scodec->jack_last_btn = 0;
 
-		if (type_mask & SND_JACK_MICROPHONE) {
+		if (scodec->jack_type & SND_JACK_MICROPHONE) {
 			/*
 			 * If we were in disconnected state, we enable HBIAS and
 			 * wait 600ms before reading initial HDATA value.
@@ -1461,7 +1461,7 @@ static void sun8i_codec_jack_work(struct work_struct *work)
 			scodec->jack_status = SUN8I_JACK_STATUS_WAITING_HBIAS;
 		} else {
 			snd_soc_jack_report(scodec->jack, SND_JACK_HEADPHONE,
-					    type_mask);
+					    scodec->jack_type);
 			scodec->jack_status = SUN8I_JACK_STATUS_CONNECTED;
 		}
 	} else if (scodec->jack_status == SUN8I_JACK_STATUS_WAITING_HBIAS) {
@@ -1502,7 +1502,7 @@ static void sun8i_codec_jack_work(struct work_struct *work)
 		if (type == SND_JACK_HEADPHONE)
 			sun8i_codec_set_hmic_bias(scodec, false);
 
-		snd_soc_jack_report(scodec->jack, type, type_mask);
+		snd_soc_jack_report(scodec->jack, type, scodec->jack_type);
 		scodec->jack_status = SUN8I_JACK_STATUS_CONNECTED;
 
 		dev_dbg(dev, "jack: plug-in reported\n");
@@ -1511,10 +1511,10 @@ static void sun8i_codec_jack_work(struct work_struct *work)
 			return;
 
 		scodec->jack_status = SUN8I_JACK_STATUS_DISCONNECTED;
-		if (type_mask & SND_JACK_MICROPHONE)
+		if (scodec->jack_type & SND_JACK_MICROPHONE)
 			sun8i_codec_set_hmic_bias(scodec, false);
 
-		snd_soc_jack_report(scodec->jack, 0, type_mask);
+		snd_soc_jack_report(scodec->jack, 0, scodec->jack_type);
 
 		dev_dbg(dev, "jack: plug-out reported\n");
 	}
@@ -1586,7 +1586,7 @@ static irqreturn_t sun8i_codec_jack_irq(int irq, void *dev_id)
 		if (scodec->jack_last_sample >= 0 &&
 		    scodec->jack_last_sample == value) {
 			snd_soc_jack_report(scodec->jack, type,
-					    scodec->jack->jack->type);
+					    scodec->jack_type);
 			btn_chg = (scodec->jack_last_btn ^ type) & SUN8I_CODEC_BUTTONS;
 			scodec->jack_last_btn = type;
 		}
