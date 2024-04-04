@@ -727,6 +727,8 @@ static int stk3310_resume(struct device *dev)
 			return ret;
 		}
 
+		usleep_range(1000, 5000);
+
 		regcache_sync(data->regmap);
 	}
 
