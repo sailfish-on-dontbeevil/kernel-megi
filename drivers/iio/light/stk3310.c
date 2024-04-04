@@ -702,12 +702,12 @@ static int stk3310_suspend(struct device *dev)
 	if (ret)
 		return ret;
 
-	if (data->vdd_reg) {
+	if (data->vdd_reg)
 		regcache_mark_dirty(data->regmap);
-		regulator_disable(data->vdd_reg);
-	}
 
 	regulator_disable(data->i2c_reg);
+	if (data->vdd_reg)
+		regulator_disable(data->vdd_reg);
 
 	return 0;
 }
@@ -720,21 +720,22 @@ static int stk3310_resume(struct device *dev)
 
 	data = iio_priv(i2c_get_clientdata(to_i2c_client(dev)));
 
+	ret = regulator_enable(data->i2c_reg);
+	if (ret) {
+		dev_err(dev, "Failed to re-enable regulator i2c\n");
+		return ret;
+	}
+
 	if (data->vdd_reg) {
 		ret = regulator_enable(data->vdd_reg);
 		if (ret) {
+			regulator_disable(data->i2c_reg);
 			dev_err(dev, "Failed to re-enable regulator vdd\n");
 			return ret;
 		}
 
+		usleep_range(1000, 2000);
 		regcache_sync(data->regmap);
-	}
-
-	ret = regulator_enable(data->i2c_reg);
-	if (ret) {
-		dev_err(dev, "Failed to re-enable regulator i2c\n");
-		regulator_disable(data->vdd_reg);
-		return ret;
 	}
 
 	if (data->ps_enabled)
