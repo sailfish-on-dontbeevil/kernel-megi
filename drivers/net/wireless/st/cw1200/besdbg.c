@@ -10,6 +10,9 @@
 #include <linux/mmc/card.h>
 #include <linux/mmc/sdio.h>
 #include <linux/mmc/sdio_ids.h>
+#include <linux/wait.h>
+//#include <linux/spinlock.h>
+#include <linux/poll.h>
 #include <linux/cdev.h>
 #include <linux/of.h>
 #include <linux/of_irq.h>
@@ -59,6 +62,11 @@ struct besdbg_priv {
 	struct gpio_desc	*regon_gpio;
 	struct cdev		cdev;
 	dev_t			major;
+	int			irq;
+
+	spinlock_t		lock;
+	int			interrupted;
+	wait_queue_head_t	poll_wait;
 };
 
 /* bes sdio slave regs can only be accessed by command52
@@ -124,26 +132,29 @@ static int bes2600_sdio_mem_helper(struct besdbg_priv *self, u8 *data, int count
 }
 #endif
 
-#if 0
-static unsigned int besdbg_poll(struct file *fp, poll_table *wait)
+static __poll_t besdbg_poll(struct file *fp, struct poll_table_struct *wait)
 {
-	struct besdbg_priv* besdbg = fp->private_data;
+	struct besdbg_priv* self = fp->private_data;
+	unsigned long flags;
+	__poll_t mask = 0;
 
-	poll_wait(fp, &besdbg->wait, wait);
+	poll_wait(fp, &self->poll_wait, wait);
 
-	if (!kfifo_is_empty(&besdbg->kfifo))
-		return EPOLLIN | EPOLLRDNORM;
+	spin_lock_irqsave(&self->lock, flags);
+	if (self->interrupted)
+		mask = EPOLLIN | EPOLLRDNORM;
+	self->interrupted = false;
+	spin_unlock_irqrestore(&self->lock, flags);
 
-	return 0;
+	return mask;
 }
-#endif
 
 static int besdbg_open(struct inode *ip, struct file *fp)
 {
-	struct besdbg_priv* besdbg = container_of(ip->i_cdev,
+	struct besdbg_priv* self = container_of(ip->i_cdev,
 						  struct besdbg_priv, cdev);
 
-	fp->private_data = besdbg;
+	fp->private_data = self;
 
 	nonseekable_open(ip, fp);
 	return 0;
@@ -151,7 +162,7 @@ static int besdbg_open(struct inode *ip, struct file *fp)
 
 static int besdbg_release(struct inode *ip, struct file *fp)
 {
-//	struct besdbg_priv* besdbg = fp->private_data;
+//	struct besdbg_priv* self = fp->private_data;
 
 	return 0;
 }
@@ -325,8 +336,88 @@ static const struct file_operations besdbg_fops = {
 	.unlocked_ioctl	= besdbg_ioctl,
 	.llseek		= noop_llseek,
 	//.read		= besdbg_read,
-	//.poll		= besdbg_poll,
+	.poll		= besdbg_poll,
 };
+
+static void besdbg_irq_handler(struct besdbg_priv *self)
+{
+	struct device *dev = &self->func->dev;
+	unsigned long flags;
+
+	spin_lock_irqsave(&self->lock, flags);
+	self->interrupted = true;
+	spin_unlock_irqrestore(&self->lock, flags);
+
+	dev_err(dev, "interrupt\n");
+	wake_up_interruptible(&self->poll_wait);
+}
+
+static irqreturn_t besdbg_gpio_irq(int irq, void *dev_id)
+{
+	struct besdbg_priv *self = dev_id;
+
+	sdio_claim_host(self->func);
+	besdbg_irq_handler(self);
+	sdio_release_host(self->func);
+
+	return IRQ_HANDLED;
+}
+
+static int besdbg_request_irq(struct besdbg_priv *self)
+{
+	int ret;
+	u8 cccr;
+
+	cccr = sdio_f0_readb(self->func, SDIO_CCCR_IENx, &ret);
+	if (ret)
+		return ret;
+
+	cccr |= BIT(0) | BIT(self->func->num);
+
+	sdio_f0_writeb(self->func, cccr, SDIO_CCCR_IENx, &ret);
+	if (ret)
+		return ret;
+
+	return request_threaded_irq(self->irq, NULL, besdbg_gpio_irq,
+				    IRQF_TRIGGER_RISING | IRQF_ONESHOT,
+				    "besdbg_gpio_irq", self);
+}
+
+static void besdbg_sdio_irq_handler(struct sdio_func *func)
+{
+	struct besdbg_priv *self = sdio_get_drvdata(func);
+
+	besdbg_irq_handler(self);
+}
+
+static int besdbg_sdio_irq_subscribe(struct besdbg_priv *self)
+{
+	int ret = 0;
+
+	sdio_claim_host(self->func);
+	if (self->irq >= 0)
+		ret = besdbg_request_irq(self);
+	else
+		ret = sdio_claim_irq(self->func, besdbg_sdio_irq_handler);
+	sdio_release_host(self->func);
+
+	return ret;
+}
+
+static int besdbg_sdio_irq_unsubscribe(struct besdbg_priv *self)
+{
+	int ret = 0;
+
+	if (self->irq >= 0) {
+		free_irq(self->irq, self);
+	} else {
+		sdio_claim_host(self->func);
+		ret = sdio_release_irq(self->func);
+		sdio_release_host(self->func);
+	}
+
+	return ret;
+}
 
 static int besdbg_probe(struct sdio_func *func, const struct sdio_device_id *id)
 {
@@ -349,24 +440,41 @@ static int besdbg_probe(struct sdio_func *func, const struct sdio_device_id *id)
 		return -ENOMEM;
 
 	self->func = func;
+	init_waitqueue_head(&self->poll_wait);
+	spin_lock_init(&self->lock);
 
 	func->card->quirks |= MMC_QUIRK_LENIENT_FN0;
-	func->card->quirks |= MMC_QUIRK_BROKEN_BYTE_MODE_512;
+	//func->card->quirks |= MMC_QUIRK_BROKEN_BYTE_MODE_512;
 
 	self->wakeup_device_gpio = devm_gpiod_get(dev, "device-wakeup", GPIOD_OUT_LOW);
 	if (IS_ERR(self->wakeup_device_gpio))
 		return dev_err_probe(dev, PTR_ERR(self->wakeup_device_gpio),
 				     "can't get device-wakeup gpio\n");
-
+/*
 	self->wakeup_host_gpio = devm_gpiod_get(dev, "host-wakeup", GPIOD_IN);
 	if (IS_ERR(self->wakeup_host_gpio))
 		return dev_err_probe(dev, PTR_ERR(self->wakeup_host_gpio),
 				     "can't get host-wakeup gpio\n");
-
+*/
 	self->regon_gpio = devm_gpiod_get(dev, "regon", GPIOD_OUT_LOW);
 	if (IS_ERR(self->regon_gpio))
 		return dev_err_probe(dev, PTR_ERR(self->regon_gpio),
 				     "can't get regon gpio\n");
+
+/*
+	self->irq = gpiod_to_irq(self->wakeup_host_gpio);
+        if (self->irq < 0) {
+                dev_err(dev, "Could not get host wakeup irq\n");
+                return self->irq;
+        }
+*/
+	//self->irq = -1;
+
+	self->irq = irq_of_parse_and_map(dev->of_node, 0);
+	if (!self->irq) {
+		dev_warn(dev, "No irq in platform data\n");
+		self->irq = -1;
+	}
 
 	ret = alloc_chrdev_region(&self->major, 0, 1, "besdbg");
 	if (ret) {
@@ -388,21 +496,17 @@ static int besdbg_probe(struct sdio_func *func, const struct sdio_device_id *id)
 		goto err_cdev;
 	}
 
-/*
-	irq = irq_of_parse_and_map(np, 0);
-	if (!irq) {
-		dev_warn(dev, "No irq in platform data\n");
-	} else {
-		global_plat_data->irq = irq;
-	}
-*/
-
 	sdio_set_drvdata(func, self);
+
 	sdio_claim_host(func);
 	ret = sdio_enable_func(func);
 	if (ret)
 		dev_warn(dev, "can't enable func %d\n", ret);
 	sdio_release_host(func);
+
+	ret = besdbg_sdio_irq_subscribe(self);
+	if (ret)
+		dev_warn(dev, "can't subscribe to irq %d\n", ret);
 
 	dev_info(dev, "probe success\n");
 
@@ -415,16 +519,21 @@ err_unreg_chrev_region:
 	return ret;
 }
 
-static void besdbg_disconnect(struct sdio_func *func)
+static void besdbg_remove(struct sdio_func *func)
 {
 	struct besdbg_priv *self = sdio_get_drvdata(func);
+	struct device *dev = &func->dev;
 
 	if (!self)
 		return;
 
+	dev_info(dev, "remove\n");
+
 	cdev_del(&self->cdev);
 	unregister_chrdev(self->major, "besdbg");
 	device_destroy(besdbg_class, self->major);
+
+	besdbg_sdio_irq_unsubscribe(self);
 
 	sdio_claim_host(func);
 	sdio_disable_func(func);
@@ -440,13 +549,13 @@ static const struct sdio_device_id besdbg_ids[] = {
 	{ SDIO_DEVICE(0xbe57, 0x2002), },
 	{ },
 };
-MODULE_DEVICE_TABLE(sdio, besdbg_ids);
+//MODULE_DEVICE_TABLE(sdio, besdbg_ids);
 
 static struct sdio_driver besdbg_sdio_driver = {
 	.name		= "besdbg_sdio",
 	.id_table	= besdbg_ids,
 	.probe		= besdbg_probe,
-	.remove		= besdbg_disconnect,
+	.remove		= besdbg_remove,
 };
 
 //module_sdio_driver(besdbg_sdio_driver);
