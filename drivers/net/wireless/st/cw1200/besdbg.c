@@ -11,7 +11,6 @@
 #include <linux/mmc/sdio.h>
 #include <linux/mmc/sdio_ids.h>
 #include <linux/wait.h>
-//#include <linux/spinlock.h>
 #include <linux/poll.h>
 #include <linux/cdev.h>
 #include <linux/of.h>
@@ -425,8 +424,6 @@ static int besdbg_probe(struct sdio_func *func, const struct sdio_device_id *id)
 	struct besdbg_priv *self;
 	int ret;
 
-	dev_info(dev, "probe start %d\n", func->num);
-
 	if (func->num != 0x01)
 		return -ENODEV;
 
@@ -434,6 +431,8 @@ static int besdbg_probe(struct sdio_func *func, const struct sdio_device_id *id)
 		dev_err(dev, "OF node for function 1 is missing\n");
 		return -ENODEV;
 	}
+
+	dev_info(dev, "probe start %d\n", func->num);
 
 	self = devm_kzalloc(dev, sizeof(*self), GFP_KERNEL);
 	if (!self)
@@ -515,7 +514,7 @@ static int besdbg_probe(struct sdio_func *func, const struct sdio_device_id *id)
 err_cdev:
 	cdev_del(&self->cdev);
 err_unreg_chrev_region:
-	unregister_chrdev(self->major, "besdbg");
+	unregister_chrdev_region(self->major, 0);
 	return ret;
 }
 
@@ -530,7 +529,7 @@ static void besdbg_remove(struct sdio_func *func)
 	dev_info(dev, "remove\n");
 
 	cdev_del(&self->cdev);
-	unregister_chrdev(self->major, "besdbg");
+	unregister_chrdev_region(self->major, 1);
 	device_destroy(besdbg_class, self->major);
 
 	besdbg_sdio_irq_unsubscribe(self);
@@ -549,7 +548,7 @@ static const struct sdio_device_id besdbg_ids[] = {
 	{ SDIO_DEVICE(0xbe57, 0x2002), },
 	{ },
 };
-//MODULE_DEVICE_TABLE(sdio, besdbg_ids);
+MODULE_DEVICE_TABLE(sdio, besdbg_ids);
 
 static struct sdio_driver besdbg_sdio_driver = {
 	.name		= "besdbg_sdio",
@@ -563,6 +562,8 @@ static struct sdio_driver besdbg_sdio_driver = {
 static int __init besdbg_driver_init(void)
 {
 	int ret;
+
+	pr_err("besdbg init\n");
 
 	besdbg_class = class_create("besdbg");
 	if (IS_ERR(besdbg_class))
@@ -579,6 +580,8 @@ static int __init besdbg_driver_init(void)
 
 static void __exit besdbg_driver_exit(void)
 {
+	pr_err("besdbg exit\n");
+
 	sdio_unregister_driver(&besdbg_sdio_driver);
 	class_destroy(besdbg_class);
 }
