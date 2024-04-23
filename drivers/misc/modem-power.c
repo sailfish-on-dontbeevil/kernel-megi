@@ -1584,7 +1584,7 @@ err_free_dev:
 err_del_cdev:
 	cdev_del(&mpwr->cdev);
 err_unreg_chrev_region:
-	unregister_chrdev(mpwr->major, "modem-power");
+	unregister_chrdev_region(mpwr->major, 1);
 err_disable_regulator:
 	cancel_work_sync(&mpwr->power_work);
 	return ret;
@@ -1612,7 +1612,7 @@ static int mpwr_remove_generic(struct mpwr_dev *mpwr)
 
 	device_destroy(mpwr_class, mpwr->major);
 	cdev_del(&mpwr->cdev);
-	unregister_chrdev(mpwr->major, "modem-power");
+	unregister_chrdev_region(mpwr->major, 1);
 
 	return 0;
 }
