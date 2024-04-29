@@ -5,6 +5,8 @@
 /dts-v1/;
 /include/ "zynq-7000.dtsi"
 
+#include "dt-bindings/clock/xlnx-zynq-clk.h"
+
 / {
 	model = "Ebang EBAZ4205";
 	compatible = "ebang,ebaz4205", "xlnx,zynq-7000";
