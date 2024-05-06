@@ -586,6 +586,9 @@
 		reset-gpios = <&pio 4 16 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>; /* PE16 */
 		enable-gpios = <&pio 4 17 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>; /* PE17 */
 
+		orientation = <0>;
+		rotation = <90>;
+
 		port {
 			gc2145_ep: endpoint {
 				remote-endpoint = <&csi_gc2145_ep>;
