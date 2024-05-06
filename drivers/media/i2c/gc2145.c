@@ -1272,6 +1272,7 @@ static int gc2145_init_controls(struct gc2145_dev *sensor)
 	const struct v4l2_ctrl_ops *ops = &gc2145_ctrl_ops;
 	struct gc2145_ctrls *ctrls = &sensor->ctrls;
 	struct v4l2_ctrl_handler *hdl = &ctrls->handler;
+	struct v4l2_fwnode_device_properties props;
 	//u8 wb_max = 0;
 	//u64 wb_mask = 0;
 	//unsigned int i;
@@ -1324,6 +1325,14 @@ static int gc2145_init_controls(struct gc2145_dev *sensor)
 	ctrls->vflip = v4l2_ctrl_new_std(hdl, ops,
 					 V4L2_CID_VFLIP, 0, 1, 1, 0);
 
+	ret = v4l2_fwnode_device_parse(&sensor->i2c_client->dev, &props);
+	if (ret)
+		goto free_ctrls;
+
+	ret = v4l2_ctrl_new_fwnode_properties(hdl, &gc2145_ctrl_ops,
+					      &props);
+	if (ret)
+		goto free_ctrls;
 
 	/* Test patterns */
 	ctrls->test_pattern =
