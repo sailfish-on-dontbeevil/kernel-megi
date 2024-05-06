@@ -610,6 +610,9 @@
 		reset-gpios = <&pio 3 3 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>; /* PD3 */
 		powerdown-gpios = <&pio 2 0 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>; /* PC0 */
 
+		orientation = <1>;
+		rotation = <270>;
+
 		port {
 			ov5640_ep: endpoint {
 				remote-endpoint = <&csi_ov5640_ep>;
