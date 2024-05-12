@@ -253,6 +253,12 @@
 #define DWC3_GCTL_PRTCAP_HOST	1
 #define DWC3_GCTL_PRTCAP_DEVICE	2
 #define DWC3_GCTL_PRTCAP_OTG	3
+/* This is not a real register value, but a special state used for
+ * current_dr_role to mean DWC3_GCTL_PRTCAP_DEVICE in disconnected
+ * state. Value is chosen so that masking with register width
+ * produces DWC3_GCTL_PRTCAP_DEVICE value.
+ */
+#define DWC3_GCTL_PRTCAP_DEVICE_DISCONNECTED	6
 
 #define DWC3_GCTL_CORESOFTRESET		BIT(11)
 #define DWC3_GCTL_SOFITPSYNC		BIT(10)
@@ -1136,6 +1142,10 @@ struct dwc3_scratchpad_array {
  * @sys_wakeup: set if the device may do system wakeup.
  * @wakeup_configured: set if the device is configured for remote wakeup.
  * @suspended: set to track suspend event due to U3/L2.
+ * @usb3_phy_reset_quirk: set to power cycle the USB3 PHY during mode
+ *                        changes. Useful on RK3399 that needs this
+ *                        to apply Type-C orientation changes in
+ *                        Type-C phy driver.
  * @imod_interval: set the interrupt moderation interval in 250ns
  *			increments or 0 to disable.
  * @max_cfg_eps: current max number of IN eps used across all USB configs.
@@ -1186,6 +1196,7 @@ struct dwc3 {
 
 	struct phy		*usb2_generic_phy;
 	struct phy		*usb3_generic_phy;
+	bool			usb3_phy_powered;
 
 	bool			phys_ready;
 
@@ -1361,6 +1372,8 @@ struct dwc3 {
 	unsigned		sys_wakeup:1;
 	unsigned		wakeup_configured:1;
 	unsigned		suspended:1;
+
+	unsigned		usb3_phy_reset_quirk:1;
 
 	u16			imod_interval;
 
