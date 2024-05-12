@@ -187,6 +187,7 @@ enum scpi_drv_cmds {
 	CMD_SENSOR_VALUE,
 	CMD_SET_DEVICE_PWR_STATE,
 	CMD_GET_DEVICE_PWR_STATE,
+	CMD_SET_SYS_PWR_STATE,
 	CMD_MAX_COUNT,
 };
 
@@ -203,6 +204,7 @@ static int scpi_std_commands[CMD_MAX_COUNT] = {
 	SCPI_CMD_SENSOR_VALUE,
 	SCPI_CMD_SET_DEVICE_PWR_STATE,
 	SCPI_CMD_GET_DEVICE_PWR_STATE,
+	SCPI_CMD_SET_SYS_PWR_STATE,
 };
 
 static int scpi_legacy_commands[CMD_MAX_COUNT] = {
@@ -218,6 +220,7 @@ static int scpi_legacy_commands[CMD_MAX_COUNT] = {
 	LEGACY_SCPI_CMD_SENSOR_VALUE,
 	-1, /* SET_DEVICE_PWR_STATE */
 	-1, /* GET_DEVICE_PWR_STATE */
+	LEGACY_SCPI_CMD_SYS_PWR_STATE,
 };
 
 struct scpi_xfer {
@@ -782,6 +785,12 @@ static int scpi_device_set_power_state(u16 dev_id, u8 pstate)
 				 sizeof(dev_set), &stat, sizeof(stat));
 }
 
+static int scpi_sys_set_power_state(u8 pstate)
+{
+	return scpi_send_message(CMD_SET_SYS_PWR_STATE, &pstate,
+				 sizeof(pstate), NULL, 0);
+}
+
 static struct scpi_ops scpi_ops = {
 	.get_version = scpi_get_version,
 	.clk_get_range = scpi_clk_get_range,
@@ -798,6 +807,7 @@ static struct scpi_ops scpi_ops = {
 	.sensor_get_value = scpi_sensor_get_value,
 	.device_get_power_state = scpi_device_get_power_state,
 	.device_set_power_state = scpi_device_set_power_state,
+	.sys_set_power_state = scpi_sys_set_power_state,
 };
 
 struct scpi_ops *get_scpi_ops(void)
