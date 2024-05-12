@@ -9,15 +9,23 @@
  * Mylène Josserand <mylene.josserand@free-electrons.com>
  */
 
+#define DEBUG
+
 #include <linux/module.h>
 #include <linux/delay.h>
 #include <linux/clk.h>
+#include <linux/input.h>
 #include <linux/io.h>
+#include <linux/irq.h>
+#include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/pm_runtime.h>
 #include <linux/regmap.h>
+#include <linux/regulator/consumer.h>
 #include <linux/log2.h>
+#include <linux/mfd/ac100.h>
 
+#include <sound/jack.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
 #include <sound/soc-dapm.h>
@@ -118,6 +126,23 @@
 #define SUN8I_ADC_VOL_CTRL				0x104
 #define SUN8I_ADC_VOL_CTRL_ADCL_VOL			8
 #define SUN8I_ADC_VOL_CTRL_ADCR_VOL			0
+#define SUN8I_HMIC_CTRL1				0x110
+#define SUN8I_HMIC_CTRL1_HMIC_M				12
+#define SUN8I_HMIC_CTRL1_HMIC_N				8
+#define SUN8I_HMIC_CTRL1_MDATA_THRESHOLD_DB		5
+#define SUN8I_HMIC_CTRL1_JACK_OUT_IRQ_EN		4
+#define SUN8I_HMIC_CTRL1_JACK_IN_IRQ_EN			3
+#define SUN8I_HMIC_CTRL1_HMIC_DATA_IRQ_EN		0
+#define SUN8I_HMIC_CTRL2				0x114
+#define SUN8I_HMIC_CTRL2_HMIC_SAMPLE			14
+#define SUN8I_HMIC_CTRL2_HMIC_MDATA_THRESHOLD		8
+#define SUN8I_HMIC_CTRL2_HMIC_SF			6
+#define SUN8I_HMIC_STS					0x118
+#define SUN8I_HMIC_STS_MDATA_DISCARD			13
+#define SUN8I_HMIC_STS_HMIC_DATA			8
+#define SUN8I_HMIC_STS_JACK_OUT_IRQ_ST			4
+#define SUN8I_HMIC_STS_JACK_IN_IRQ_ST			3
+#define SUN8I_HMIC_STS_HMIC_DATA_IRQ_ST			0
 #define SUN8I_DAC_DIG_CTRL				0x120
 #define SUN8I_DAC_DIG_CTRL_ENDA				15
 #define SUN8I_DAC_VOL_CTRL				0x124
@@ -143,6 +168,17 @@
 #define SUN8I_AIF_CLK_CTRL_WORD_SIZ_MASK	GENMASK(5, 4)
 #define SUN8I_AIF_CLK_CTRL_DATA_FMT_MASK	GENMASK(3, 2)
 #define SUN8I_AIF3_CLK_CTRL_AIF3_CLK_SRC_MASK	GENMASK(1, 0)
+#define SUN8I_HMIC_CTRL1_HMIC_M_MASK		GENMASK(15, 12)
+#define SUN8I_HMIC_CTRL1_HMIC_N_MASK		GENMASK(11, 8)
+#define SUN8I_HMIC_CTRL1_MDATA_THRESHOLD_DB_MASK GENMASK(6, 5)
+#define SUN8I_HMIC_CTRL2_HMIC_SAMPLE_MASK	GENMASK(15, 14)
+#define SUN8I_HMIC_CTRL2_HMIC_SF_MASK		GENMASK(7, 6)
+#define SUN8I_HMIC_STS_HMIC_DATA_MASK		GENMASK(12, 8)
+
+#define SUN8I_CODEC_BUTTONS	(SND_JACK_BTN_0|\
+				 SND_JACK_BTN_1|\
+				 SND_JACK_BTN_2|\
+				 SND_JACK_BTN_3)
 
 #define SUN8I_CODEC_PASSTHROUGH_SAMPLE_RATE 48000
 
@@ -159,6 +195,50 @@
 				 SNDRV_PCM_RATE_176400    |\
 				 SNDRV_PCM_RATE_192000    |\
 				 SNDRV_PCM_RATE_KNOT)
+
+#define AC100_SYSCLK_CTRL_PLLCLK_ENA_OFF	15
+#define AC100_SYSCLK_CTRL_PLLCLK_ENA_MASK	BIT(15)
+#define AC100_SYSCLK_CTRL_PLLCLK_ENA_DISABLED	0
+#define AC100_SYSCLK_CTRL_PLLCLK_ENA_ENABLED	BIT(15)
+#define AC100_SYSCLK_CTRL_PLLCLK_SRC_OFF	12
+#define AC100_SYSCLK_CTRL_PLLCLK_SRC_MASK	GENMASK(13, 12)
+#define AC100_SYSCLK_CTRL_PLLCLK_SRC_MCLK1	(0x0 << 12)
+#define AC100_SYSCLK_CTRL_PLLCLK_SRC_MCLK2	(0x1 << 12)
+#define AC100_SYSCLK_CTRL_PLLCLK_SRC_BCLK1	(0x2 << 12)
+#define AC100_SYSCLK_CTRL_PLLCLK_SRC_BCLK2	(0x3 << 12)
+#define AC100_SYSCLK_CTRL_I2S1CLK_ENA_OFF	11
+#define AC100_SYSCLK_CTRL_I2S1CLK_ENA_MASK	BIT(11)
+#define AC100_SYSCLK_CTRL_I2S1CLK_ENA_DISABLED	0
+#define AC100_SYSCLK_CTRL_I2S1CLK_ENA_ENABLED	BIT(11)
+#define AC100_SYSCLK_CTRL_I2S1CLK_SRC_OFF	8
+#define AC100_SYSCLK_CTRL_I2S1CLK_SRC_MASK	GENMASK(9, 8)
+#define AC100_SYSCLK_CTRL_I2S1CLK_SRC_MCLK1	(0x0 << 8)
+#define AC100_SYSCLK_CTRL_I2S1CLK_SRC_MCLK2	(0x1 << 8)
+#define AC100_SYSCLK_CTRL_I2S1CLK_SRC_PLL	(0x2 << 8)
+#define AC100_SYSCLK_CTRL_I2S2CLK_ENA_OFF	7
+#define AC100_SYSCLK_CTRL_I2S2CLK_ENA_MASK	BIT(7)
+#define AC100_SYSCLK_CTRL_I2S2CLK_ENA_DISABLED	0
+#define AC100_SYSCLK_CTRL_I2S2CLK_ENA_ENABLED	BIT(7)
+#define AC100_SYSCLK_CTRL_I2S2CLK_SRC_OFF	4
+#define AC100_SYSCLK_CTRL_I2S2CLK_SRC_MASK	GENMASK(5, 4)
+#define AC100_SYSCLK_CTRL_I2S2CLK_SRC_MCLK1	(0x0 << 4)
+#define AC100_SYSCLK_CTRL_I2S2CLK_SRC_MCLK2	(0x1 << 4)
+#define AC100_SYSCLK_CTRL_I2S2CLK_SRC_PLL	(0x2 << 4)
+#define AC100_SYSCLK_CTRL_SYSCLK_ENA_OFF	3
+#define AC100_SYSCLK_CTRL_SYSCLK_ENA_MASK	BIT(3)
+#define AC100_SYSCLK_CTRL_SYSCLK_ENA_DISABLED	0
+#define AC100_SYSCLK_CTRL_SYSCLK_ENA_ENABLED	BIT(3)
+#define AC100_SYSCLK_CTRL_SYSCLK_SRC_OFF	0
+#define AC100_SYSCLK_CTRL_SYSCLK_SRC_MASK	BIT(0)
+#define AC100_SYSCLK_CTRL_SYSCLK_SRC_I2S1CLK	0
+#define AC100_SYSCLK_CTRL_SYSCLK_SRC_I2S2CLK	BIT(0)
+
+static const char *const ac100_supply_names[] = {
+	"LDOIN",
+	"AVCC",
+	"VDDIO1",
+	"VDDIO2",
+};
 
 enum {
 	SUN8I_CODEC_AIF1,
@@ -177,17 +257,40 @@ struct sun8i_codec_aif {
 };
 
 struct sun8i_codec_quirks {
-	bool legacy_widgets	: 1;
-	bool lrck_inversion	: 1;
+	bool	bus_clock	: 1;
+	bool	jack_detection	: 1;
+	bool	legacy_widgets	: 1;
+	bool	lrck_inversion	: 1;
+};
+
+enum {
+	SUN8I_JACK_STATUS_DISCONNECTED,
+	SUN8I_JACK_STATUS_WAITING_HBIAS,
+	SUN8I_JACK_STATUS_CONNECTED,
 };
 
 struct sun8i_codec {
+	struct snd_soc_component	*component;
 	struct regmap			*regmap;
+	struct clk			*clk_bus;
 	struct clk			*clk_module;
 	const struct sun8i_codec_quirks	*quirks;
 	struct sun8i_codec_aif		aifs[SUN8I_CODEC_NAIFS];
+	struct snd_soc_jack		*jack;
+	struct delayed_work		jack_work;
+	int				jack_irq;
+	int				jack_status;
+	int				jack_type;
+	int				jack_last_sample;
+	unsigned			jack_last_btn;
+	ktime_t				jack_hbias_ready;
+	struct mutex			jack_mutex;
+	int				last_hmic_irq;
 	unsigned int			sysclk_rate;
 	int				sysclk_refcnt;
+
+	struct regmap			*ac100_regmap;
+	struct regulator_bulk_data	supplies[ARRAY_SIZE(ac100_supply_names)];
 };
 
 static struct snd_soc_dai_driver sun8i_codec_dais[];
@@ -196,6 +299,14 @@ static int sun8i_codec_runtime_resume(struct device *dev)
 {
 	struct sun8i_codec *scodec = dev_get_drvdata(dev);
 	int ret;
+
+	if (scodec->clk_bus) {
+		ret = clk_prepare_enable(scodec->clk_bus);
+		if (ret) {
+			dev_err(dev, "Failed to enable the bus clock\n");
+			return ret;
+		}
+	}
 
 	regcache_cache_only(scodec->regmap, false);
 
@@ -214,6 +325,9 @@ static int sun8i_codec_runtime_suspend(struct device *dev)
 
 	regcache_cache_only(scodec->regmap, true);
 	regcache_mark_dirty(scodec->regmap);
+
+	if (scodec->clk_bus)
+		clk_disable_unprepare(scodec->clk_bus);
 
 	return 0;
 }
@@ -580,6 +694,10 @@ static int sun8i_codec_hw_params(struct snd_pcm_substream *substream,
 			   SUN8I_AIF_CLK_CTRL_BCLK_DIV_MASK,
 			   bclk_div << SUN8I_AIF_CLK_CTRL_BCLK_DIV);
 
+	/* TODO: Implement clk driver for AC100 codec system clock */
+	if (scodec->ac100_regmap)
+		goto update_sample_rate;
+
 	/*
 	 * SYSCLK rate
 	 *
@@ -602,6 +720,7 @@ static int sun8i_codec_hw_params(struct snd_pcm_substream *substream,
 		scodec->sysclk_refcnt++;
 	scodec->sysclk_rate = sysclk_rate;
 
+update_sample_rate:
 	aif->lrck_div_order = lrck_div_order;
 	aif->sample_rate = sample_rate;
 	aif->open_streams |= BIT(substream->stream);
@@ -619,8 +738,11 @@ static int sun8i_codec_hw_free(struct snd_pcm_substream *substream,
 	if (aif->open_streams != BIT(substream->stream))
 		goto done;
 
-	clk_rate_exclusive_put(scodec->clk_module);
-	scodec->sysclk_refcnt--;
+	if (!scodec->ac100_regmap) {
+		clk_rate_exclusive_put(scodec->clk_module);
+		scodec->sysclk_refcnt--;
+	}
+
 	aif->lrck_div_order = 0;
 	aif->sample_rate = 0;
 
@@ -893,8 +1015,6 @@ static const struct snd_kcontrol_new sun8i_dac_mixer_controls[] = {
 
 static const struct snd_soc_dapm_widget sun8i_codec_dapm_widgets[] = {
 	/* System Clocks */
-	SND_SOC_DAPM_CLOCK_SUPPLY("mod"),
-
 	SND_SOC_DAPM_SUPPLY("AIF1CLK",
 			    SUN8I_SYSCLK_CTL,
 			    SUN8I_SYSCLK_CTL_AIF1CLK_ENA, 0, NULL, 0),
@@ -1055,8 +1175,6 @@ static const struct snd_soc_dapm_widget sun8i_codec_dapm_widgets[] = {
 
 static const struct snd_soc_dapm_route sun8i_codec_dapm_routes[] = {
 	/* Clock Routes */
-	{ "AIF1CLK", NULL, "mod" },
-
 	{ "SYSCLK", NULL, "AIF1CLK" },
 
 	{ "CLK AIF1", NULL, "AIF1CLK" },
@@ -1226,11 +1344,38 @@ static const struct snd_soc_dapm_route sun8i_codec_legacy_routes[] = {
 	{ "AIF1 Slot 0 Right", NULL, "DACR" },
 };
 
+static const struct snd_soc_dapm_widget sun8i_codec_dapm_widgets_sun8i[] = {
+	SND_SOC_DAPM_CLOCK_SUPPLY("mod"),
+};
+
+static const struct snd_soc_dapm_route sun8i_codec_dapm_routes_sun8i[] = {
+	{ "AIF1CLK", NULL, "mod" },
+};
+
+static int ac100_codec_component_probe(struct snd_soc_component *component);
+
 static int sun8i_codec_component_probe(struct snd_soc_component *component)
 {
 	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
 	struct sun8i_codec *scodec = snd_soc_component_get_drvdata(component);
 	int ret;
+
+	scodec->component = component;
+
+	if (scodec->ac100_regmap)
+                return ac100_codec_component_probe(component);
+
+	ret = snd_soc_dapm_new_controls(dapm,
+					sun8i_codec_dapm_widgets_sun8i,
+					ARRAY_SIZE(sun8i_codec_dapm_widgets_sun8i));
+	if (ret)
+		return ret;
+
+	ret = snd_soc_dapm_add_routes(dapm,
+				      sun8i_codec_dapm_routes_sun8i,
+				      ARRAY_SIZE(sun8i_codec_dapm_routes_sun8i));
+	if (ret)
+		return ret;
 
 	/* Add widgets for backward compatibility with old device trees. */
 	if (scodec->quirks->legacy_widgets) {
@@ -1268,6 +1413,291 @@ static int sun8i_codec_component_probe(struct snd_soc_component *component)
 	return 0;
 }
 
+static void sun8i_codec_set_hmic_bias(struct sun8i_codec *scodec, bool enable)
+{
+	struct snd_soc_dapm_context *dapm = &scodec->component->card->dapm;
+	int irq_mask = BIT(SUN8I_HMIC_CTRL1_HMIC_DATA_IRQ_EN);
+
+	if (enable)
+		snd_soc_dapm_force_enable_pin(dapm, "HBIAS");
+	else
+		snd_soc_dapm_disable_pin(dapm, "HBIAS");
+
+	snd_soc_dapm_sync(dapm);
+
+	dev_dbg(scodec->component->dev, "HMIC bias %s\n", enable ? "on" : "off");
+
+	regmap_update_bits(scodec->regmap, SUN8I_HMIC_CTRL1,
+			   irq_mask, enable ? irq_mask : 0);
+}
+
+static void sun8i_codec_jack_work(struct work_struct *work)
+{
+	struct sun8i_codec *scodec = container_of(work, struct sun8i_codec,
+						  jack_work.work);
+	struct device *dev = scodec->component->dev;
+	unsigned int mdata;
+	int type;
+
+	guard(mutex)(&scodec->jack_mutex);
+
+	if (scodec->jack_status == SUN8I_JACK_STATUS_DISCONNECTED) {
+		if (scodec->last_hmic_irq != SUN8I_HMIC_STS_JACK_IN_IRQ_ST)
+			return;
+
+		scodec->jack_last_sample = -1;
+		scodec->jack_last_btn = 0;
+
+		if (scodec->jack_type & SND_JACK_MICROPHONE) {
+			/*
+			 * If we were in disconnected state, we enable HBIAS and
+			 * wait 600ms before reading initial HDATA value.
+			 */
+			scodec->jack_hbias_ready = ktime_add_ms(ktime_get(), 600);
+			sun8i_codec_set_hmic_bias(scodec, true);
+			queue_delayed_work(system_power_efficient_wq,
+					   &scodec->jack_work,
+					   msecs_to_jiffies(610));
+			scodec->jack_status = SUN8I_JACK_STATUS_WAITING_HBIAS;
+		} else {
+			snd_soc_jack_report(scodec->jack, SND_JACK_HEADPHONE,
+					    scodec->jack_type);
+			scodec->jack_status = SUN8I_JACK_STATUS_CONNECTED;
+		}
+	} else if (scodec->jack_status == SUN8I_JACK_STATUS_WAITING_HBIAS) {
+		/*
+		 * If we're waiting for HBIAS to stabilize, and we get plug-out
+		 * interrupt and nothing more for > 100ms, just cancel the
+		 * initialization.
+		 */
+		if (scodec->last_hmic_irq == SUN8I_HMIC_STS_JACK_OUT_IRQ_ST) {
+			scodec->jack_status = SUN8I_JACK_STATUS_DISCONNECTED;
+			sun8i_codec_set_hmic_bias(scodec, false);
+			return;
+		}
+
+		/*
+		 * If we're not done waiting for HBIAS to stabilize, wait more.
+		 */
+		if (!ktime_after(ktime_get(), scodec->jack_hbias_ready)) {
+			s64 msecs = ktime_ms_delta(scodec->jack_hbias_ready,
+						   ktime_get());
+
+			queue_delayed_work(system_power_efficient_wq,
+					   &scodec->jack_work,
+					   msecs_to_jiffies(msecs + 10));
+			return;
+		}
+
+		/*
+		 * Everything is stabilized, determine jack type and report it.
+		 */
+		regmap_read(scodec->regmap, SUN8I_HMIC_STS, &mdata);
+		mdata &= SUN8I_HMIC_STS_HMIC_DATA_MASK;
+		mdata >>= SUN8I_HMIC_STS_HMIC_DATA;
+
+		regmap_write(scodec->regmap, SUN8I_HMIC_STS, 0);
+
+		type = mdata < 16 ? SND_JACK_HEADPHONE : SND_JACK_HEADSET;
+		if (type == SND_JACK_HEADPHONE)
+			sun8i_codec_set_hmic_bias(scodec, false);
+
+		snd_soc_jack_report(scodec->jack, type, scodec->jack_type);
+		scodec->jack_status = SUN8I_JACK_STATUS_CONNECTED;
+
+		dev_dbg(dev, "jack: plug-in reported\n");
+	} else if (scodec->jack_status == SUN8I_JACK_STATUS_CONNECTED) {
+		if (scodec->last_hmic_irq != SUN8I_HMIC_STS_JACK_OUT_IRQ_ST)
+			return;
+
+		scodec->jack_status = SUN8I_JACK_STATUS_DISCONNECTED;
+		if (scodec->jack_type & SND_JACK_MICROPHONE)
+			sun8i_codec_set_hmic_bias(scodec, false);
+
+		snd_soc_jack_report(scodec->jack, 0, scodec->jack_type);
+
+		dev_dbg(dev, "jack: plug-out reported\n");
+	}
+}
+
+static irqreturn_t sun8i_codec_jack_irq(int irq, void *dev_id)
+{
+	struct sun8i_codec *scodec = dev_id;
+	struct device *dev = scodec->component->dev;
+	int type = SND_JACK_HEADSET;
+	unsigned int status, value;
+	unsigned btn_chg = 0;
+
+	guard(mutex)(&scodec->jack_mutex);
+
+	regmap_read(scodec->regmap, SUN8I_HMIC_STS, &status);
+	regmap_write(scodec->regmap, SUN8I_HMIC_STS, status);
+
+	/*
+	 * De-bounce in/out interrupts via a delayed work re-scheduling to
+	 * 100ms after each interrupt..
+	 */
+	if (status & BIT(SUN8I_HMIC_STS_JACK_OUT_IRQ_ST)) {
+		dev_dbg(dev, "jack: irq plug-out\n");
+
+		/*
+		 * Out interrupt has priority over in interrupt so that if
+		 * we get both, we assume the disconnected state, which is
+		 * safer.
+		 */
+		scodec->last_hmic_irq = SUN8I_HMIC_STS_JACK_OUT_IRQ_ST;
+		mod_delayed_work(system_power_efficient_wq, &scodec->jack_work,
+				 msecs_to_jiffies(100));
+	} else if (status & BIT(SUN8I_HMIC_STS_JACK_IN_IRQ_ST)) {
+		dev_dbg(dev, "jack: irq plug-in\n");
+
+		scodec->last_hmic_irq = SUN8I_HMIC_STS_JACK_IN_IRQ_ST;
+		mod_delayed_work(system_power_efficient_wq, &scodec->jack_work,
+				 msecs_to_jiffies(100));
+	} else if (status & BIT(SUN8I_HMIC_STS_HMIC_DATA_IRQ_ST)) {
+		/*
+		 * Ignore data interrupts until jack status turns to connected
+		 * state, which is after HMIC enable stabilization is completed.
+		 * Until then tha data are bogus.
+		 */
+		if (scodec->jack_status != SUN8I_JACK_STATUS_CONNECTED)
+			return IRQ_HANDLED;
+
+		value = (status & SUN8I_HMIC_STS_HMIC_DATA_MASK) >>
+			SUN8I_HMIC_STS_HMIC_DATA;
+
+		/*
+		 * Assumes 60 mV per ADC LSB increment, 2V bias voltage, 2.2kOhm
+		 * bias resistor.
+		 */
+		if (value == 0)
+			type |= SND_JACK_BTN_0;
+		else if (value == 1)
+			type |= SND_JACK_BTN_3;
+		else if (value <= 3)
+			type |= SND_JACK_BTN_1;
+		else if (value <= 8)
+			type |= SND_JACK_BTN_2;
+
+		/*
+		 * De-bounce. Only report button after two consecutive A/D
+		 * samples are identical.
+		 */
+		if (scodec->jack_last_sample >= 0 &&
+		    scodec->jack_last_sample == value) {
+			snd_soc_jack_report(scodec->jack, type,
+					    scodec->jack_type);
+			btn_chg = (scodec->jack_last_btn ^ type) & SUN8I_CODEC_BUTTONS;
+			scodec->jack_last_btn = type;
+		}
+
+		if (btn_chg & SND_JACK_BTN_0)
+			dev_dbg(dev, "jack: key_%spress BTN_0 (%#x)\n",
+				type & SND_JACK_BTN_0 ? "" : "de", value);
+		if (btn_chg & SND_JACK_BTN_1)
+			dev_dbg(dev, "jack: key_%spress BTN_1 (%#x)\n",
+				type & SND_JACK_BTN_1 ? "" : "de", value);
+		if (btn_chg & SND_JACK_BTN_2)
+			dev_dbg(dev, "jack: key_%spress BTN_2 (%#x)\n",
+				type & SND_JACK_BTN_2 ? "" : "de", value);
+
+		scodec->jack_last_sample = value;
+	}
+
+	return IRQ_HANDLED;
+}
+
+static int sun8i_codec_enable_jack_detect(struct snd_soc_component *component,
+					  struct snd_soc_jack *jack, void *data)
+{
+	struct sun8i_codec *scodec = snd_soc_component_get_drvdata(component);
+	struct platform_device *pdev = to_platform_device(component->dev);
+	int ret;
+
+	if (!scodec->quirks->jack_detection)
+		return 0;
+
+	scodec->jack = jack;
+
+	scodec->jack_irq = platform_get_irq(pdev, 0);
+	if (scodec->jack_irq < 0)
+		return scodec->jack_irq;
+
+	/* Reserved value required for jack IRQs to trigger. */
+	regmap_write(scodec->regmap, SUN8I_HMIC_CTRL1,
+			   0xf << SUN8I_HMIC_CTRL1_HMIC_N |
+			   0x0 << SUN8I_HMIC_CTRL1_MDATA_THRESHOLD_DB |
+			   0x4 << SUN8I_HMIC_CTRL1_HMIC_M);
+
+	/* Sample the ADC at 128 Hz; bypass smooth filter. */
+	regmap_write(scodec->regmap, SUN8I_HMIC_CTRL2,
+			   0x0 << SUN8I_HMIC_CTRL2_HMIC_SAMPLE |
+			   0x17 << SUN8I_HMIC_CTRL2_HMIC_MDATA_THRESHOLD |
+			   0x0 << SUN8I_HMIC_CTRL2_HMIC_SF);
+
+	/* Do not discard any MDATA, enable user written MDATA threshold. */
+	regmap_write(scodec->regmap, SUN8I_HMIC_STS, 0);
+
+	regmap_set_bits(scodec->regmap, SUN8I_HMIC_CTRL1,
+			BIT(SUN8I_HMIC_CTRL1_JACK_OUT_IRQ_EN) |
+			BIT(SUN8I_HMIC_CTRL1_JACK_IN_IRQ_EN));
+
+	ret = devm_request_threaded_irq(&pdev->dev, scodec->jack_irq,
+					NULL, sun8i_codec_jack_irq,
+					IRQF_ONESHOT,
+					dev_name(&pdev->dev), scodec);
+	if (ret)
+		return ret;
+
+	if (jack->jack->type & SND_JACK_MICROPHONE) {
+		snd_jack_set_key(jack->jack, SND_JACK_BTN_0, KEY_PLAYPAUSE);
+		snd_jack_set_key(jack->jack, SND_JACK_BTN_1, KEY_VOLUMEUP);
+		snd_jack_set_key(jack->jack, SND_JACK_BTN_2, KEY_VOLUMEDOWN);
+		snd_jack_set_key(jack->jack, SND_JACK_BTN_3, KEY_VOICECOMMAND);
+	}
+
+	return 0;
+}
+
+static void sun8i_codec_disable_jack_detect(struct snd_soc_component *component)
+{
+	struct sun8i_codec *scodec = snd_soc_component_get_drvdata(component);
+
+	if (!scodec->quirks->jack_detection)
+		return;
+
+	devm_free_irq(component->dev, scodec->jack_irq, scodec);
+
+	cancel_delayed_work_sync(&scodec->jack_work);
+
+	regmap_clear_bits(scodec->regmap, SUN8I_HMIC_CTRL1,
+			  BIT(SUN8I_HMIC_CTRL1_JACK_OUT_IRQ_EN) |
+			  BIT(SUN8I_HMIC_CTRL1_JACK_IN_IRQ_EN) |
+			  BIT(SUN8I_HMIC_CTRL1_HMIC_DATA_IRQ_EN));
+
+	scodec->jack = NULL;
+}
+
+static int sun8i_codec_component_get_jack_type(struct snd_soc_component *component)
+{
+	struct sun8i_codec *scodec = snd_soc_component_get_drvdata(component);
+
+	return scodec->jack_type;
+}
+
+static int sun8i_codec_component_set_jack(struct snd_soc_component *component,
+					  struct snd_soc_jack *jack, void *data)
+{
+	int ret = 0;
+
+	if (jack)
+		ret = sun8i_codec_enable_jack_detect(component, jack, data);
+	else
+		sun8i_codec_disable_jack_detect(component);
+
+	return ret;
+}
+
 static const struct snd_soc_component_driver sun8i_soc_component = {
 	.controls		= sun8i_codec_controls,
 	.num_controls		= ARRAY_SIZE(sun8i_codec_controls),
@@ -1275,19 +1705,137 @@ static const struct snd_soc_component_driver sun8i_soc_component = {
 	.num_dapm_widgets	= ARRAY_SIZE(sun8i_codec_dapm_widgets),
 	.dapm_routes		= sun8i_codec_dapm_routes,
 	.num_dapm_routes	= ARRAY_SIZE(sun8i_codec_dapm_routes),
+	.set_jack		= sun8i_codec_component_set_jack,
+	.get_jack_type		= sun8i_codec_component_get_jack_type,
 	.probe			= sun8i_codec_component_probe,
 	.idle_bias_on		= 1,
+	.suspend_bias_off	= 1,
 	.endianness		= 1,
 };
 
-static const struct regmap_config sun8i_codec_regmap_config = {
+static bool sun8i_codec_volatile_reg(struct device *dev, unsigned int reg)
+{
+	return reg == SUN8I_HMIC_STS;
+}
+
+static struct regmap_config sun8i_codec_regmap_config = {
 	.reg_bits	= 32,
 	.reg_stride	= 4,
 	.val_bits	= 32,
+	.volatile_reg	= sun8i_codec_volatile_reg,
 	.max_register	= SUN8I_DAC_MXR_SRC,
 
 	.cache_type	= REGCACHE_FLAT,
 };
+
+/* AC100 Codec Support (digital parts) */
+
+static int sun8i_codec_ac100_regmap_read(void *context,
+					 unsigned int reg, unsigned int *val)
+{
+	struct sun8i_codec *scodec = context;
+
+	return regmap_read(scodec->ac100_regmap, reg / 4, val);
+}
+
+static int sun8i_codec_ac100_regmap_write(void *context,
+					  unsigned int reg, unsigned int val)
+{
+	struct sun8i_codec *scodec = context;
+
+	return regmap_write(scodec->ac100_regmap, reg / 4, val);
+}
+
+static struct regmap_bus sun8i_codec_ac100_regmap_bus = {
+	.reg_write = sun8i_codec_ac100_regmap_write,
+	.reg_read = sun8i_codec_ac100_regmap_read,
+};
+
+static int ac100_codec_component_probe(struct snd_soc_component *component)
+{
+	struct sun8i_codec *scodec = snd_soc_component_get_drvdata(component);
+
+        /*
+	 * The system clock(SYSCLK) of AC100 must be 512*fs(fs=48KHz or 44.1KHz)
+	 * Source clocks from the SoC.
+	 */
+
+        regmap_update_bits(scodec->ac100_regmap, AC100_SYSCLK_CTRL,
+                            AC100_SYSCLK_CTRL_I2S1CLK_SRC_MASK,
+                            AC100_SYSCLK_CTRL_I2S1CLK_SRC_MCLK1);
+        regmap_update_bits(scodec->ac100_regmap, AC100_SYSCLK_CTRL,
+                            AC100_SYSCLK_CTRL_I2S2CLK_SRC_MASK,
+                            AC100_SYSCLK_CTRL_I2S2CLK_SRC_MCLK1);
+        regmap_update_bits(scodec->ac100_regmap, AC100_SYSCLK_CTRL,
+                            AC100_SYSCLK_CTRL_SYSCLK_SRC_MASK,
+                            AC100_SYSCLK_CTRL_SYSCLK_SRC_I2S1CLK);
+
+	/* Program the default sample rate. */
+	return sun8i_codec_update_sample_rate(scodec);
+}
+
+static int sun8i_codec_probe_ac100(struct platform_device *pdev)
+{
+	struct ac100_dev *ac100 = dev_get_drvdata(pdev->dev.parent);
+	struct device* dev = &pdev->dev;
+	struct sun8i_codec *scodec;
+	int ret, i;
+
+	scodec = devm_kzalloc(dev, sizeof(*scodec), GFP_KERNEL);
+	if (!scodec)
+		return -ENOMEM;
+
+	scodec->quirks = of_device_get_match_data(&pdev->dev);
+	scodec->ac100_regmap = ac100->regmap;
+
+	platform_set_drvdata(pdev, scodec);
+
+	/*
+	 * Caching is done by the MFD regmap, so disable the mapped regmap
+	 * cache.
+	 */
+	sun8i_codec_regmap_config.cache_type = REGCACHE_NONE;
+
+	/*
+	 * We need to create a custom regmap_bus that will map reads/writes to
+	 * the MFD regmap
+	 */
+	scodec->regmap = __regmap_lockdep_wrapper(__devm_regmap_init,
+		 "ac100-regmap-codec", dev,
+		  &sun8i_codec_ac100_regmap_bus, scodec,
+		  &sun8i_codec_regmap_config);
+	if (IS_ERR(scodec->regmap))
+		return dev_err_probe(dev, PTR_ERR(scodec->regmap),
+				     "Failed to create our regmap\n");
+
+	for (i = 0; i < ARRAY_SIZE(scodec->supplies); i++)
+		scodec->supplies[i].supply = ac100_supply_names[i];
+
+        ret = devm_regulator_bulk_get(dev, ARRAY_SIZE(scodec->supplies),
+                                      scodec->supplies);
+        if (ret)
+		return dev_err_probe(dev, ret, "Failed to request supplies\n");
+
+	ret = regulator_bulk_enable(ARRAY_SIZE(scodec->supplies),
+				    scodec->supplies);
+	if (ret)
+		return dev_err_probe(dev, ret, "Failed to enable supplies\n");
+
+	ret = devm_snd_soc_register_component(dev, &sun8i_soc_component,
+					      sun8i_codec_dais,
+					      ARRAY_SIZE(sun8i_codec_dais));
+	if (ret) {
+		dev_err_probe(dev, ret, "Failed to register codec\n");
+		goto err_disable_reg;
+	}
+
+	return 0;
+
+err_disable_reg:
+	regulator_bulk_disable(ARRAY_SIZE(scodec->supplies),
+			       scodec->supplies);
+	return ret;
+}
 
 static int sun8i_codec_probe(struct platform_device *pdev)
 {
@@ -1295,9 +1843,31 @@ static int sun8i_codec_probe(struct platform_device *pdev)
 	void __iomem *base;
 	int ret;
 
+	if (of_device_is_compatible(pdev->dev.of_node, "x-powers,ac100-codec"))
+		return sun8i_codec_probe_ac100(pdev);
+
 	scodec = devm_kzalloc(&pdev->dev, sizeof(*scodec), GFP_KERNEL);
 	if (!scodec)
 		return -ENOMEM;
+
+	scodec->quirks = of_device_get_match_data(&pdev->dev);
+	INIT_DELAYED_WORK(&scodec->jack_work, sun8i_codec_jack_work);
+	mutex_init(&scodec->jack_mutex);
+
+	platform_set_drvdata(pdev, scodec);
+
+	if (of_property_match_string(pdev->dev.of_node, "jack-type", "headset") >= 0)
+		scodec->jack_type = SND_JACK_HEADSET | SUN8I_CODEC_BUTTONS;
+	else if (of_property_match_string(pdev->dev.of_node, "jack-type", "headphone") >= 0)
+		scodec->jack_type = SND_JACK_HEADPHONE;
+
+	if (scodec->quirks->bus_clock) {
+		scodec->clk_bus = devm_clk_get(&pdev->dev, "bus");
+		if (IS_ERR(scodec->clk_bus)) {
+			dev_err(&pdev->dev, "Failed to get the bus clock\n");
+			return PTR_ERR(scodec->clk_bus);
+		}
+	}
 
 	scodec->clk_module = devm_clk_get(&pdev->dev, "mod");
 	if (IS_ERR(scodec->clk_module)) {
@@ -1311,17 +1881,14 @@ static int sun8i_codec_probe(struct platform_device *pdev)
 		return PTR_ERR(base);
 	}
 
-	scodec->regmap = devm_regmap_init_mmio_clk(&pdev->dev, "bus", base,
-						   &sun8i_codec_regmap_config);
+	scodec->regmap = devm_regmap_init_mmio(&pdev->dev, base,
+					       &sun8i_codec_regmap_config);
 	if (IS_ERR(scodec->regmap)) {
 		dev_err(&pdev->dev, "Failed to create our regmap\n");
 		return PTR_ERR(scodec->regmap);
 	}
 
-	scodec->quirks = of_device_get_match_data(&pdev->dev);
-
-	platform_set_drvdata(pdev, scodec);
-
+	regcache_cache_only(scodec->regmap, true);
 	pm_runtime_enable(&pdev->dev);
 	if (!pm_runtime_enabled(&pdev->dev)) {
 		ret = sun8i_codec_runtime_resume(&pdev->dev);
@@ -1351,22 +1918,37 @@ err_pm_disable:
 
 static void sun8i_codec_remove(struct platform_device *pdev)
 {
+	struct sun8i_codec *scodec = dev_get_drvdata(&pdev->dev);
+
+	if (scodec->ac100_regmap) {
+		regulator_bulk_disable(ARRAY_SIZE(scodec->supplies),
+				       scodec->supplies);
+		return;
+	}
+
 	pm_runtime_disable(&pdev->dev);
 	if (!pm_runtime_status_suspended(&pdev->dev))
 		sun8i_codec_runtime_suspend(&pdev->dev);
 }
 
 static const struct sun8i_codec_quirks sun8i_a33_quirks = {
+	.bus_clock	= true,
 	.legacy_widgets	= true,
 	.lrck_inversion	= true,
 };
 
 static const struct sun8i_codec_quirks sun50i_a64_quirks = {
+	.bus_clock	= true,
+	.jack_detection	= true,
+};
+
+static const struct sun8i_codec_quirks ac100_quirks = {
 };
 
 static const struct of_device_id sun8i_codec_of_match[] = {
 	{ .compatible = "allwinner,sun8i-a33-codec", .data = &sun8i_a33_quirks },
 	{ .compatible = "allwinner,sun50i-a64-codec", .data = &sun50i_a64_quirks },
+	{ .compatible = "x-powers,ac100-codec", .data = &ac100_quirks },
 	{}
 };
 MODULE_DEVICE_TABLE(of, sun8i_codec_of_match);
