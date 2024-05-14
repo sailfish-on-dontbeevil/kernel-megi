@@ -978,6 +978,10 @@
 			"MIC1", "Internal Microphone",
 			"Headset Microphone", "HBIAS",
 			"MIC2", "Headset Microphone";
+	simple-audio-card,jack-pins =
+			"1c22e00.codec", "Headphone Jack",
+			"1c22e00.codec", "Headset Microphone";
+	simple-audio-card,jack-pins-mask = <1>, <2>;
 
 	simple-audio-card,dai-link@1 {
 		format = "dsp_a";
