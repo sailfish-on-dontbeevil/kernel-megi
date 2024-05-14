@@ -838,6 +838,46 @@ int simple_util_init_aux_jacks(struct simple_util_priv *priv, char *prefix)
 			continue;
 
 		(void)snd_soc_component_set_jack(component, jack, NULL);
+
+		/* add pins to the jack */
+		int count = of_property_count_strings(card->dev->of_node, "simple-audio-card,jack-pins");
+		if (count < 0) {
+			if (count != -EINVAL)
+				dev_warn(card->dev, "Invalid jack-pins property\n");
+			continue;
+		}
+		if (count % 2) {
+			dev_warn(card->dev, "jack-pins property must have even number of strings\n");
+			continue;
+		}
+
+		for (int idx = 0; idx < count; idx += 2) {
+			const char *aux_dev_name, *pin_name;
+			u32 mask;
+
+			ret = of_property_read_string_index(card->dev->of_node, "simple-audio-card,jack-pins", idx, &aux_dev_name);
+			if (ret < 0)
+				continue;
+			ret = of_property_read_string_index(card->dev->of_node, "simple-audio-card,jack-pins", idx + 1, &pin_name);
+			if (ret < 0)
+				continue;
+			ret = of_property_read_u32_index(card->dev->of_node, "simple-audio-card,jack-pins-mask", idx / 2, &mask);
+			if (ret < 0) {
+				dev_warn(card->dev, "jack-pins-mask for jack pin %s/%s can't be read\n", aux_dev_name, pin_name);
+				continue;
+			}
+
+			if (!strcmp(aux_dev_name, component->name)) {
+				struct snd_soc_jack_pin *pin = devm_kzalloc(card->dev, sizeof(*pin), GFP_KERNEL);
+
+				pin->pin = pin_name;
+				pin->mask = mask;
+
+				dev_info(card->dev, "Adding jack %s pin %s (mask %d)\n",
+					 aux_dev_name, pin_name, pin->mask);
+				snd_soc_jack_add_pins(jack, 1, pin);
+			}
+		}
 	}
 	return 0;
 }
