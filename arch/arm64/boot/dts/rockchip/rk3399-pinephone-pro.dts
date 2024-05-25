@@ -948,7 +948,7 @@
 		compatible = "sony,imx258";
 		reg = <0x1a>;
 		pinctrl-names = "default";
-		pinctrl-0 = <&wcam_rst &wcam_pdn>;
+		pinctrl-0 = <&wcam_rst>;
 
 		clocks = <&cru SCLK_CIF_OUT>;
 		clock-names = "xvclk";
@@ -958,7 +958,6 @@
 		/*XXX: also depends on vcca1v8_codec for I2C bus power (currently always on) */
 
 		reset-gpios = <&gpio1 RK_PA0 GPIO_ACTIVE_LOW>;
-		powerdown-gpios = <&gpio2 RK_PD4 GPIO_ACTIVE_HIGH>;
 
 		orientation = <1>;
 		rotation = <270>;
@@ -1307,10 +1306,6 @@
 	camera {
 		wcam_rst: wcam-rst {
 			rockchip,pins = <1 RK_PA0 RK_FUNC_GPIO &pcfg_pull_none>;
-		};
-
-		wcam_pdn: wcam-pdn {
-			rockchip,pins = <2 RK_PD4 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 
 		ucam_rst: ucam-rst {
