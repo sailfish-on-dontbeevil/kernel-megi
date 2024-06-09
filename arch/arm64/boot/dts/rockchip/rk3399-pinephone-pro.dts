@@ -940,9 +940,8 @@
 
 	pinctrl-0 = <&i2c1_xfer &cif_clkouta>;
 
-	assigned-clocks = <&cru SCLK_CIF_OUT &cru SCLK_CIF_OUT_SRC>;
-	assigned-clock-parents = <&cru SCLK_CIF_OUT_SRC &cru PLL_GPLL>;
-	assigned-clock-rates = <19200000 0>;
+	assigned-clocks = <&cru SCLK_CIF_OUT>;
+	assigned-clock-rates = <24000000>;
 
 	wcam: camera@1a {
 		compatible = "sony,imx258";
