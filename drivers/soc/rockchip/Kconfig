@@ -30,4 +30,9 @@ config ROCKCHIP_DTPM
 	  on this platform. That will create all the power capping capable
 	  devices.
 
+config ROCKCHIP_NPOR_POWERGOOD
+	bool "Rockchip NPOR Powergood"
+	help
+	  Say y if SOC integrate ROCKCHIP NPOR Powergood.
+
 endif
