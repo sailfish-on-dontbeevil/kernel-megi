@@ -1399,7 +1399,9 @@ int iwl_mvm_set_tx_power(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 	if (tx_power == IWL_DEFAULT_MAX_TX_POWER)
 		cmd.common.pwr_restriction = cpu_to_le16(IWL_DEV_MAX_TX_POWER);
 
-	if (cmd_ver == 7)
+	if (cmd_ver == 8)
+		len = sizeof(cmd.v8);
+	else if (cmd_ver == 7)
 		len = sizeof(cmd.v7);
 	else if (cmd_ver == 6)
 		len = sizeof(cmd.v6);
@@ -4641,7 +4643,7 @@ static int iwl_mvm_roc_station(struct iwl_mvm *mvm,
 
 	if (fw_ver == IWL_FW_CMD_VER_UNKNOWN) {
 		ret = iwl_mvm_send_aux_roc_cmd(mvm, channel, vif, duration);
-	} else if (fw_ver == 3) {
+	} else if (fw_ver >= 3) {
 		ret = iwl_mvm_roc_add_cmd(mvm, channel, vif, duration,
 					  ROC_ACTIVITY_HOTSPOT);
 	} else {

@@ -740,6 +740,7 @@ static int system_1p_ev_to_ump_midi1(const struct snd_seq_event *event,
 				     union snd_ump_midi1_msg *data,
 				     unsigned char status)
 {
+	data->system.type = UMP_MSG_TYPE_SYSTEM; // override
 	data->system.status = status;
 	data->system.parm1 = event->data.control.value & 0x7f;
 	return 1;
@@ -751,6 +752,7 @@ static int system_2p_ev_to_ump_midi1(const struct snd_seq_event *event,
 				     union snd_ump_midi1_msg *data,
 				     unsigned char status)
 {
+	data->system.type = UMP_MSG_TYPE_SYSTEM; // override
 	data->system.status = status;
 	data->system.parm1 = event->data.control.value & 0x7f;
 	data->system.parm2 = (event->data.control.value >> 7) & 0x7f;
@@ -1072,6 +1074,8 @@ static const struct seq_ev_to_ump seq_ev_ump_encoders[] = {
 	{ SNDRV_SEQ_EVENT_STOP, UMP_SYSTEM_STATUS_STOP,
 	  system_ev_to_ump_midi1, system_ev_to_ump_midi2 },
 	{ SNDRV_SEQ_EVENT_SENSING, UMP_SYSTEM_STATUS_ACTIVE_SENSING,
+	  system_ev_to_ump_midi1, system_ev_to_ump_midi2 },
+	{ SNDRV_SEQ_EVENT_RESET, UMP_SYSTEM_STATUS_RESET,
 	  system_ev_to_ump_midi1, system_ev_to_ump_midi2 },
 };
 
