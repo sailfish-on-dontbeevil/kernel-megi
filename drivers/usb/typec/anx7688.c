@@ -1975,7 +1975,7 @@ static int anx7688_i2c_probe(struct i2c_client *client)
 		return irq_cabledet;
 	}
 
-	ret = devm_device_add_groups(&client->dev, anx7688_groups);
+	ret = device_add_groups(&client->dev, anx7688_groups);
 	if (ret)
 		return ret;
 
