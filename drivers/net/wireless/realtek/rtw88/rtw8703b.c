@@ -645,7 +645,7 @@ static void rtw8703b_pwrtrack_init(struct rtw_dev *rtwdev)
 
 static void rtw8703b_phy_set_param(struct rtw_dev *rtwdev)
 {
-	u8 xtal_cap = rtwdev->efuse.crystal_cap & 0x3F;
+	u8 xtal_cap = rtwdev->efuse.crystal_cap & XCAP_MASK_8703B;
 
 	/* power on BB/RF domain */
 	rtw_write16_set(rtwdev, REG_SYS_FUNC_EN,
@@ -1021,6 +1021,8 @@ static void query_phy_status_ofdm(struct rtw_dev *rtwdev, u8 *phy_raw,
 	val_s8 = clamp_t(s8, -val_s8 >> 1, 0, 64);
 	val_s8 &= 0x3F; /* 64->0: second path of 1SS rate is 64 */
 	dm_info->rx_evm_dbm[RF_PATH_A] = val_s8;
+
+	rtw_phy_parsing_cfo(rtwdev, pkt_stat);
 }
 
 static void query_phy_status(struct rtw_dev *rtwdev, u8 *phy_status,
@@ -1063,6 +1065,7 @@ static void rtw8703b_query_rx_desc(struct rtw_dev *rtwdev, u8 *rx_desc,
 
 	hdr = (struct ieee80211_hdr *)(rx_desc + desc_sz + pkt_stat->shift +
 				       pkt_stat->drv_info_sz);
+	pkt_stat->hdr = hdr;
 
 	pkt_stat->bw = GET_RX_DESC_BW(rx_desc);
 
@@ -1809,6 +1812,183 @@ static void rtw8703b_coex_set_wl_rx_gain(struct rtw_dev *rtwdev, bool low_gain)
 {
 }
 
+#define RTW8703B_EDCCA_INIT 0x7f
+static void rtw8703b_adaptivity_init(struct rtw_dev *rtwdev)
+{
+	rtw_phy_set_edcca_th(rtwdev, RTW8703B_EDCCA_INIT, RTW8703B_EDCCA_INIT);
+
+	/* mac edcca state settings: enable EDCCA, EDCCA count down */
+	rtw_write32_clr(rtwdev, REG_TX_PTCL_CTRL, BIT_DIS_EDCCA);
+	rtw_write32_set(rtwdev, REG_RD_CTRL, BIT_EDCCA_MSK_CNTDOWN_EN);
+
+	rtw_write32_mask(rtwdev, REG_EDCCA_DCNF, BIT(21) | BIT(20), 0x1);
+}
+
+#define IGI_TARGET 0x32
+static void rtw8703b_adaptivity(struct rtw_dev *rtwdev)
+{
+	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
+	s8 l2h, h2l;
+	u8 igi;
+	u8 l2h_dyn_min;
+
+	igi = dm_info->igi_history[0];
+	if (dm_info->edcca_mode == RTW_EDCCA_NORMAL) {
+		l2h = max_t(s8, igi + EDCCA_IGI_L2H_DIFF, EDCCA_TH_L2H_LB);
+		h2l = l2h - EDCCA_L2H_H2L_DIFF_NORMAL;
+	} else {
+		l2h_dyn_min = (u8)(dm_info->l2h_th_ini + IGI_TARGET);
+		if (igi < l2h_dyn_min)
+			l2h = igi;
+		else
+			l2h = l2h_dyn_min;
+		h2l = l2h - EDCCA_L2H_H2L_DIFF;
+	}
+
+	rtw_dbg(rtwdev, RTW_DBG_ADAPTIVITY, "l2h=%d, h2l=%d", l2h, h2l);
+	rtw_phy_set_edcca_th(rtwdev, l2h, h2l);
+}
+
+static void rtw8703b_cfo_init(struct rtw_dev *rtwdev)
+{
+	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
+	struct rtw_cfo_track *cfo = &dm_info->cfo_track;
+
+	cfo->crystal_cap = rtwdev->efuse.crystal_cap;
+	cfo->is_adjust = true;
+	cfo->atc_enable = rtw_read32_mask(rtwdev, REG_OFDM1_CFOTRK, BIT_EN_ATC);
+}
+
+#define XCAP_EXTEND(val) ({typeof(val) _v = (val); _v | _v << 6; })
+static void rtw8703b_set_crystal_cap_reg(struct rtw_dev *rtwdev, u8 crystal_cap)
+{
+	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
+	struct rtw_cfo_track *cfo = &dm_info->cfo_track;
+	u32 val = 0;
+
+	val = XCAP_EXTEND(crystal_cap);
+	cfo->crystal_cap = crystal_cap;
+	rtw_write32_mask(rtwdev, REG_AFE_CTRL3, BIT_MASK_XTAL, val);
+}
+
+static void rtw8703b_set_crystal_cap(struct rtw_dev *rtwdev, u8 crystal_cap)
+{
+	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
+	struct rtw_cfo_track *cfo = &dm_info->cfo_track;
+
+	if (cfo->crystal_cap == crystal_cap)
+		return;
+
+	rtw8703b_set_crystal_cap_reg(rtwdev, crystal_cap);
+	rtw_dbg(rtwdev, RTW_DBG_CFO, "[CFO] XTAL=0x%x\n", crystal_cap);
+}
+
+static void rtw8703b_cfo_tracking_reset(struct rtw_dev *rtwdev)
+{
+	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
+	struct rtw_cfo_track *cfo = &dm_info->cfo_track;
+
+	cfo->is_adjust = true;
+
+	if (cfo->crystal_cap > rtwdev->efuse.crystal_cap)
+		rtw8703b_set_crystal_cap(rtwdev, cfo->crystal_cap - 1);
+	else if (cfo->crystal_cap < rtwdev->efuse.crystal_cap)
+		rtw8703b_set_crystal_cap(rtwdev, cfo->crystal_cap + 1);
+}
+
+#define REPORT_TO_KHZ(val) ({typeof(val) _v = (val); (_v << 1) + (_v >> 1); })
+static s32 rtw8703b_cfo_calc_avg(struct rtw_dev *rtwdev)
+{
+	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
+	struct rtw_cfo_track *cfo = &dm_info->cfo_track;
+	s32 cfo_avg, cfo_rpt_sum;
+
+	cfo_rpt_sum = REPORT_TO_KHZ(cfo->cfo_tail[0]);
+
+	if (cfo->cfo_cnt[0])
+		cfo_avg = cfo_rpt_sum / cfo->cfo_cnt[0];
+	else
+		cfo_avg = 0;
+
+	cfo->cfo_tail[0] = 0;
+	cfo->cfo_cnt[0] = 0;
+
+	return cfo_avg;
+}
+
+#define CFO_TRK_ENABLE_TH 20
+#define CFO_TRK_STOP_TH 10
+#define CFO_TRK_ADJ_TH 10
+#define CFO_ATC_TH 80
+
+static void rtw8703b_cfo_need_adjust(struct rtw_dev *rtwdev, s32 cfo_avg)
+{
+	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
+	struct rtw_cfo_track *cfo = &dm_info->cfo_track;
+
+	if (!cfo->is_adjust) {
+		if (abs(cfo_avg) > CFO_TRK_ENABLE_TH)
+			cfo->is_adjust = true;
+	} else {
+		if (abs(cfo_avg) <= CFO_TRK_STOP_TH)
+			cfo->is_adjust = false;
+	}
+
+	if (!rtw_coex_disabled(rtwdev)) {
+		cfo->is_adjust = false;
+		rtw8703b_set_crystal_cap(rtwdev, rtwdev->efuse.crystal_cap);
+	}
+}
+
+static void rtw8703b_cfo_set_atc(struct rtw_dev *rtwdev, bool enable)
+{
+	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
+	struct rtw_cfo_track *cfo = &dm_info->cfo_track;
+
+	if (cfo->atc_enable == enable)
+		return;
+
+	rtw_write32_mask(rtwdev, REG_OFDM1_CFOTRK, BIT_EN_ATC, enable);
+	cfo->atc_enable = enable;
+	rtw_dbg(rtwdev, RTW_DBG_CFO, "[CFO] ATC: %s\n",
+		enable ? "enabled" : "disabled");
+}
+
+static void rtw8703b_cfo_track(struct rtw_dev *rtwdev)
+{
+	struct rtw_dm_info *dm_info = &rtwdev->dm_info;
+	struct rtw_cfo_track *cfo = &dm_info->cfo_track;
+	s8 crystal_cap = cfo->crystal_cap;
+	s32 cfo_avg = 0;
+
+	if (rtwdev->sta_cnt != 1) {
+		rtw8703b_cfo_tracking_reset(rtwdev);
+		return;
+	}
+
+	if (cfo->packet_count == cfo->packet_count_pre)
+		return;
+
+	cfo->packet_count_pre = cfo->packet_count;
+	cfo_avg = rtw8703b_cfo_calc_avg(rtwdev);
+	rtw8703b_cfo_need_adjust(rtwdev, cfo_avg);
+
+	if (cfo->is_adjust) {
+		if (cfo_avg > CFO_TRK_ADJ_TH)
+			crystal_cap++;
+		else if (cfo_avg < -CFO_TRK_ADJ_TH)
+			crystal_cap--;
+
+		crystal_cap = clamp_t(s8, crystal_cap, 0, XCAP_MASK_8703B);
+		rtw8703b_set_crystal_cap(rtwdev, (u8)crystal_cap);
+	}
+
+	if (abs(cfo_avg) > CFO_ATC_TH)
+		rtw8703b_cfo_set_atc(rtwdev, true);
+	else
+		rtw8703b_cfo_set_atc(rtwdev, false);
+}
+
 static const u8 rtw8703b_pwrtrk_2gb_n[] = {
 	0, 0, 1, 2, 2, 3, 3, 4, 4, 4, 4, 5, 5, 6, 6,
 	7, 7, 7, 7, 8, 8, 9, 9, 10, 10, 10, 11, 11, 11, 11
@@ -1941,6 +2121,15 @@ static const struct coex_tdma_para tdma_sant_8703b[] = {
 	{ {0x61, 0x08, 0x03, 0x11, 0x11} },
 };
 
+static struct rtw_hw_reg_offset rtw8703b_edcca_th[] = {
+	[EDCCA_TH_L2H_IDX] = {
+		{.addr = 0xc4c, .mask = MASKBYTE0}, .offset = 0
+	},
+	[EDCCA_TH_H2L_IDX] = {
+		{.addr = 0xc4c, .mask = MASKBYTE2}, .offset = 0
+	},
+};
+
 static struct rtw_chip_ops rtw8703b_ops = {
 	.mac_init		= rtw8723x_mac_init,
 	.dump_fw_crash		= NULL,
@@ -1969,10 +2158,10 @@ static struct rtw_chip_ops rtw8703b_ops = {
 	.config_bfee		= NULL,
 	.set_gid_table		= NULL,
 	.cfg_csi_rate		= NULL,
-	.adaptivity_init	= NULL,
-	.adaptivity		= NULL,
-	.cfo_init		= NULL,
-	.cfo_track		= NULL,
+	.adaptivity_init	= rtw8703b_adaptivity_init,
+	.adaptivity		= rtw8703b_adaptivity,
+	.cfo_init		= rtw8703b_cfo_init,
+	.cfo_track		= rtw8703b_cfo_track,
 	.config_tx_path		= NULL,
 	.config_txrx_mode	= NULL,
 	.fill_txdesc_checksum	= rtw8723x_fill_txdesc_checksum,
@@ -2012,6 +2201,9 @@ const struct rtw_chip_info rtw8703b_hw_spec = {
 	.rx_ldpc = false,
 	.tx_stbc = false,
 	.max_power_index = 0x3f,
+	.edcca_th = rtw8703b_edcca_th,
+	.l2h_th_ini_cs = 10, /* -50 dBm */
+	.l2h_th_ini_ad = -11,
 	.ampdu_density = IEEE80211_HT_MPDU_DENSITY_16,
 
 	.path_div_supported = false,
