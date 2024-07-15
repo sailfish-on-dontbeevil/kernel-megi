@@ -1,715 +1,1909 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
- * A V4L2 driver for Galaxycore GC2145 camera.
- * Copyright (C) 2023, STMicroelectronics SA
+ * Galaxycore GC2145 driver.
+ * Copyright (C) 2018 Ondřej Jirman <megi@xff.cz>.
+ * Copyright (C) 2022, STMicroelectronics SA
  *
- * Inspired by the imx219.c driver
- *
- * Datasheet v1.0 available at http://files.pine64.org/doc/datasheet/PinebookPro/GC2145%20CSP%20DataSheet%20release%20V1.0_20131201.pdf
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  */
 
-#include <linux/clk.h>
-#include <linux/delay.h>
-#include <linux/gpio/consumer.h>
-#include <linux/i2c.h>
-#include <linux/module.h>
-#include <linux/pm_runtime.h>
-#include <linux/regulator/consumer.h>
-#include <linux/units.h>
+//#define DEBUG
 
-#include <media/mipi-csi2.h>
-#include <media/v4l2-cci.h>
+#include <asm/div64.h>
+#include <linux/clk.h>
+#include <linux/clk-provider.h>
+#include <linux/clkdev.h>
+#include <linux/ctype.h>
+#include <linux/delay.h>
+#include <linux/device.h>
+#include <linux/firmware.h>
+#include <linux/i2c.h>
+#include <linux/init.h>
+#include <linux/module.h>
+#include <linux/of_device.h>
+#include <linux/slab.h>
+#include <linux/types.h>
+#include <linux/gpio/consumer.h>
+#include <linux/regulator/consumer.h>
+#include <media/v4l2-async.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
-#include <media/v4l2-event.h>
 #include <media/v4l2-fwnode.h>
-#include <media/v4l2-mediabus.h>
+#include <media/v4l2-subdev.h>
 
-/* Chip ID */
-#define GC2145_CHIP_ID		0x2145
-
-/* Page 0 */
-#define GC2145_REG_EXPOSURE	CCI_REG16(0x03)
-#define GC2145_REG_HBLANK	CCI_REG16(0x05)
-#define GC2145_REG_VBLANK	CCI_REG16(0x07)
-#define GC2145_REG_ROW_START	CCI_REG16(0x09)
-#define GC2145_REG_COL_START	CCI_REG16(0x0b)
-#define GC2145_REG_WIN_HEIGHT	CCI_REG16(0x0d)
-#define GC2145_REG_WIN_WIDTH	CCI_REG16(0x0f)
-#define GC2145_REG_ANALOG_MODE1	CCI_REG8(0x17)
-#define GC2145_REG_OUTPUT_FMT	CCI_REG8(0x84)
-#define GC2145_REG_SYNC_MODE	CCI_REG8(0x86)
-#define GC2145_SYNC_MODE_COL_SWITCH	BIT(4)
-#define GC2145_SYNC_MODE_ROW_SWITCH	BIT(5)
-#define GC2145_REG_BYPASS_MODE	CCI_REG8(0x89)
-#define GC2145_BYPASS_MODE_SWITCH	BIT(5)
-#define GC2145_REG_DEBUG_MODE2	CCI_REG8(0x8c)
-#define GC2145_REG_DEBUG_MODE3	CCI_REG8(0x8d)
-#define GC2145_REG_CROP_ENABLE	CCI_REG8(0x90)
-#define GC2145_REG_CROP_Y	CCI_REG16(0x91)
-#define GC2145_REG_CROP_X	CCI_REG16(0x93)
-#define GC2145_REG_CROP_HEIGHT	CCI_REG16(0x95)
-#define GC2145_REG_CROP_WIDTH	CCI_REG16(0x97)
-#define GC2145_REG_GLOBAL_GAIN	CCI_REG8(0xb0)
-#define GC2145_REG_CHIP_ID	CCI_REG16(0xf0)
-#define GC2145_REG_PAD_IO	CCI_REG8(0xf2)
-#define GC2145_REG_PAGE_SELECT	CCI_REG8(0xfe)
-/* Page 3 */
-#define GC2145_REG_DPHY_ANALOG_MODE1	CCI_REG8(0x01)
-#define GC2145_DPHY_MODE_PHY_CLK_EN	BIT(0)
-#define GC2145_DPHY_MODE_PHY_LANE0_EN	BIT(1)
-#define GC2145_DPHY_MODE_PHY_LANE1_EN	BIT(2)
-#define GC2145_DPHY_MODE_PHY_CLK_LANE_P2S_SEL	BIT(7)
-#define GC2145_REG_DPHY_ANALOG_MODE2	CCI_REG8(0x02)
-#define GC2145_DPHY_CLK_DIFF(a)		((a) & 0x07)
-#define GC2145_DPHY_LANE0_DIFF(a)	(((a) & 0x07) << 4)
-#define GC2145_REG_DPHY_ANALOG_MODE3	CCI_REG8(0x03)
-#define GC2145_DPHY_LANE1_DIFF(a)	((a) & 0x07)
-#define GC2145_DPHY_CLK_DELAY		BIT(4)
-#define GC2145_DPHY_LANE0_DELAY		BIT(5)
-#define GC2145_DPHY_LANE1_DELAY		BIT(6)
-#define GC2145_REG_FIFO_FULL_LVL_LOW	CCI_REG8(0x04)
-#define GC2145_REG_FIFO_FULL_LVL_HIGH	CCI_REG8(0x05)
-#define GC2145_REG_FIFO_MODE		CCI_REG8(0x06)
-#define GC2145_FIFO_MODE_READ_GATE	BIT(3)
-#define GC2145_FIFO_MODE_MIPI_CLK_MODULE	BIT(7)
-#define GC2145_REG_BUF_CSI2_MODE	CCI_REG8(0x10)
-#define GC2145_CSI2_MODE_DOUBLE		BIT(0)
-#define GC2145_CSI2_MODE_RAW8		BIT(2)
-#define GC2145_CSI2_MODE_MIPI_EN	BIT(4)
-#define GC2145_CSI2_MODE_EN		BIT(7)
-#define GC2145_REG_MIPI_DT	CCI_REG8(0x11)
-#define GC2145_REG_LWC_LOW	CCI_REG8(0x12)
-#define GC2145_REG_LWC_HIGH	CCI_REG8(0x13)
-#define GC2145_REG_DPHY_MODE	CCI_REG8(0x15)
-#define GC2145_DPHY_MODE_TRIGGER_PROG	BIT(4)
-#define GC2145_REG_FIFO_GATE_MODE	CCI_REG8(0x17)
-#define GC2145_REG_T_LPX	CCI_REG8(0x21)
-#define GC2145_REG_T_CLK_HS_PREPARE	CCI_REG8(0x22)
-#define GC2145_REG_T_CLK_ZERO	CCI_REG8(0x23)
-#define GC2145_REG_T_CLK_PRE	CCI_REG8(0x24)
-#define GC2145_REG_T_CLK_POST	CCI_REG8(0x25)
-#define GC2145_REG_T_CLK_TRAIL	CCI_REG8(0x26)
-#define GC2145_REG_T_HS_EXIT	CCI_REG8(0x27)
-#define GC2145_REG_T_WAKEUP	CCI_REG8(0x28)
-#define GC2145_REG_T_HS_PREPARE	CCI_REG8(0x29)
-#define GC2145_REG_T_HS_ZERO	CCI_REG8(0x2a)
-#define GC2145_REG_T_HS_TRAIL	CCI_REG8(0x2b)
-
-/* External clock frequency is 24.0MHz */
-#define GC2145_XCLK_FREQ	(24 * HZ_PER_MHZ)
-
-#define GC2145_NATIVE_WIDTH	1616U
-#define GC2145_NATIVE_HEIGHT	1232U
-
-/**
- * struct gc2145_mode - GC2145 mode description
- * @width: frame width (in pixels)
- * @height: frame height (in pixels)
- * @reg_seq: registers config sequence to enter into the mode
- * @reg_seq_size: size of the sequence
- * @pixel_rate: pixel rate associated with the mode
- * @crop: window area captured
- * @hblank: default horizontal blanking
- * @vblank: default vertical blanking
- * @link_freq_index: index within the link frequency menu
+/*
+ * GC2145
+ * - 2M pixel
+ * - 1600 x 1200, max frame rate: 720P, 30fps@96MHz
+ * - Bayer RGB, RGB565, YCbCr 4:2:2
+ * - AE, AWB
+ * - PLL
+ * - AVDD 2.7-3V, DVDD 1.7-1.9V, IOVDD 1.7-3V
+ * - Power 180mW / 200uA standby
+ * - Interpolation, denoise, gamma, edge enhance
+ * I2C:
+ * - write reg8
+ * - read reg8
+ * - write reg8 multi
+ *
+ * Power on:
+ * MCLK on
+ * PWDN, RESET low
+ * IOVDD, AVDD, DVDD on in sequence
+ * RESET high
+ *
+ * Power off:
+ * PWDN, RESET low
+ * RESET high
+ * delay
+ * PWDN high
+ * RESET low
+ * IOVDD, AVDD, DVDD off
+ * PWDN low?
+ * MCLK off
+ *
+ * Init:
+ * - check chip id
+ * - setup pll
+ * - setup CSI interface / PAD drive strength
+ * - setup resolution/fps
+ * - enable postprocessing
+ *   (ISP related chapter)
+ *
+ * Stream on:
+ * - ???
  */
-struct gc2145_mode {
-	unsigned int width;
-	unsigned int height;
-	const struct cci_reg_sequence *reg_seq;
-	size_t reg_seq_size;
-	unsigned long pixel_rate;
-	struct v4l2_rect crop;
-	unsigned int hblank;
-	unsigned int vblank;
-	unsigned int link_freq_index;
+
+#define GC2145_FIRMWARE_PARAMETERS	"gc2145-init.bin"
+
+#define GC2145_SENSOR_WIDTH_MIN		88u
+#define GC2145_SENSOR_HEIGHT_MIN	72u
+
+//XXX: 1616x1232 8H/16V dummy pixels on each side
+#define GC2145_SENSOR_WIDTH_MAX		1600u
+#define GC2145_SENSOR_HEIGHT_MAX	1200u
+
+/* {{{ Register definitions */
+
+/* system registers */
+#define GC2145_REG_CHIP_ID			0xf0
+#define GC2145_REG_CHIP_ID_VALUE		0x2145
+
+#define GC2145_REG_PAD_IO		0xf2
+#define GC2145_REG_PLL_MODE1		0xf7
+#define GC2145_REG_PLL_MODE2		0xf8
+#define GC2145_REG_CM_MODE		0xf9
+#define GC2145_REG_CLK_DIV_MODE		0xfa
+#define GC2145_REG_ANALOG_PWC		0xfc
+#define GC2145_REG_SCALER_MODE		0xfd
+#define GC2145_REG_RESET		0xfe
+
+#define GC2145_P0_EXPOSURE_HI		0x03
+#define GC2145_P0_EXPOSURE_LO		0x04
+#define GC2145_P0_HBLANK_DELAY_HI	0x05
+#define GC2145_P0_HBLANK_DELAY_LO	0x06
+#define GC2145_P0_VBLANK_DELAY_HI	0x07
+#define GC2145_P0_VBLANK_DELAY_LO	0x08
+#define GC2145_P0_ROW_START_HI		0x09
+#define GC2145_P0_ROW_START_LO		0x0a
+#define GC2145_P0_COL_START_HI		0x0b
+#define GC2145_P0_COL_START_LO		0x0c
+#define GC2145_P0_WIN_HEIGHT_HI		0x0d
+#define GC2145_P0_WIN_HEIGHT_LO		0x0e
+#define GC2145_P0_WIN_WIDTH_HI		0x0f
+#define GC2145_P0_WIN_WIDTH_LO		0x10
+#define GC2145_P0_SH_DELAY_HI		0x11
+#define GC2145_P0_SH_DELAY_LO		0x12
+#define GC2145_P0_START_TIME		0x13
+#define GC2145_P0_END_TIME		0x14
+
+#define GC2145_P0_ISP_BLK_ENABLE1	0x80
+#define GC2145_P0_ISP_BLK_ENABLE2	0x81
+#define GC2145_P0_ISP_BLK_ENABLE3	0x82
+#define GC2145_P0_ISP_SPECIAL_EFFECT	0x83
+#define GC2145_P0_ISP_OUT_FORMAT	0x84
+#define GC2145_P0_FRAME_START		0x85
+#define GC2145_P0_SYNC_MODE		0x86
+#define GC2145_P0_ISP_BLK_ENABLE4	0x87
+#define GC2145_P0_ISP_MODULE_GATING	0x88
+#define GC2145_P0_ISP_BYPASS_MODE	0x89
+#define GC2145_P0_DEBUG_MODE2		0x8c
+#define GC2145_P0_DEBUG_MODE3		0x8d
+
+#define GC2145_P0_CROP_ENABLE		0x90
+#define GC2145_P0_CROP_Y1_HI		0x91
+#define GC2145_P0_CROP_Y1_LO		0x92
+#define GC2145_P0_CROP_X1_HI		0x93
+#define GC2145_P0_CROP_X1_LO		0x94
+#define GC2145_P0_CROP_WIN_HEIGHT_HI	0x95
+#define GC2145_P0_CROP_WIN_HEIGHT_LO	0x96
+#define GC2145_P0_CROP_WIN_WIDTH_HI	0x97
+#define GC2145_P0_CROP_WIN_WIDTH_LO	0x98
+
+#define GC2145_P0_SUBSAMPLE_RATIO	0x99
+#define GC2145_P0_SUBSAMPLE_MODE	0x9a
+#define GC2145_P0_SUB_ROW_N1		0x9b
+#define GC2145_P0_SUB_ROW_N2		0x9c
+#define GC2145_P0_SUB_ROW_N3		0x9d
+#define GC2145_P0_SUB_ROW_N4		0x9e
+#define GC2145_P0_SUB_COL_N1		0x9f
+#define GC2145_P0_SUB_COL_N2		0xa0
+#define GC2145_P0_SUB_COL_N3		0xa1
+#define GC2145_P0_SUB_COL_N4		0xa2
+#define GC2145_P0_OUT_BUF_ENABLE	0xc2
+
+/* }}} */
+
+struct gc2145_pixfmt {
+	u32 code;
+	u32 colorspace;
+	u8 fmt_setup;
 };
 
-#define GC2145_DEFAULT_EXPOSURE	0x04e2
-#define GC2145_DEFAULT_GLOBAL_GAIN	0x55
-static const struct cci_reg_sequence gc2145_common_regs[] = {
-	{GC2145_REG_PAGE_SELECT, 0x00},
-	/* SH Delay */
-	{CCI_REG8(0x12), 0x2e},
-	/* Flip */
-	{GC2145_REG_ANALOG_MODE1, 0x14},
-	/* Analog Conf */
-	{CCI_REG8(0x18), 0x22}, {CCI_REG8(0x19), 0x0e}, {CCI_REG8(0x1a), 0x01},
-	{CCI_REG8(0x1b), 0x4b}, {CCI_REG8(0x1c), 0x07}, {CCI_REG8(0x1d), 0x10},
-	{CCI_REG8(0x1e), 0x88}, {CCI_REG8(0x1f), 0x78}, {CCI_REG8(0x20), 0x03},
-	{CCI_REG8(0x21), 0x40}, {CCI_REG8(0x22), 0xa0}, {CCI_REG8(0x24), 0x16},
-	{CCI_REG8(0x25), 0x01}, {CCI_REG8(0x26), 0x10}, {CCI_REG8(0x2d), 0x60},
-	{CCI_REG8(0x30), 0x01}, {CCI_REG8(0x31), 0x90}, {CCI_REG8(0x33), 0x06},
-	{CCI_REG8(0x34), 0x01},
-	/* ISP related */
-	{CCI_REG8(0x80), 0x7f}, {CCI_REG8(0x81), 0x26}, {CCI_REG8(0x82), 0xfa},
-	{CCI_REG8(0x83), 0x00}, {CCI_REG8(0x84), 0x02}, {CCI_REG8(0x86), 0x02},
-	{CCI_REG8(0x88), 0x03},
-	{GC2145_REG_BYPASS_MODE, 0x03},
-	{CCI_REG8(0x85), 0x08}, {CCI_REG8(0x8a), 0x00}, {CCI_REG8(0x8b), 0x00},
-	{GC2145_REG_GLOBAL_GAIN, GC2145_DEFAULT_GLOBAL_GAIN},
-	{CCI_REG8(0xc3), 0x00}, {CCI_REG8(0xc4), 0x80}, {CCI_REG8(0xc5), 0x90},
-	{CCI_REG8(0xc6), 0x3b}, {CCI_REG8(0xc7), 0x46},
-	/* BLK */
-	{GC2145_REG_PAGE_SELECT, 0x00},
-	{CCI_REG8(0x40), 0x42}, {CCI_REG8(0x41), 0x00}, {CCI_REG8(0x43), 0x5b},
-	{CCI_REG8(0x5e), 0x00}, {CCI_REG8(0x5f), 0x00}, {CCI_REG8(0x60), 0x00},
-	{CCI_REG8(0x61), 0x00}, {CCI_REG8(0x62), 0x00}, {CCI_REG8(0x63), 0x00},
-	{CCI_REG8(0x64), 0x00}, {CCI_REG8(0x65), 0x00}, {CCI_REG8(0x66), 0x20},
-	{CCI_REG8(0x67), 0x20}, {CCI_REG8(0x68), 0x20}, {CCI_REG8(0x69), 0x20},
-	{CCI_REG8(0x76), 0x00}, {CCI_REG8(0x6a), 0x08}, {CCI_REG8(0x6b), 0x08},
-	{CCI_REG8(0x6c), 0x08}, {CCI_REG8(0x6d), 0x08}, {CCI_REG8(0x6e), 0x08},
-	{CCI_REG8(0x6f), 0x08}, {CCI_REG8(0x70), 0x08}, {CCI_REG8(0x71), 0x08},
-	{CCI_REG8(0x76), 0x00}, {CCI_REG8(0x72), 0xf0}, {CCI_REG8(0x7e), 0x3c},
-	{CCI_REG8(0x7f), 0x00},
-	{GC2145_REG_PAGE_SELECT, 0x02},
-	{CCI_REG8(0x48), 0x15}, {CCI_REG8(0x49), 0x00}, {CCI_REG8(0x4b), 0x0b},
-	/* AEC */
-	{GC2145_REG_PAGE_SELECT, 0x00},
-	{GC2145_REG_EXPOSURE, GC2145_DEFAULT_EXPOSURE},
-	{GC2145_REG_PAGE_SELECT, 0x01},
-	{CCI_REG8(0x01), 0x04}, {CCI_REG8(0x02), 0xc0}, {CCI_REG8(0x03), 0x04},
-	{CCI_REG8(0x04), 0x90}, {CCI_REG8(0x05), 0x30}, {CCI_REG8(0x06), 0x90},
-	{CCI_REG8(0x07), 0x30}, {CCI_REG8(0x08), 0x80}, {CCI_REG8(0x09), 0x00},
-	{CCI_REG8(0x0a), 0x82}, {CCI_REG8(0x0b), 0x11}, {CCI_REG8(0x0c), 0x10},
-	{CCI_REG8(0x11), 0x10}, {CCI_REG8(0x13), 0x7b}, {CCI_REG8(0x17), 0x00},
-	{CCI_REG8(0x1c), 0x11}, {CCI_REG8(0x1e), 0x61}, {CCI_REG8(0x1f), 0x35},
-	{CCI_REG8(0x20), 0x40}, {CCI_REG8(0x22), 0x40}, {CCI_REG8(0x23), 0x20},
-	{GC2145_REG_PAGE_SELECT, 0x02},
-	{CCI_REG8(0x0f), 0x04},
-	{GC2145_REG_PAGE_SELECT, 0x01},
-	{CCI_REG8(0x12), 0x35}, {CCI_REG8(0x15), 0xb0}, {CCI_REG8(0x10), 0x31},
-	{CCI_REG8(0x3e), 0x28}, {CCI_REG8(0x3f), 0xb0}, {CCI_REG8(0x40), 0x90},
-	{CCI_REG8(0x41), 0x0f},
-	/* INTPEE */
-	{GC2145_REG_PAGE_SELECT, 0x02},
-	{CCI_REG8(0x90), 0x6c}, {CCI_REG8(0x91), 0x03}, {CCI_REG8(0x92), 0xcb},
-	{CCI_REG8(0x94), 0x33}, {CCI_REG8(0x95), 0x84}, {CCI_REG8(0x97), 0x65},
-	{CCI_REG8(0xa2), 0x11},
-	/* DNDD */
-	{GC2145_REG_PAGE_SELECT, 0x02},
-	{CCI_REG8(0x80), 0xc1}, {CCI_REG8(0x81), 0x08}, {CCI_REG8(0x82), 0x05},
-	{CCI_REG8(0x83), 0x08}, {CCI_REG8(0x84), 0x0a}, {CCI_REG8(0x86), 0xf0},
-	{CCI_REG8(0x87), 0x50}, {CCI_REG8(0x88), 0x15}, {CCI_REG8(0x89), 0xb0},
-	{CCI_REG8(0x8a), 0x30}, {CCI_REG8(0x8b), 0x10},
-	/* ASDE */
-	{GC2145_REG_PAGE_SELECT, 0x01},
-	{CCI_REG8(0x21), 0x04},
-	{GC2145_REG_PAGE_SELECT, 0x02},
-	{CCI_REG8(0xa3), 0x50}, {CCI_REG8(0xa4), 0x20}, {CCI_REG8(0xa5), 0x40},
-	{CCI_REG8(0xa6), 0x80}, {CCI_REG8(0xab), 0x40}, {CCI_REG8(0xae), 0x0c},
-	{CCI_REG8(0xb3), 0x46}, {CCI_REG8(0xb4), 0x64}, {CCI_REG8(0xb6), 0x38},
-	{CCI_REG8(0xb7), 0x01}, {CCI_REG8(0xb9), 0x2b}, {CCI_REG8(0x3c), 0x04},
-	{CCI_REG8(0x3d), 0x15}, {CCI_REG8(0x4b), 0x06}, {CCI_REG8(0x4c), 0x20},
-	/* Gamma */
-	{GC2145_REG_PAGE_SELECT, 0x02},
-	{CCI_REG8(0x10), 0x09}, {CCI_REG8(0x11), 0x0d}, {CCI_REG8(0x12), 0x13},
-	{CCI_REG8(0x13), 0x19}, {CCI_REG8(0x14), 0x27}, {CCI_REG8(0x15), 0x37},
-	{CCI_REG8(0x16), 0x45}, {CCI_REG8(0x17), 0x53}, {CCI_REG8(0x18), 0x69},
-	{CCI_REG8(0x19), 0x7d}, {CCI_REG8(0x1a), 0x8f}, {CCI_REG8(0x1b), 0x9d},
-	{CCI_REG8(0x1c), 0xa9}, {CCI_REG8(0x1d), 0xbd}, {CCI_REG8(0x1e), 0xcd},
-	{CCI_REG8(0x1f), 0xd9}, {CCI_REG8(0x20), 0xe3}, {CCI_REG8(0x21), 0xea},
-	{CCI_REG8(0x22), 0xef}, {CCI_REG8(0x23), 0xf5}, {CCI_REG8(0x24), 0xf9},
-	{CCI_REG8(0x25), 0xff},
-	{GC2145_REG_PAGE_SELECT, 0x00},
-	{CCI_REG8(0xc6), 0x20}, {CCI_REG8(0xc7), 0x2b},
-	/* Gamma 2 */
-	{GC2145_REG_PAGE_SELECT, 0x02},
-	{CCI_REG8(0x26), 0x0f}, {CCI_REG8(0x27), 0x14}, {CCI_REG8(0x28), 0x19},
-	{CCI_REG8(0x29), 0x1e}, {CCI_REG8(0x2a), 0x27}, {CCI_REG8(0x2b), 0x33},
-	{CCI_REG8(0x2c), 0x3b}, {CCI_REG8(0x2d), 0x45}, {CCI_REG8(0x2e), 0x59},
-	{CCI_REG8(0x2f), 0x69}, {CCI_REG8(0x30), 0x7c}, {CCI_REG8(0x31), 0x89},
-	{CCI_REG8(0x32), 0x98}, {CCI_REG8(0x33), 0xae}, {CCI_REG8(0x34), 0xc0},
-	{CCI_REG8(0x35), 0xcf}, {CCI_REG8(0x36), 0xda}, {CCI_REG8(0x37), 0xe2},
-	{CCI_REG8(0x38), 0xe9}, {CCI_REG8(0x39), 0xf3}, {CCI_REG8(0x3a), 0xf9},
-	{CCI_REG8(0x3b), 0xff},
-	/* YCP */
-	{GC2145_REG_PAGE_SELECT, 0x02},
-	{CCI_REG8(0xd1), 0x32}, {CCI_REG8(0xd2), 0x32}, {CCI_REG8(0xd3), 0x40},
-	{CCI_REG8(0xd6), 0xf0}, {CCI_REG8(0xd7), 0x10}, {CCI_REG8(0xd8), 0xda},
-	{CCI_REG8(0xdd), 0x14}, {CCI_REG8(0xde), 0x86}, {CCI_REG8(0xed), 0x80},
-	{CCI_REG8(0xee), 0x00}, {CCI_REG8(0xef), 0x3f}, {CCI_REG8(0xd8), 0xd8},
-	/* ABS */
-	{GC2145_REG_PAGE_SELECT, 0x01},
-	{CCI_REG8(0x9f), 0x40},
-	/* LSC */
-	{GC2145_REG_PAGE_SELECT, 0x01},
-	{CCI_REG8(0xc2), 0x14}, {CCI_REG8(0xc3), 0x0d}, {CCI_REG8(0xc4), 0x0c},
-	{CCI_REG8(0xc8), 0x15}, {CCI_REG8(0xc9), 0x0d}, {CCI_REG8(0xca), 0x0a},
-	{CCI_REG8(0xbc), 0x24}, {CCI_REG8(0xbd), 0x10}, {CCI_REG8(0xbe), 0x0b},
-	{CCI_REG8(0xb6), 0x25}, {CCI_REG8(0xb7), 0x16}, {CCI_REG8(0xb8), 0x15},
-	{CCI_REG8(0xc5), 0x00}, {CCI_REG8(0xc6), 0x00}, {CCI_REG8(0xc7), 0x00},
-	{CCI_REG8(0xcb), 0x00}, {CCI_REG8(0xcc), 0x00}, {CCI_REG8(0xcd), 0x00},
-	{CCI_REG8(0xbf), 0x07}, {CCI_REG8(0xc0), 0x00}, {CCI_REG8(0xc1), 0x00},
-	{CCI_REG8(0xb9), 0x00}, {CCI_REG8(0xba), 0x00}, {CCI_REG8(0xbb), 0x00},
-	{CCI_REG8(0xaa), 0x01}, {CCI_REG8(0xab), 0x01}, {CCI_REG8(0xac), 0x00},
-	{CCI_REG8(0xad), 0x05}, {CCI_REG8(0xae), 0x06}, {CCI_REG8(0xaf), 0x0e},
-	{CCI_REG8(0xb0), 0x0b}, {CCI_REG8(0xb1), 0x07}, {CCI_REG8(0xb2), 0x06},
-	{CCI_REG8(0xb3), 0x17}, {CCI_REG8(0xb4), 0x0e}, {CCI_REG8(0xb5), 0x0e},
-	{CCI_REG8(0xd0), 0x09}, {CCI_REG8(0xd1), 0x00}, {CCI_REG8(0xd2), 0x00},
-	{CCI_REG8(0xd6), 0x08}, {CCI_REG8(0xd7), 0x00}, {CCI_REG8(0xd8), 0x00},
-	{CCI_REG8(0xd9), 0x00}, {CCI_REG8(0xda), 0x00}, {CCI_REG8(0xdb), 0x00},
-	{CCI_REG8(0xd3), 0x0a}, {CCI_REG8(0xd4), 0x00}, {CCI_REG8(0xd5), 0x00},
-	{CCI_REG8(0xa4), 0x00}, {CCI_REG8(0xa5), 0x00}, {CCI_REG8(0xa6), 0x77},
-	{CCI_REG8(0xa7), 0x77}, {CCI_REG8(0xa8), 0x77}, {CCI_REG8(0xa9), 0x77},
-	{CCI_REG8(0xa1), 0x80}, {CCI_REG8(0xa2), 0x80},
-	{GC2145_REG_PAGE_SELECT, 0x01},
-	{CCI_REG8(0xdf), 0x0d}, {CCI_REG8(0xdc), 0x25}, {CCI_REG8(0xdd), 0x30},
-	{CCI_REG8(0xe0), 0x77}, {CCI_REG8(0xe1), 0x80}, {CCI_REG8(0xe2), 0x77},
-	{CCI_REG8(0xe3), 0x90}, {CCI_REG8(0xe6), 0x90}, {CCI_REG8(0xe7), 0xa0},
-	{CCI_REG8(0xe8), 0x90}, {CCI_REG8(0xe9), 0xa0},
-	/* AWB */
-	/* measure window */
-	{GC2145_REG_PAGE_SELECT, 0x00},
-	{CCI_REG8(0xec), 0x06}, {CCI_REG8(0xed), 0x04}, {CCI_REG8(0xee), 0x60},
-	{CCI_REG8(0xef), 0x90}, {CCI_REG8(0xb6), 0x01},
-	{GC2145_REG_PAGE_SELECT, 0x01},
-	{CCI_REG8(0x4f), 0x00}, {CCI_REG8(0x4f), 0x00}, {CCI_REG8(0x4b), 0x01},
-	{CCI_REG8(0x4f), 0x00},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0x71}, {CCI_REG8(0x4e), 0x01},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0x91}, {CCI_REG8(0x4e), 0x01},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0x70}, {CCI_REG8(0x4e), 0x01},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0x90}, {CCI_REG8(0x4e), 0x02},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0xb0}, {CCI_REG8(0x4e), 0x02},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0x8f}, {CCI_REG8(0x4e), 0x02},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0x6f}, {CCI_REG8(0x4e), 0x02},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0xaf}, {CCI_REG8(0x4e), 0x02},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0xd0}, {CCI_REG8(0x4e), 0x02},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0xf0}, {CCI_REG8(0x4e), 0x02},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0xcf}, {CCI_REG8(0x4e), 0x02},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0xef}, {CCI_REG8(0x4e), 0x02},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0x6e}, {CCI_REG8(0x4e), 0x03},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0x8e}, {CCI_REG8(0x4e), 0x03},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0xae}, {CCI_REG8(0x4e), 0x03},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0xce}, {CCI_REG8(0x4e), 0x03},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0x4d}, {CCI_REG8(0x4e), 0x03},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0x6d}, {CCI_REG8(0x4e), 0x03},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0x8d}, {CCI_REG8(0x4e), 0x03},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0xad}, {CCI_REG8(0x4e), 0x03},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0xcd}, {CCI_REG8(0x4e), 0x03},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0x4c}, {CCI_REG8(0x4e), 0x03},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0x6c}, {CCI_REG8(0x4e), 0x03},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0x8c}, {CCI_REG8(0x4e), 0x03},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0xac}, {CCI_REG8(0x4e), 0x03},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0xcc}, {CCI_REG8(0x4e), 0x03},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0xcb}, {CCI_REG8(0x4e), 0x03},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0x4b}, {CCI_REG8(0x4e), 0x03},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0x6b}, {CCI_REG8(0x4e), 0x03},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0x8b}, {CCI_REG8(0x4e), 0x03},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0xab}, {CCI_REG8(0x4e), 0x03},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0x8a}, {CCI_REG8(0x4e), 0x04},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0xaa}, {CCI_REG8(0x4e), 0x04},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0xca}, {CCI_REG8(0x4e), 0x04},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0xca}, {CCI_REG8(0x4e), 0x04},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0xc9}, {CCI_REG8(0x4e), 0x04},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0x8a}, {CCI_REG8(0x4e), 0x04},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0x89}, {CCI_REG8(0x4e), 0x04},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0xa9}, {CCI_REG8(0x4e), 0x04},
-	{CCI_REG8(0x4c), 0x02}, {CCI_REG8(0x4d), 0x0b}, {CCI_REG8(0x4e), 0x05},
-	{CCI_REG8(0x4c), 0x02}, {CCI_REG8(0x4d), 0x0a}, {CCI_REG8(0x4e), 0x05},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0xeb}, {CCI_REG8(0x4e), 0x05},
-	{CCI_REG8(0x4c), 0x01}, {CCI_REG8(0x4d), 0xea}, {CCI_REG8(0x4e), 0x05},
-	{CCI_REG8(0x4c), 0x02}, {CCI_REG8(0x4d), 0x09}, {CCI_REG8(0x4e), 0x05},
-	{CCI_REG8(0x4c), 0x02}, {CCI_REG8(0x4d), 0x29}, {CCI_REG8(0x4e), 0x05},
-	{CCI_REG8(0x4c), 0x02}, {CCI_REG8(0x4d), 0x2a}, {CCI_REG8(0x4e), 0x05},
-	{CCI_REG8(0x4c), 0x02}, {CCI_REG8(0x4d), 0x4a}, {CCI_REG8(0x4e), 0x05},
-	{CCI_REG8(0x4c), 0x02}, {CCI_REG8(0x4d), 0x8a}, {CCI_REG8(0x4e), 0x06},
-	{CCI_REG8(0x4c), 0x02}, {CCI_REG8(0x4d), 0x49}, {CCI_REG8(0x4e), 0x06},
-	{CCI_REG8(0x4c), 0x02}, {CCI_REG8(0x4d), 0x69}, {CCI_REG8(0x4e), 0x06},
-	{CCI_REG8(0x4c), 0x02}, {CCI_REG8(0x4d), 0x89}, {CCI_REG8(0x4e), 0x06},
-	{CCI_REG8(0x4c), 0x02}, {CCI_REG8(0x4d), 0xa9}, {CCI_REG8(0x4e), 0x06},
-	{CCI_REG8(0x4c), 0x02}, {CCI_REG8(0x4d), 0x48}, {CCI_REG8(0x4e), 0x06},
-	{CCI_REG8(0x4c), 0x02}, {CCI_REG8(0x4d), 0x68}, {CCI_REG8(0x4e), 0x06},
-	{CCI_REG8(0x4c), 0x02}, {CCI_REG8(0x4d), 0x69}, {CCI_REG8(0x4e), 0x06},
-	{CCI_REG8(0x4c), 0x02}, {CCI_REG8(0x4d), 0xca}, {CCI_REG8(0x4e), 0x07},
-	{CCI_REG8(0x4c), 0x02}, {CCI_REG8(0x4d), 0xc9}, {CCI_REG8(0x4e), 0x07},
-	{CCI_REG8(0x4c), 0x02}, {CCI_REG8(0x4d), 0xe9}, {CCI_REG8(0x4e), 0x07},
-	{CCI_REG8(0x4c), 0x03}, {CCI_REG8(0x4d), 0x09}, {CCI_REG8(0x4e), 0x07},
-	{CCI_REG8(0x4c), 0x02}, {CCI_REG8(0x4d), 0xc8}, {CCI_REG8(0x4e), 0x07},
-	{CCI_REG8(0x4c), 0x02}, {CCI_REG8(0x4d), 0xe8}, {CCI_REG8(0x4e), 0x07},
-	{CCI_REG8(0x4c), 0x02}, {CCI_REG8(0x4d), 0xa7}, {CCI_REG8(0x4e), 0x07},
-	{CCI_REG8(0x4c), 0x02}, {CCI_REG8(0x4d), 0xc7}, {CCI_REG8(0x4e), 0x07},
-	{CCI_REG8(0x4c), 0x02}, {CCI_REG8(0x4d), 0xe7}, {CCI_REG8(0x4e), 0x07},
-	{CCI_REG8(0x4c), 0x03}, {CCI_REG8(0x4d), 0x07}, {CCI_REG8(0x4e), 0x07},
-	{CCI_REG8(0x4f), 0x01},
-	{CCI_REG8(0x50), 0x80}, {CCI_REG8(0x51), 0xa8}, {CCI_REG8(0x52), 0x47},
-	{CCI_REG8(0x53), 0x38}, {CCI_REG8(0x54), 0xc7}, {CCI_REG8(0x56), 0x0e},
-	{CCI_REG8(0x58), 0x08}, {CCI_REG8(0x5b), 0x00}, {CCI_REG8(0x5c), 0x74},
-	{CCI_REG8(0x5d), 0x8b}, {CCI_REG8(0x61), 0xdb}, {CCI_REG8(0x62), 0xb8},
-	{CCI_REG8(0x63), 0x86}, {CCI_REG8(0x64), 0xc0}, {CCI_REG8(0x65), 0x04},
-	{CCI_REG8(0x67), 0xa8}, {CCI_REG8(0x68), 0xb0}, {CCI_REG8(0x69), 0x00},
-	{CCI_REG8(0x6a), 0xa8}, {CCI_REG8(0x6b), 0xb0}, {CCI_REG8(0x6c), 0xaf},
-	{CCI_REG8(0x6d), 0x8b}, {CCI_REG8(0x6e), 0x50}, {CCI_REG8(0x6f), 0x18},
-	{CCI_REG8(0x73), 0xf0}, {CCI_REG8(0x70), 0x0d}, {CCI_REG8(0x71), 0x60},
-	{CCI_REG8(0x72), 0x80}, {CCI_REG8(0x74), 0x01}, {CCI_REG8(0x75), 0x01},
-	{CCI_REG8(0x7f), 0x0c}, {CCI_REG8(0x76), 0x70}, {CCI_REG8(0x77), 0x58},
-	{CCI_REG8(0x78), 0xa0}, {CCI_REG8(0x79), 0x5e}, {CCI_REG8(0x7a), 0x54},
-	{CCI_REG8(0x7b), 0x58},
-	/* CC */
-	{GC2145_REG_PAGE_SELECT, 0x02},
-	{CCI_REG8(0xc0), 0x01}, {CCI_REG8(0xc1), 0x44}, {CCI_REG8(0xc2), 0xfd},
-	{CCI_REG8(0xc3), 0x04}, {CCI_REG8(0xc4), 0xf0}, {CCI_REG8(0xc5), 0x48},
-	{CCI_REG8(0xc6), 0xfd}, {CCI_REG8(0xc7), 0x46}, {CCI_REG8(0xc8), 0xfd},
-	{CCI_REG8(0xc9), 0x02}, {CCI_REG8(0xca), 0xe0}, {CCI_REG8(0xcb), 0x45},
-	{CCI_REG8(0xcc), 0xec}, {CCI_REG8(0xcd), 0x48}, {CCI_REG8(0xce), 0xf0},
-	{CCI_REG8(0xcf), 0xf0}, {CCI_REG8(0xe3), 0x0c}, {CCI_REG8(0xe4), 0x4b},
-	{CCI_REG8(0xe5), 0xe0},
-	/* ABS */
-	{GC2145_REG_PAGE_SELECT, 0x01},
-	{CCI_REG8(0x9f), 0x40},
-	/* Dark sun */
-	{GC2145_REG_PAGE_SELECT, 0x02},
-	{CCI_REG8(0x40), 0xbf}, {CCI_REG8(0x46), 0xcf},
+static const struct gc2145_pixfmt gc2145_formats[] = {
+	{
+		.code              = MEDIA_BUS_FMT_UYVY8_2X8,
+		.colorspace        = V4L2_COLORSPACE_SRGB,
+		.fmt_setup         = 0x00,
+	},
+	{
+		.code              = MEDIA_BUS_FMT_VYUY8_2X8,
+		.colorspace        = V4L2_COLORSPACE_SRGB,
+		.fmt_setup         = 0x01,
+	},
+	{
+		.code              = MEDIA_BUS_FMT_YUYV8_2X8,
+		.colorspace        = V4L2_COLORSPACE_SRGB,
+		.fmt_setup         = 0x02,
+	},
+	{
+		.code              = MEDIA_BUS_FMT_YVYU8_2X8,
+		.colorspace        = V4L2_COLORSPACE_SRGB,
+		.fmt_setup         = 0x03,
+	},
+	{
+		.code              = MEDIA_BUS_FMT_RGB565_2X8_LE,
+		.colorspace        = V4L2_COLORSPACE_SRGB,
+		.fmt_setup         = 0x06,
+	},
+	{
+		.code              = MEDIA_BUS_FMT_SBGGR8_1X8,
+		.colorspace        = V4L2_COLORSPACE_RAW,
+		.fmt_setup         = 0x17,
+	},
 };
 
-#define GC2145_640_480_PIXELRATE	30000000
-#define GC2145_640_480_LINKFREQ		120000000
-#define GC2145_640_480_HBLANK		0x0130
-#define GC2145_640_480_VBLANK		0x000c
-static const struct cci_reg_sequence gc2145_mode_640_480_regs[] = {
-	{GC2145_REG_PAGE_SELECT, 0xf0}, {GC2145_REG_PAGE_SELECT, 0xf0},
-	{GC2145_REG_PAGE_SELECT, 0xf0}, {CCI_REG8(0xfc), 0x06},
-	{CCI_REG8(0xf6), 0x00}, {CCI_REG8(0xf7), 0x1d}, {CCI_REG8(0xf8), 0x86},
-	{CCI_REG8(0xfa), 0x00}, {CCI_REG8(0xf9), 0x8e},
-	/* Disable PAD IO */
-	{GC2145_REG_PAD_IO, 0x00},
-	{GC2145_REG_PAGE_SELECT, 0x00},
-	/* Row/Col start - 0/0 */
-	{GC2145_REG_ROW_START, 0x0000},
-	{GC2145_REG_COL_START, 0x0000},
-	/* Window size 1216/1618 */
-	{GC2145_REG_WIN_HEIGHT, 0x04c0},
-	{GC2145_REG_WIN_WIDTH, 0x0652},
-	/* Scalar more */
-	{CCI_REG8(0xfd), 0x01}, {CCI_REG8(0xfa), 0x00},
-	/* Crop 640-480@0-0 */
-	{GC2145_REG_CROP_ENABLE, 0x01},
-	{GC2145_REG_CROP_Y, 0x0000},
-	{GC2145_REG_CROP_X, 0x0000},
-	{GC2145_REG_CROP_HEIGHT, 0x01e0},
-	{GC2145_REG_CROP_WIDTH, 0x0280},
-	/* Subsampling configuration */
-	{CCI_REG8(0x99), 0x55}, {CCI_REG8(0x9a), 0x06}, {CCI_REG8(0x9b), 0x01},
-	{CCI_REG8(0x9c), 0x23}, {CCI_REG8(0x9d), 0x00}, {CCI_REG8(0x9e), 0x00},
-	{CCI_REG8(0x9f), 0x01}, {CCI_REG8(0xa0), 0x23}, {CCI_REG8(0xa1), 0x00},
-	{CCI_REG8(0xa2), 0x00},
-	{GC2145_REG_PAGE_SELECT, 0x01},
-	/* AEC anti-flicker */
-	{CCI_REG16(0x25), 0x0175},
-	/* AEC exposure level 1-5 */
-	{CCI_REG16(0x27), 0x045f}, {CCI_REG16(0x29), 0x045f},
-	{CCI_REG16(0x2b), 0x045f}, {CCI_REG16(0x2d), 0x045f},
-};
+static const struct gc2145_pixfmt *gc2145_find_format(u32 code)
+{
+	int i;
 
-#define GC2145_1280_720_PIXELRATE	48000000
-#define GC2145_1280_720_LINKFREQ	192000000
-#define GC2145_1280_720_HBLANK		0x0156
-#define GC2145_1280_720_VBLANK		0x0011
-static const struct cci_reg_sequence gc2145_mode_1280_720_regs[] = {
-	{GC2145_REG_PAGE_SELECT, 0xf0}, {GC2145_REG_PAGE_SELECT, 0xf0},
-	{GC2145_REG_PAGE_SELECT, 0xf0}, {CCI_REG8(0xfc), 0x06},
-	{CCI_REG8(0xf6), 0x00}, {CCI_REG8(0xf7), 0x1d}, {CCI_REG8(0xf8), 0x83},
-	{CCI_REG8(0xfa), 0x00}, {CCI_REG8(0xf9), 0x8e},
-	/* Disable PAD IO */
-	{GC2145_REG_PAD_IO, 0x00},
-	{GC2145_REG_PAGE_SELECT, 0x00},
-	/* Row/Col start - 240/160 */
-	{GC2145_REG_ROW_START, 0x00f0},
-	{GC2145_REG_COL_START, 0x00a0},
-	/* Window size 736/1296 */
-	{GC2145_REG_WIN_HEIGHT, 0x02e0},
-	{GC2145_REG_WIN_WIDTH, 0x0510},
-	/* Crop 1280-720@0-0 */
-	{GC2145_REG_CROP_ENABLE, 0x01},
-	{GC2145_REG_CROP_Y, 0x0000},
-	{GC2145_REG_CROP_X, 0x0000},
-	{GC2145_REG_CROP_HEIGHT, 0x02d0},
-	{GC2145_REG_CROP_WIDTH, 0x0500},
-	{GC2145_REG_PAGE_SELECT, 0x01},
-	/* AEC anti-flicker */
-	{CCI_REG16(0x25), 0x00e6},
-	/* AEC exposure level 1-5 */
-	{CCI_REG16(0x27), 0x02b2}, {CCI_REG16(0x29), 0x02b2},
-	{CCI_REG16(0x2b), 0x02b2}, {CCI_REG16(0x2d), 0x02b2},
-};
+	for (i = 0; i < ARRAY_SIZE(gc2145_formats); i++)
+		if (gc2145_formats[i].code == code)
+			return &gc2145_formats[i];
 
-#define GC2145_1600_1200_PIXELRATE	60000000
-#define GC2145_1600_1200_LINKFREQ	240000000
-#define GC2145_1600_1200_HBLANK		0x0156
-#define GC2145_1600_1200_VBLANK		0x0010
-static const struct cci_reg_sequence gc2145_mode_1600_1200_regs[] = {
-	{GC2145_REG_PAGE_SELECT, 0xf0}, {GC2145_REG_PAGE_SELECT, 0xf0},
-	{GC2145_REG_PAGE_SELECT, 0xf0}, {CCI_REG8(0xfc), 0x06},
-	{CCI_REG8(0xf6), 0x00}, {CCI_REG8(0xf7), 0x1d}, {CCI_REG8(0xf8), 0x84},
-	{CCI_REG8(0xfa), 0x00}, {CCI_REG8(0xf9), 0x8e},
-	/* Disable PAD IO */
-	{GC2145_REG_PAD_IO, 0x00},
-	{GC2145_REG_PAGE_SELECT, 0x00},
-	/* Row/Col start - 0/0 */
-	{GC2145_REG_ROW_START, 0x0000},
-	{GC2145_REG_COL_START, 0x0000},
-	/* Window size: 1216/1618 */
-	{GC2145_REG_WIN_HEIGHT, 0x04c0},
-	{GC2145_REG_WIN_WIDTH, 0x0652},
-	/* Crop 1600-1200@0-0 */
-	{GC2145_REG_CROP_ENABLE, 0x01},
-	{GC2145_REG_CROP_Y, 0x0000},
-	{GC2145_REG_CROP_X, 0x0000},
-	{GC2145_REG_CROP_HEIGHT, 0x04b0},
-	{GC2145_REG_CROP_WIDTH, 0x0640},
-	{GC2145_REG_PAGE_SELECT, 0x01},
-	/* AEC anti-flicker */
-	{CCI_REG16(0x25), 0x00fa},
-	/* AEC exposure level 1-5 */
-	{CCI_REG16(0x27), 0x04e2}, {CCI_REG16(0x29), 0x04e2},
-	{CCI_REG16(0x2b), 0x04e2}, {CCI_REG16(0x2d), 0x04e2},
-};
+	return NULL;
+}
 
-static const s64 gc2145_link_freq_menu[] = {
-	GC2145_640_480_LINKFREQ,
-	GC2145_1280_720_LINKFREQ,
-	GC2145_1600_1200_LINKFREQ,
-};
-
-/* Regulators supplies */
+/* regulator supplies */
 static const char * const gc2145_supply_name[] = {
-	"iovdd", /* Digital I/O (1.7-3V) suppply */
-	"avdd",  /* Analog (2.7-3V) supply */
-	"dvdd",  /* Digital Core (1.7-1.9V) supply */
+	"IOVDD", /* Digital I/O (1.7-3V) suppply */
+	"AVDD",  /* Analog (2.7-3V) supply */
+	"DVDD",  /* Digital Core (1.7-1.9V) supply */
 };
 
 #define GC2145_NUM_SUPPLIES ARRAY_SIZE(gc2145_supply_name)
 
-/* Mode configs */
-#define GC2145_MODE_640X480	0
-#define GC2145_MODE_1280X720	1
-#define GC2145_MODE_1600X1200	2
-static const struct gc2145_mode supported_modes[] = {
-	{
-		/* 640x480 30fps mode */
-		.width = 640,
-		.height = 480,
-		.reg_seq = gc2145_mode_640_480_regs,
-		.reg_seq_size = ARRAY_SIZE(gc2145_mode_640_480_regs),
-		.pixel_rate = GC2145_640_480_PIXELRATE,
-		.crop = {
-			.top = 0,
-			.left = 0,
-			.width = 640,
-			.height = 480,
-		},
-		.hblank = GC2145_640_480_HBLANK,
-		.vblank = GC2145_640_480_VBLANK,
-		.link_freq_index = GC2145_MODE_640X480,
-	},
-	{
-		/* 1280x720 30fps mode */
-		.width = 1280,
-		.height = 720,
-		.reg_seq = gc2145_mode_1280_720_regs,
-		.reg_seq_size = ARRAY_SIZE(gc2145_mode_1280_720_regs),
-		.pixel_rate = GC2145_1280_720_PIXELRATE,
-		.crop = {
-			.top = 160,
-			.left = 240,
-			.width = 1280,
-			.height = 720,
-		},
-		.hblank = GC2145_1280_720_HBLANK,
-		.vblank = GC2145_1280_720_VBLANK,
-		.link_freq_index = GC2145_MODE_1280X720,
-	},
-	{
-		/* 1600x1200 20fps mode */
-		.width = 1600,
-		.height = 1200,
-		.reg_seq = gc2145_mode_1600_1200_regs,
-		.reg_seq_size = ARRAY_SIZE(gc2145_mode_1600_1200_regs),
-		.pixel_rate = GC2145_1600_1200_PIXELRATE,
-		.crop = {
-			.top = 0,
-			.left = 0,
-			.width = 1600,
-			.height = 1200,
-		},
-		.hblank = GC2145_1600_1200_HBLANK,
-		.vblank = GC2145_1600_1200_VBLANK,
-		.link_freq_index = GC2145_MODE_1600X1200,
-	},
-};
-
-/**
- * struct gc2145_format - GC2145 pixel format description
- * @code: media bus (MBUS) associated code
- * @datatype: MIPI CSI2 data type
- * @output_fmt: GC2145 output format
- * @switch_bit: GC2145 first/second switch
- */
-struct gc2145_format {
-	unsigned int code;
-	unsigned char datatype;
-	unsigned char output_fmt;
-	bool switch_bit;
-};
-
-/* All supported formats */
-static const struct gc2145_format supported_formats[] = {
-	{
-		.code		= MEDIA_BUS_FMT_UYVY8_1X16,
-		.datatype	= MIPI_CSI2_DT_YUV422_8B,
-		.output_fmt	= 0x00,
-	},
-	{
-		.code		= MEDIA_BUS_FMT_VYUY8_1X16,
-		.datatype	= MIPI_CSI2_DT_YUV422_8B,
-		.output_fmt	= 0x01,
-	},
-	{
-		.code		= MEDIA_BUS_FMT_YUYV8_1X16,
-		.datatype	= MIPI_CSI2_DT_YUV422_8B,
-		.output_fmt	= 0x02,
-	},
-	{
-		.code		= MEDIA_BUS_FMT_YVYU8_1X16,
-		.datatype	= MIPI_CSI2_DT_YUV422_8B,
-		.output_fmt	= 0x03,
-	},
-	{
-		.code		= MEDIA_BUS_FMT_RGB565_1X16,
-		.datatype	= MIPI_CSI2_DT_RGB565,
-		.output_fmt	= 0x06,
-		.switch_bit	= true,
-	},
-};
-
 struct gc2145_ctrls {
 	struct v4l2_ctrl_handler handler;
 	struct v4l2_ctrl *pixel_rate;
-	struct v4l2_ctrl *link_freq;
-	struct v4l2_ctrl *test_pattern;
-	struct v4l2_ctrl *hflip;
-	struct v4l2_ctrl *vflip;
 	struct v4l2_ctrl *hblank;
 	struct v4l2_ctrl *vblank;
+	struct {
+		struct v4l2_ctrl *auto_exposure;
+		struct v4l2_ctrl *exposure;
+		struct v4l2_ctrl *d_gain;
+		struct v4l2_ctrl *a_gain;
+	};
+	struct v4l2_ctrl *metering;
+	struct v4l2_ctrl *exposure_bias;
+	struct {
+		struct v4l2_ctrl *wb;
+		struct v4l2_ctrl *blue_balance;
+		struct v4l2_ctrl *red_balance;
+	};
+	struct v4l2_ctrl *aaa_lock;
+	struct v4l2_ctrl *hflip;
+	struct v4l2_ctrl *vflip;
+	struct v4l2_ctrl *pl_freq;
+	struct v4l2_ctrl *colorfx;
+	struct v4l2_ctrl *brightness;
+	struct v4l2_ctrl *saturation;
+	struct v4l2_ctrl *contrast;
+	struct v4l2_ctrl *gamma;
+	struct v4l2_ctrl *test_pattern;
+	struct v4l2_ctrl *test_data[4];
 };
 
-struct gc2145 {
+enum {
+	TX_WRITE = 1,
+	TX_WRITE16,
+	TX_UPDATE_BITS,
+};
+
+#define GC2145_MAX_OPS 64
+
+struct gc2145_tx_op {
+	int op;
+	u16 reg;
+	u16 val;
+	u16 mask;
+};
+
+struct gc2145_dev {
+	struct i2c_client *i2c_client;
 	struct v4l2_subdev sd;
 	struct media_pad pad;
+	struct v4l2_fwnode_endpoint ep; /* the parsed DT endpoint info */
+	struct clk *xclk; /* external clock for GC2145 */
 
-	struct regmap *regmap;
-	struct clk *xclk;
-
-	struct gpio_desc *reset_gpio;
-	struct gpio_desc *powerdown_gpio;
 	struct regulator_bulk_data supplies[GC2145_NUM_SUPPLIES];
+	struct gpio_desc *reset_gpio; // nrst pin
+	struct gpio_desc *enable_gpio; // ce pin
 
-	/* V4L2 controls */
+	/* lock to protect all members below */
+	struct mutex lock;
+
+	struct v4l2_mbus_framefmt fmt;
+	struct v4l2_fract frame_interval;
 	struct gc2145_ctrls ctrls;
 
-	/* Current mode */
-	const struct gc2145_mode *mode;
+	bool pending_mode_change;
+	bool powered;
+	bool streaming;
+
+	u8 current_bank;
+
+	struct gc2145_tx_op ops[GC2145_MAX_OPS];
+	int n_ops;
+	int tx_started;
 };
 
-static inline struct gc2145 *to_gc2145(struct v4l2_subdev *_sd)
+static inline struct gc2145_dev *to_gc2145_dev(struct v4l2_subdev *sd)
 {
-	return container_of(_sd, struct gc2145, sd);
+	return container_of(sd, struct gc2145_dev, sd);
 }
 
-static inline struct v4l2_subdev *gc2145_ctrl_to_sd(struct v4l2_ctrl *ctrl)
-{
-	return &container_of(ctrl->handler, struct gc2145,
-			     ctrls.handler)->sd;
-}
+/* {{{ Register access helpers */
 
-static const struct gc2145_format *
-gc2145_get_format_code(struct gc2145 *gc2145, u32 code)
+static int gc2145_write_regs(struct gc2145_dev *sensor, u8 addr,
+			     u8 *data, int data_size)
 {
-	unsigned int i;
+	struct i2c_client *client = sensor->i2c_client;
+	struct i2c_msg msg;
+	u8 buf[128 + 1];
+	int ret;
 
-	for (i = 0; i < ARRAY_SIZE(supported_formats); i++) {
-		if (supported_formats[i].code == code)
-			break;
+	if (data_size > sizeof(buf) - 1) {
+		v4l2_err(&sensor->sd, "%s: oversized transfer (size=%d)\n",
+			 __func__, data_size);
+		return -EINVAL;
 	}
 
-	if (i >= ARRAY_SIZE(supported_formats))
-		i = 0;
+	buf[0] = addr;
+	memcpy(buf + 1, data, data_size);
 
-	return &supported_formats[i];
-}
+	msg.addr = client->addr;
+	msg.flags = client->flags;
+	msg.buf = buf;
+	msg.len = data_size + 1;
 
-static void gc2145_update_pad_format(struct gc2145 *gc2145,
-				     const struct gc2145_mode *mode,
-				     struct v4l2_mbus_framefmt *fmt, u32 code)
-{
-	fmt->code = code;
-	fmt->width = mode->width;
-	fmt->height = mode->height;
-	fmt->field = V4L2_FIELD_NONE;
-	fmt->colorspace = V4L2_COLORSPACE_SRGB;
-	fmt->ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
-	fmt->quantization = V4L2_QUANTIZATION_DEFAULT;
-	fmt->xfer_func = V4L2_XFER_FUNC_DEFAULT;
-}
+	dev_dbg(&sensor->i2c_client->dev, "[wr %02x] <= %*ph\n",
+		(u32)addr, data_size, data);
 
-static int gc2145_init_state(struct v4l2_subdev *sd,
-			     struct v4l2_subdev_state *state)
-{
-	struct gc2145 *gc2145 = to_gc2145(sd);
-	struct v4l2_mbus_framefmt *format;
-	struct v4l2_rect *crop;
-
-	/* Initialize pad format */
-	format = v4l2_subdev_state_get_format(state, 0);
-	gc2145_update_pad_format(gc2145, &supported_modes[0], format,
-				 MEDIA_BUS_FMT_RGB565_1X16);
-
-	/* Initialize crop rectangle. */
-	crop = v4l2_subdev_state_get_crop(state, 0);
-	*crop = supported_modes[0].crop;
+	ret = i2c_transfer(client->adapter, &msg, 1);
+	if (ret < 0) {
+		v4l2_err(&sensor->sd,
+			 "%s: error %d: addr=%x, data=%*ph\n",
+			 __func__, ret, (u32)addr, data_size, data);
+		return ret;
+	}
 
 	return 0;
 }
 
-static int gc2145_get_selection(struct v4l2_subdev *sd,
-				struct v4l2_subdev_state *sd_state,
-				struct v4l2_subdev_selection *sel)
+static int gc2145_read_regs(struct gc2145_dev *sensor, u8 addr,
+			    u8 *data, int data_size)
 {
-	switch (sel->target) {
-	case V4L2_SEL_TGT_CROP:
-		sel->r = *v4l2_subdev_state_get_crop(sd_state, 0);
-		return 0;
+	struct i2c_client *client = sensor->i2c_client;
+	struct i2c_msg msg[2];
+	int ret;
 
-	case V4L2_SEL_TGT_NATIVE_SIZE:
-		sel->r.top = 0;
-		sel->r.left = 0;
-		sel->r.width = GC2145_NATIVE_WIDTH;
-		sel->r.height = GC2145_NATIVE_HEIGHT;
+	msg[0].addr = client->addr;
+	msg[0].flags = client->flags;
+	msg[0].buf = &addr;
+	msg[0].len = 1;
 
-		return 0;
+	msg[1].addr = client->addr;
+	msg[1].flags = client->flags | I2C_M_RD;
+	msg[1].buf = data;
+	msg[1].len = data_size;
 
-	case V4L2_SEL_TGT_CROP_DEFAULT:
-	case V4L2_SEL_TGT_CROP_BOUNDS:
-		sel->r.top = 0;
-		sel->r.left = 0;
-		sel->r.width = 1600;
-		sel->r.height = 1200;
+	ret = i2c_transfer(client->adapter, msg, 2);
+	if (ret < 0) {
+		v4l2_err(&sensor->sd,
+			 "%s: error %d: start_index=%x, data_size=%d\n",
+			 __func__, ret, (u32)addr, data_size);
+		return ret;
+	}
 
+	dev_dbg(&sensor->i2c_client->dev, "[rd %02x] => %*ph\n",
+		(u32)addr, data_size, data);
+
+	return 0;
+}
+
+static int gc2145_switch_bank(struct gc2145_dev *sensor, u16 reg)
+{
+	int ret;
+	u8 bank = reg >> 8;
+
+	if (bank & ~3u)
+		return -ERANGE;
+
+	if (sensor->current_bank != bank) {
+		ret = gc2145_write_regs(sensor, GC2145_REG_RESET, &bank, 1);
+		if (ret)
+			return ret;
+
+		sensor->current_bank = bank;
+		dev_dbg(&sensor->i2c_client->dev, "bank switch: 0x%02x\n",
+				(unsigned int)sensor->current_bank);
+	}
+
+	return 0;
+}
+
+static int gc2145_read(struct gc2145_dev *sensor, u16 reg, u8 *val)
+{
+	int ret;
+
+	ret = gc2145_switch_bank(sensor, reg);
+	if (ret)
+		return ret;
+
+	return gc2145_read_regs(sensor, reg, val, 1);
+}
+
+static int gc2145_write(struct gc2145_dev *sensor, u16 reg, u8 val)
+{
+	int ret;
+
+	ret = gc2145_switch_bank(sensor, reg);
+	if (ret)
+		return ret;
+
+	if ((reg & 0xffu) == GC2145_REG_RESET)
+		sensor->current_bank = val & 3;
+
+	return gc2145_write_regs(sensor, reg, &val, 1);
+}
+
+static int gc2145_update_bits(struct gc2145_dev *sensor, u16 reg, u8 mask, u8 val)
+{
+	int ret;
+	u8 tmp;
+
+	ret = gc2145_read(sensor, reg, &tmp);
+	if (ret)
+		return ret;
+
+	tmp &= ~mask;
+	tmp |= val & mask;
+
+	return gc2145_write(sensor, reg, tmp);
+}
+
+static int gc2145_read16(struct gc2145_dev *sensor, u16 reg, u16 *val)
+{
+	int ret;
+
+	ret = gc2145_switch_bank(sensor, reg);
+	if (ret)
+		return ret;
+
+	ret = gc2145_read_regs(sensor, reg, (u8 *)val, sizeof(*val));
+	if (ret)
+		return ret;
+
+	*val = be16_to_cpu(*val);
+	return 0;
+}
+
+static int gc2145_write16(struct gc2145_dev *sensor, u16 reg, u16 val)
+{
+	u16 tmp = cpu_to_be16(val);
+	int ret;
+
+	ret = gc2145_switch_bank(sensor, reg);
+	if (ret)
+		return ret;
+
+	return gc2145_write_regs(sensor, reg, (u8 *)&tmp, sizeof(tmp));
+}
+
+static void gc2145_tx_start(struct gc2145_dev *sensor)
+{
+	if (sensor->tx_started++)
+		dev_err(&sensor->i2c_client->dev,
+				"tx_start called multiple times\n");
+
+	sensor->n_ops = 0;
+}
+
+static void gc2145_tx_add(struct gc2145_dev *sensor, int kind,
+			  u16 reg, u16 val, u16 mask)
+{
+	struct gc2145_tx_op *op;
+
+	if (!sensor->tx_started) {
+		dev_err(&sensor->i2c_client->dev,
+				"op added without calling tx_start\n");
+		return;
+	}
+
+	if (sensor->n_ops >= ARRAY_SIZE(sensor->ops)) {
+		dev_err(&sensor->i2c_client->dev,
+				"ops overflow, increase GC2145_MAX_OPS\n");
+		return;
+	}
+
+	op = &sensor->ops[sensor->n_ops++];
+	op->op = kind;
+	op->reg = reg;
+	op->val = val;
+	op->mask = mask;
+}
+
+static void gc2145_tx_write8(struct gc2145_dev *sensor, u16 reg, u8 val)
+{
+	return gc2145_tx_add(sensor, TX_WRITE, reg, val, 0);
+}
+
+static void gc2145_tx_write16(struct gc2145_dev *sensor, u16 reg, u16 val)
+{
+	return gc2145_tx_add(sensor, TX_WRITE16, reg, val, 0);
+}
+
+static void gc2145_tx_update_bits(struct gc2145_dev *sensor, u16 reg,
+				  u8 mask, u8 val)
+{
+	return gc2145_tx_add(sensor, TX_UPDATE_BITS, reg, val, mask);
+}
+
+static int gc2145_tx_commit(struct gc2145_dev *sensor)
+{
+	struct gc2145_tx_op* op;
+	int i, ret, n_ops;
+
+	if (!sensor->tx_started) {
+		dev_err(&sensor->i2c_client->dev,
+				"tx_commit called without tx_start\n");
 		return 0;
 	}
 
-	return -EINVAL;
+	n_ops = sensor->n_ops;
+	sensor->tx_started = 0;
+	sensor->n_ops = 0;
+
+	for (i = 0; i < n_ops; i++) {
+		op = &sensor->ops[i];
+
+		switch (op->op) {
+		case TX_WRITE:
+			ret = gc2145_write(sensor, op->reg, op->val);
+			break;
+		case TX_WRITE16:
+			ret = gc2145_write16(sensor, op->reg, op->val);
+			break;
+		case TX_UPDATE_BITS:
+			ret = gc2145_update_bits(sensor, op->reg, op->mask, op->val);
+			break;
+		default:
+			dev_err(&sensor->i2c_client->dev, "invalid op at %d\n", i);
+			ret = -EINVAL;
+		}
+
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+/*
+ * Efficiently write to a set of registers, using auto-increment
+ * when possible. User must not use address 0xff. To switch banks,
+ * use sequence: 0xfe, bank_no.
+ */
+static int gc2145_set_registers(struct gc2145_dev *sensor,
+				const uint8_t* data, size_t data_len)
+{
+	int ret = 0, i = 0;
+	u16 start, len;
+	u8 buf[128];
+
+	if (data_len % 2 != 0) {
+		v4l2_err(&sensor->sd, "Register map has invalid size\n");
+		return -EINVAL;
+	}
+
+	/* we speed up communication by using auto-increment functionality */
+	while (i < data_len) {
+		start = data[i];
+		len = 0;
+
+		while (i < data_len && data[i] == (start + len) &&
+		       len < sizeof(buf)) {
+			buf[len++] = data[i + 1];
+			i += 2;
+		}
+
+		ret = gc2145_write_regs(sensor, start, buf, len);
+		if (ret)
+			return ret;
+	}
+
+	sensor->current_bank = 0xff;
+	return 0;
+}
+
+/*
+ * The firmware format:
+ * <record 0>, ..., <record N - 1>
+ * "record" is a 1-byte register address followed by 1-byte data
+ */
+static int gc2145_load_firmware(struct gc2145_dev *sensor, const char *name)
+{
+	const struct firmware *fw;
+	int ret;
+
+	ret = request_firmware(&fw, name, sensor->sd.v4l2_dev->dev);
+	if (ret) {
+		v4l2_warn(&sensor->sd,
+			  "Failed to read firmware %s, continuing anyway...\n",
+			  name);
+		return 1;
+	}
+
+	if (fw->size == 0)
+		return 1;
+
+	ret = gc2145_set_registers(sensor, fw->data, fw->size);
+
+	release_firmware(fw);
+	return ret;
+}
+
+/* }}} */
+/* {{{ Controls */
+
+static inline struct v4l2_subdev *ctrl_to_sd(struct v4l2_ctrl *ctrl)
+{
+	return &container_of(ctrl->handler, struct gc2145_dev,
+			     ctrls.handler)->sd;
+}
+
+#if 0
+static const u8 gc2145_wb_opts[][2] = {
+	{ V4L2_WHITE_BALANCE_MANUAL, GC2145_REG_WB_MODE_OFF },
+	{ V4L2_WHITE_BALANCE_INCANDESCENT, GC2145_REG_WB_MODE_TUNGSTEN_PRESET },
+	{ V4L2_WHITE_BALANCE_FLUORESCENT,
+		GC2145_REG_WB_MODE_FLUORESCENT_PRESET },
+	{ V4L2_WHITE_BALANCE_HORIZON, GC2145_REG_WB_MODE_HORIZON_PRESET },
+	{ V4L2_WHITE_BALANCE_CLOUDY, GC2145_REG_WB_MODE_CLOUDY_PRESET },
+	{ V4L2_WHITE_BALANCE_DAYLIGHT, GC2145_REG_WB_MODE_SUNNY_PRESET },
+	{ V4L2_WHITE_BALANCE_AUTO, GC2145_REG_WB_MODE_AUTOMATIC },
+};
+
+static int gc2145_set_power_line_frequency(struct gc2145_dev *sensor, s32 val)
+{
+	u16 freq;
+	int ret;
+
+	switch (val) {
+	case V4L2_CID_POWER_LINE_FREQUENCY_DISABLED:
+		ret = gc2145_write(sensor, GC2145_REG_ANTI_FLICKER_MODE, 0);
+		if (ret)
+			return ret;
+
+		return gc2145_write(sensor, GC2145_REG_FD_ENABLE_DETECT, 0);
+	case V4L2_CID_POWER_LINE_FREQUENCY_50HZ:
+	case V4L2_CID_POWER_LINE_FREQUENCY_60HZ:
+		ret = gc2145_write(sensor, GC2145_REG_ANTI_FLICKER_MODE, 1);
+		if (ret)
+			return ret;
+
+		ret = gc2145_write(sensor, GC2145_REG_FD_ENABLE_DETECT, 0);
+		if (ret)
+			return ret;
+
+		freq = (val == V4L2_CID_POWER_LINE_FREQUENCY_50HZ) ?
+			0x4b20 : 0x4bc0;
+
+		return gc2145_write16(sensor, GC2145_REG_FD_FLICKER_FREQUENCY,
+				      freq);
+	case V4L2_CID_POWER_LINE_FREQUENCY_AUTO:
+		ret = gc2145_write(sensor, GC2145_REG_FD_ENABLE_DETECT, 1);
+		if (ret)
+			return ret;
+
+		ret = gc2145_write(sensor, GC2145_REG_ANTI_FLICKER_MODE, 1);
+		if (ret)
+			return ret;
+
+		ret = gc2145_write16(sensor, GC2145_REG_FD_MAX_NUMBER_ATTEMP,
+				     100);
+		if (ret)
+			return ret;
+
+		ret = gc2145_write16(sensor, GC2145_REG_FD_FLICKER_FREQUENCY,
+				     0);
+		if (ret)
+			return ret;
+
+		return gc2145_write(sensor, GC2145_REG_FD_DETECTION_START, 1);
+	default:
+		return -EINVAL;
+	}
+}
+
+static int gc2145_set_colorfx(struct gc2145_dev *sensor, s32 val)
+{
+	int ret;
+
+	ret = gc2145_write(sensor, GC2145_REG_EFFECTS_COLOR,
+			   GC2145_REG_EFFECTS_COLOR_NORMAL);
+	if (ret)
+		return ret;
+
+	ret = gc2145_write(sensor, GC2145_REG_EFFECTS_NEGATIVE, 0);
+	if (ret)
+		return ret;
+
+	ret = gc2145_write(sensor, GC2145_REG_EFFECTS_SOLARISING, 0);
+	if (ret)
+		return ret;
+
+	ret = gc2145_write(sensor, GC2145_REG_EFFECTS_SKECTH, 0);
+	if (ret)
+		return ret;
+
+	switch (val) {
+	case V4L2_COLORFX_NONE:
+		return 0;
+	case V4L2_COLORFX_NEGATIVE:
+		return gc2145_write(sensor, GC2145_REG_EFFECTS_NEGATIVE, 1);
+	case V4L2_COLORFX_SOLARIZATION:
+		return gc2145_write(sensor, GC2145_REG_EFFECTS_SOLARISING, 1);
+	case V4L2_COLORFX_SKETCH:
+		return gc2145_write(sensor, GC2145_REG_EFFECTS_SKECTH, 1);
+	case V4L2_COLORFX_ANTIQUE:
+		return gc2145_write(sensor, GC2145_REG_EFFECTS_COLOR,
+				    GC2145_REG_EFFECTS_COLOR_ANTIQUE);
+	case V4L2_COLORFX_SEPIA:
+		return gc2145_write(sensor, GC2145_REG_EFFECTS_COLOR,
+				    GC2145_REG_EFFECTS_COLOR_SEPIA);
+	case V4L2_COLORFX_AQUA:
+		return gc2145_write(sensor, GC2145_REG_EFFECTS_COLOR,
+				    GC2145_REG_EFFECTS_COLOR_AQUA);
+	case V4L2_COLORFX_BW:
+		return gc2145_write(sensor, GC2145_REG_EFFECTS_COLOR,
+				    GC2145_REG_EFFECTS_COLOR_BLACK_WHITE);
+	default:
+		return -EINVAL;
+	}
+}
+
+static int gc2145_3a_lock(struct gc2145_dev *sensor, struct v4l2_ctrl *ctrl)
+{
+	bool awb_lock = ctrl->val & V4L2_LOCK_WHITE_BALANCE;
+	bool ae_lock = ctrl->val & V4L2_LOCK_EXPOSURE;
+	int ret = 0;
+
+	if ((ctrl->val ^ ctrl->cur.val) & V4L2_LOCK_EXPOSURE
+	    && sensor->ctrls.auto_exposure->val == V4L2_EXPOSURE_AUTO) {
+		ret = gc2145_write(sensor, GC2145_REG_FREEZE_AUTO_EXPOSURE,
+				   ae_lock);
+		if (ret)
+			return ret;
+	}
+
+	if (((ctrl->val ^ ctrl->cur.val) & V4L2_LOCK_WHITE_BALANCE)
+	    && sensor->ctrls.wb->val == V4L2_WHITE_BALANCE_AUTO) {
+		ret = gc2145_write(sensor, GC2145_REG_WB_MISC_SETTINGS,
+				   awb_lock ?
+				   GC2145_REG_WB_MISC_SETTINGS_FREEZE_ALGO : 0);
+		if (ret)
+			return ret;
+	}
+
+	return ret;
+}
+
+static int gc2145_set_white_balance(struct gc2145_dev *sensor)
+{
+	struct gc2145_ctrls *ctrls = &sensor->ctrls;
+	bool manual_wb = ctrls->wb->val == V4L2_WHITE_BALANCE_MANUAL;
+	int ret = 0, i;
+	s32 val;
+
+	if (ctrls->wb->is_new) {
+		for (i = 0; i < ARRAY_SIZE(gc2145_wb_opts); i++) {
+			if (gc2145_wb_opts[i][0] != ctrls->wb->val)
+				continue;
+
+			ret = gc2145_write(sensor, GC2145_REG_WB_MODE,
+					    gc2145_wb_opts[i][1]);
+			if (ret)
+				return ret;
+			goto next;
+		}
+
+		return -EINVAL;
+	}
+
+next:
+	if (ctrls->wb->is_new || ctrls->blue_balance->is_new) {
+		val = manual_wb ? ctrls->blue_balance->val : 1000;
+		ret = gc2145_write16(sensor, GC2145_REG_WB_HUE_B_BIAS,
+				     gc2145_mili_to_fp16(val));
+		if (ret)
+			return ret;
+	}
+
+	if (ctrls->wb->is_new || ctrls->red_balance->is_new) {
+		val = manual_wb ? ctrls->red_balance->val : 1000;
+		ret = gc2145_write16(sensor, GC2145_REG_WB_HUE_R_BIAS,
+				     gc2145_mili_to_fp16(val));
+	}
+
+	return ret;
+}
+
+#endif
+
+/* Exposure */
+
+static int gc2145_get_exposure(struct gc2145_dev *sensor)
+{
+	struct gc2145_ctrls *ctrls = &sensor->ctrls;
+	u8 again, dgain;
+	u16 exp;
+	int ret;
+
+	ret = gc2145_read(sensor, 0xb1, &again);
+	if (ret)
+		return ret;
+
+	ret = gc2145_read(sensor, 0xb2, &dgain);
+	if (ret)
+		return ret;
+
+	ret = gc2145_read16(sensor, 0x03, &exp);
+	if (ret)
+		return ret;
+
+	ctrls->exposure->val = exp;
+	ctrls->d_gain->val = dgain;
+	ctrls->a_gain->val = again;
+
+	return 0;
+}
+
+#define AE_BIAS_MENU_DEFAULT_VALUE_INDEX 4
+static const s64 ae_bias_menu_values[] = {
+	-4000, -3000, -2000, -1000, 0, 1000, 2000, 3000, 4000
+};
+
+static const s8 ae_bias_menu_reg_values[] = {
+	0x55, 0x60, 0x65, 0x70, 0x7b, 0x85, 0x90, 0x95, 0xa0
+};
+
+static int gc2145_set_exposure(struct gc2145_dev *sensor)
+{
+	struct gc2145_ctrls *ctrls = &sensor->ctrls;
+	bool is_auto = (ctrls->auto_exposure->val != V4L2_EXPOSURE_MANUAL);
+
+	gc2145_tx_start(sensor);
+
+	if (ctrls->auto_exposure->is_new) {
+		gc2145_tx_write8(sensor, 0xb6, is_auto ? 1 : 0);
+
+		//XXX: remove?
+		//if (ctrls->auto_exposure->cur.val != ctrls->auto_exposure->val &&
+		    //!is_auto) {
+			/*
+			 * Hack: At this point, there are current volatile
+			 * values in val, but control framework will not
+			 * update the cur values for our autocluster, as it
+			 * should. I couldn't find the reason. This fixes
+			 * it for our driver. Remove this after the kernel
+			 * is fixed.
+			 */
+			//ctrls->exposure->cur.val = ctrls->exposure->val;
+			//ctrls->d_gain->cur.val = ctrls->d_gain->val;
+			//ctrls->a_gain->cur.val = ctrls->a_gain->val;
+		//}
+	}
+
+	if (!is_auto && ctrls->exposure->is_new)
+		gc2145_tx_write16(sensor, 0x03, ctrls->exposure->val);
+
+	if (!is_auto && ctrls->d_gain->is_new)
+		gc2145_tx_write8(sensor, 0xb2, ctrls->d_gain->val);
+
+	if (!is_auto && ctrls->a_gain->is_new)
+		gc2145_tx_write8(sensor, 0xb1, ctrls->a_gain->val);
+
+	return gc2145_tx_commit(sensor);;
+}
+
+struct gc2145_sensor_params {
+	unsigned int enable_scaler;
+	unsigned int col_scaler_only;
+	unsigned int row_skip;
+	unsigned int col_skip;
+	unsigned long sh_delay;
+	unsigned long hb;
+	unsigned long vb;
+	unsigned long st;
+	unsigned long et;
+	unsigned long win_width;
+	unsigned long win_height;
+	unsigned long width;
+	unsigned long height;
+};
+
+static void gc2145_sensor_params_init(struct gc2145_sensor_params* p, int width, int height)
+{
+	p->win_height = height + 32;
+	p->win_width = (width + 16);
+	p->width = width;
+	p->height = height;
+	p->st = 2;
+	p->et = 2;
+	p->vb = 8;
+	p->hb = 0x1f0;
+	p->sh_delay = 30;
+}
+
+// unit is PCLK periods
+static unsigned long
+gc2145_sensor_params_get_row_period(struct gc2145_sensor_params* p)
+{
+	return 2 * (p->win_width / 2 / (p->col_skip + 1) + p->sh_delay + p->hb + 4);
+}
+
+static unsigned long
+gc2145_sensor_params_get_frame_period(struct gc2145_sensor_params* p)
+{
+	unsigned long rt = gc2145_sensor_params_get_row_period(p);
+
+	return rt * (p->vb + p->win_height) / (p->row_skip + 1);
+}
+
+static void
+gc2145_sensor_params_fit_hb_to_power_line_period(struct gc2145_sensor_params* p,
+					  unsigned long power_line_freq,
+					  unsigned long pclk)
+{
+	unsigned long rt, power_line_ratio;
+
+        for (p->hb = 0x1f0; p->hb < 2047; p->hb++) {
+		rt = gc2145_sensor_params_get_row_period(p);
+
+		// power_line_ratio is row_freq / power_line_freq * 1000
+                power_line_ratio = pclk / power_line_freq * 1000 / rt;
+
+		// if we're close enough, stop the search
+                if (power_line_ratio % 1000 < 50)
+                        break;
+        }
+
+	// finding the optimal Hb is not critical
+	if (p->hb == 2047)
+		p->hb = 0x1f0;
+}
+
+static void
+gc2145_sensor_params_fit_vb_to_frame_period(struct gc2145_sensor_params* p,
+				     unsigned long frame_period)
+{
+	unsigned long rt, fp;
+
+	p->vb = 8;
+	rt = gc2145_sensor_params_get_row_period(p);
+	fp = gc2145_sensor_params_get_frame_period(p);
+
+	if (frame_period > fp)
+		p->vb = frame_period * (p->row_skip + 1) / rt - p->win_height;
+
+	if (p->vb > 4095)
+		p->vb = 4095;
+}
+
+static struct gc2145_sensor_params gc2145_get_sensor_params(
+	unsigned long framerate,
+	unsigned long width,
+	unsigned long height,
+	unsigned long *pclk2)
+{
+	struct gc2145_sensor_params params = {0};
+	bool scaling_desired;
+	unsigned long frame_period;
+	unsigned long power_line_freq = 50;
+
+	/*
+	 * Equations for calculating framerate are:
+	 *
+	 *    ww = width + 16
+	 *    wh = height + 32
+	 *    Rt = (ww / 2 / (col_skip + 1) + sh_delay + Hb + 4)
+	 *    Ft = Rt * (Vb + wh) / (row_skip + 1)
+	 *    framerate = 2pclk / 4 / Ft
+	 *
+	 * Based on these equations:
+	 *
+	 * 1) First we need to determine what 2PCLK frequency to use. The 2PCLK
+	 *    frequency is not arbitrarily precise, so we need to calculate the
+	 *    actual frequency used, after setting our target frequency.
+	 *
+	 *    We use a simple heuristic:
+	 *
+	 *      If pixel_count * 2 * framerate * 1.15 is > 40MHz, we use 60MHz,
+	 *      otherwise we use 40MHz.
+	 *
+	 * 2) We want to determine lowest Hb that we can use to extend row
+	 *    period so that row time takes an integer fraction of the power
+	 *    line frequency period. Minimum Hb is 0x1f0.
+	 *
+	 * 3) If the requested resolution is less than half the sensor's size,
+	 *    we'll use scaling, or row skipping + column scaling, or row and
+	 *    column skiping, depending on what allows us to achieve the
+	 *    requested framerate.
+	 *
+	 * 4) We use the selected Hb to calculate Vb value that will give
+	 *    us the desired framerate, given the scaling/skipping option
+	 *    selected in 3).
+	 */
+
+	scaling_desired = width <= GC2145_SENSOR_WIDTH_MAX / 2
+			&& height <= GC2145_SENSOR_HEIGHT_MAX / 2;
+
+	*pclk2 = 60000000;
+
+	gc2145_sensor_params_init(&params, width, height);
+
+	// if the resolution is < half the sensor size, enable the scaler
+	// to cover more area of the chip
+	if (scaling_desired) {
+		params.enable_scaler = 1;
+		*pclk2 *= 2;
+		gc2145_sensor_params_init(&params, width * 2, height * 2);
+	}
+
+	// we need to call this each time pclk or power_line_freq is changed
+	gc2145_sensor_params_fit_hb_to_power_line_period(&params,
+							 power_line_freq,
+							 *pclk2 / 2);
+
+	frame_period = gc2145_sensor_params_get_frame_period(&params);
+	if (framerate <= *pclk2 / 2 / frame_period)
+		goto apply;
+
+	if (scaling_desired) {
+		// try using just the column scaler + row skip
+		params.col_scaler_only = 1;
+		params.row_skip = 1;
+		gc2145_sensor_params_fit_hb_to_power_line_period(&params,
+								 power_line_freq,
+								 *pclk2 / 2);
+
+		frame_period = gc2145_sensor_params_get_frame_period(&params);
+		if (framerate <= *pclk2 / 2 / frame_period)
+			goto apply;
+
+
+		/*
+		// try disabling the scaler and just use skipping
+		params.enable_scaler = 0;
+		*pclk2 /= 2;
+		params.col_scaler_only = 0;
+		params.col_skip = 1;
+		gc2145_sensor_params_fit_hb_to_power_line_period(&params, power_line_freq, *pclk2 / 2);
+
+		frame_period = gc2145_sensor_params_get_frame_period(&params);
+
+		if (framerate <= *pclk2 / 2 / frame_period)
+			goto apply;
+		*/
+	}
+
+apply:
+	// adjust vb to fit the target framerate
+	gc2145_sensor_params_fit_vb_to_frame_period(&params,
+						    *pclk2 / 2 / framerate);
+
+	return params;
+}
+
+static int gc2145_sensor_params_apply(struct gc2145_dev *sensor,
+				      struct gc2145_sensor_params* p)
+{
+	u32 off_x = (GC2145_SENSOR_WIDTH_MAX - p->width) / 2;
+	u32 off_y = (GC2145_SENSOR_HEIGHT_MAX - p->height) / 2;
+
+	gc2145_tx_start(sensor);
+
+	gc2145_tx_write8(sensor, 0xfd, (p->enable_scaler ? BIT(0) : 0)
+			| (p->col_scaler_only ? BIT(1) : 0));
+
+	gc2145_tx_write8(sensor, 0x18, 0x0a
+		       | (p->col_skip ? BIT(7) : 0)
+		       | (p->row_skip ? BIT(6) : 0));
+
+	gc2145_tx_write16(sensor, 0x09, off_y);
+	gc2145_tx_write16(sensor, 0x0b, off_x);
+	gc2145_tx_write16(sensor, 0x0d, p->win_height);
+	gc2145_tx_write16(sensor, 0x0f, p->win_width);
+	gc2145_tx_write16(sensor, 0x05, p->hb);
+	gc2145_tx_write16(sensor, 0x07, p->vb);
+	gc2145_tx_write16(sensor, 0x11, p->sh_delay);
+
+	gc2145_tx_write8(sensor, 0x13, p->st);
+	gc2145_tx_write8(sensor, 0x14, p->et);
+
+	return gc2145_tx_commit(sensor);
+}
+
+/* Test patterns */
+
+enum {
+	GC2145_TEST_PATTERN_DISABLED,
+	GC2145_TEST_PATTERN_VGA_COLOR_BARS,
+	GC2145_TEST_PATTERN_UXGA_COLOR_BARS,
+	GC2145_TEST_PATTERN_SKIN_MAP,
+	GC2145_TEST_PATTERN_SOLID_COLOR,
+};
+
+static const char * const test_pattern_menu[] = {
+	"Disabled",
+	"VGA color bars",
+	"UXGA color bars",
+	"Skin map",
+	"Solid black color",
+	"Solid light gray color",
+	"Solid gray color",
+	"Solid dark gray color",
+	"Solid white color",
+	"Solid red color",
+	"Solid green color",
+	"Solid blue color",
+	"Solid yellow color",
+	"Solid cyan color",
+	"Solid magenta color",
+};
+
+static int gc2145_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
+{
+	struct v4l2_subdev *sd = ctrl_to_sd(ctrl);
+	struct gc2145_dev *sensor = to_gc2145_dev(sd);
+	int ret;
+
+	/* v4l2_ctrl_lock() locks our own mutex */
+
+	if (!sensor->powered)
+		return -EIO;
+
+	switch (ctrl->id) {
+	case V4L2_CID_EXPOSURE_AUTO:
+		ret = gc2145_get_exposure(sensor);
+		if (ret)
+			return ret;
+		break;
+	default:
+		dev_err(&sensor->i2c_client->dev, "getting unknown control %d\n", ctrl->id);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int gc2145_s_ctrl(struct v4l2_ctrl *ctrl)
+{
+	struct v4l2_subdev *sd = ctrl_to_sd(ctrl);
+	struct gc2145_dev *sensor = to_gc2145_dev(sd);
+	struct gc2145_ctrls *ctrls = &sensor->ctrls;
+	s32 val = ctrl->val;
+	unsigned int i;
+	int ret;
+	u8 test1, test2;
+
+	/* v4l2_ctrl_lock() locks our own mutex */
+
+	/*
+	 * If the device is not powered up by the host driver do
+	 * not apply any controls to H/W at this time. Instead
+	 * the controls will be restored right after power-up.
+	 */
+	if (!sensor->powered)
+		return 0;
+
+	switch (ctrl->id) {
+	case V4L2_CID_EXPOSURE_AUTO:
+		return gc2145_set_exposure(sensor);
+
+	case V4L2_CID_AUTO_EXPOSURE_BIAS:
+		if (val < 0 || val >= ARRAY_SIZE(ae_bias_menu_reg_values)) {
+			dev_err(&sensor->i2c_client->dev, "ae bias out of range\n");
+			return -EINVAL;
+		}
+
+		return gc2145_write(sensor, 0x113,
+				    (u8)ae_bias_menu_reg_values[val]);
+
+	case V4L2_CID_VFLIP:
+		return gc2145_update_bits(sensor, 0x17, BIT(1), val ? BIT(1) : 0);
+
+	case V4L2_CID_HFLIP:
+		return gc2145_update_bits(sensor, 0x17, BIT(0), val ? BIT(0) : 0);
+
+	case V4L2_CID_TEST_PATTERN:
+		for (i = 0; i < ARRAY_SIZE(ctrls->test_data); i++)
+			v4l2_ctrl_activate(ctrls->test_data[i],
+					   val == 6); /* solid color */
+
+		test1 = 0;
+		test2 = 0x01;
+
+		if (val == GC2145_TEST_PATTERN_VGA_COLOR_BARS)
+			test1 = 0x04;
+		else if (val == GC2145_TEST_PATTERN_UXGA_COLOR_BARS)
+			test1 = 0x44;
+		else if (val == GC2145_TEST_PATTERN_SKIN_MAP)
+			test1 = 0x10;
+		else if (val >= GC2145_TEST_PATTERN_SOLID_COLOR) {
+			test1 = 0x04;
+			test2 = ((val - GC2145_TEST_PATTERN_SOLID_COLOR) << 4) | 0x8;
+		} else if (val != GC2145_TEST_PATTERN_DISABLED) {
+			dev_err(&sensor->i2c_client->dev, "test pattern out of range\n");
+			return -EINVAL;
+		}
+
+		ret = gc2145_write(sensor, 0x8c, test1);
+		if (ret)
+			return ret;
+
+		return gc2145_write(sensor, 0x8d, test2);
+
+#if 0
+	case V4L2_CID_EXPOSURE_METERING:
+		if (val == V4L2_EXPOSURE_METERING_AVERAGE)
+			reg = GC2145_REG_EXPOSURE_METERING_FLAT;
+		else if (val == V4L2_EXPOSURE_METERING_CENTER_WEIGHTED)
+			reg = GC2145_REG_EXPOSURE_METERING_CENTERED;
+		else
+			return -EINVAL;
+
+		return gc2145_write(sensor, GC2145_REG_EXPOSURE_METERING, reg);
+
+	case V4L2_CID_CONTRAST:
+		return gc2145_write(sensor, GC2145_REG_CONTRAST, val);
+
+	case V4L2_CID_SATURATION:
+		return gc2145_write(sensor, GC2145_REG_COLOR_SATURATION, val);
+
+	case V4L2_CID_BRIGHTNESS:
+		return gc2145_write(sensor, GC2145_REG_BRIGHTNESS, val);
+
+	case V4L2_CID_POWER_LINE_FREQUENCY:
+		return gc2145_set_power_line_frequency(sensor, val);
+
+	case V4L2_CID_GAMMA:
+		return gc2145_write(sensor, GC2145_REG_P0_GAMMA_GAIN, val);
+
+	case V4L2_CID_COLORFX:
+		return gc2145_set_colorfx(sensor, val);
+
+	case V4L2_CID_3A_LOCK:
+		return gc2145_3a_lock(sensor, ctrl);
+
+	case V4L2_CID_AUTO_N_PRESET_WHITE_BALANCE:
+		return gc2145_set_white_balance(sensor);
+
+	case V4L2_CID_TEST_PATTERN_RED:
+		return gc2145_write16(sensor, GC2145_REG_TESTDATA_RED, val);
+
+	case V4L2_CID_TEST_PATTERN_GREENR:
+		return gc2145_write16(sensor, GC2145_REG_TESTDATA_GREEN_R, val);
+
+	case V4L2_CID_TEST_PATTERN_BLUE:
+		return gc2145_write16(sensor, GC2145_REG_TESTDATA_BLUE, val);
+
+	case V4L2_CID_TEST_PATTERN_GREENB:
+		return gc2145_write16(sensor, GC2145_REG_TESTDATA_GREEN_B, val);
+
+#endif
+	default:
+		dev_err(&sensor->i2c_client->dev, "setting unknown control %d\n", ctrl->id);
+		return -EINVAL;
+	}
+}
+
+static const struct v4l2_ctrl_ops gc2145_ctrl_ops = {
+	.g_volatile_ctrl = gc2145_g_volatile_ctrl,
+	.s_ctrl = gc2145_s_ctrl,
+};
+
+static int gc2145_init_controls(struct gc2145_dev *sensor)
+{
+	const struct v4l2_ctrl_ops *ops = &gc2145_ctrl_ops;
+	struct gc2145_ctrls *ctrls = &sensor->ctrls;
+	struct v4l2_ctrl_handler *hdl = &ctrls->handler;
+	struct v4l2_fwnode_device_properties props;
+	//u8 wb_max = 0;
+	//u64 wb_mask = 0;
+	//unsigned int i;
+	int ret;
+	struct gc2145_sensor_params params;
+	unsigned long pixel_rate;
+
+	v4l2_ctrl_handler_init(hdl, 32);
+
+	/* we can use our own mutex for the ctrl lock */
+	hdl->lock = &sensor->lock;
+
+	/* Clock related controls */
+	params = gc2145_get_sensor_params(sensor->frame_interval.denominator,
+					  sensor->fmt.width,
+					  sensor->fmt.height,
+					  &pixel_rate);
+	ctrls->pixel_rate = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_PIXEL_RATE,
+					      0, INT_MAX, 1,
+					      pixel_rate);
+
+	ctrls->hblank = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HBLANK,
+					  0, INT_MAX, 1,
+					  params.win_height);
+
+	ctrls->vblank = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VBLANK,
+					  0, INT_MAX, 1,
+					  params.win_width);
+
+	/* Exposure controls */
+	ctrls->auto_exposure = v4l2_ctrl_new_std_menu(hdl, ops,
+						      V4L2_CID_EXPOSURE_AUTO,
+						      V4L2_EXPOSURE_MANUAL, 0,
+						      V4L2_EXPOSURE_AUTO);
+	ctrls->exposure = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_EXPOSURE,
+					    1, 0x1fff, 1, 0x80);
+	ctrls->a_gain = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_ANALOGUE_GAIN,
+					  0, 255, 1, 0x20);
+	ctrls->d_gain = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_DIGITAL_GAIN,
+					  0, 255, 1, 0x40);
+	ctrls->exposure_bias =
+		v4l2_ctrl_new_int_menu(hdl, ops, V4L2_CID_AUTO_EXPOSURE_BIAS,
+				       ARRAY_SIZE(ae_bias_menu_values) - 1,
+				       AE_BIAS_MENU_DEFAULT_VALUE_INDEX,
+				       ae_bias_menu_values);
+
+	/* V/H flips */
+	ctrls->hflip = v4l2_ctrl_new_std(hdl, ops,
+					 V4L2_CID_HFLIP, 0, 1, 1, 0);
+	ctrls->vflip = v4l2_ctrl_new_std(hdl, ops,
+					 V4L2_CID_VFLIP, 0, 1, 1, 0);
+
+	ret = v4l2_fwnode_device_parse(&sensor->i2c_client->dev, &props);
+	if (ret)
+		goto free_ctrls;
+
+	ret = v4l2_ctrl_new_fwnode_properties(hdl, &gc2145_ctrl_ops,
+					      &props);
+	if (ret)
+		goto free_ctrls;
+
+	/* Test patterns */
+	ctrls->test_pattern =
+		v4l2_ctrl_new_std_menu_items(hdl, ops, V4L2_CID_TEST_PATTERN,
+					     ARRAY_SIZE(test_pattern_menu) - 1,
+					     0, 0, test_pattern_menu);
+#if 0
+
+	ctrls->metering =
+		v4l2_ctrl_new_std_menu(hdl, ops, V4L2_CID_EXPOSURE_METERING,
+				       V4L2_EXPOSURE_METERING_CENTER_WEIGHTED,
+				       0, V4L2_EXPOSURE_METERING_AVERAGE);
+
+	for (i = 0; i < ARRAY_SIZE(gc2145_wb_opts); i++) {
+		if (wb_max < gc2145_wb_opts[i][0])
+			wb_max = gc2145_wb_opts[i][0];
+		wb_mask |= BIT(gc2145_wb_opts[i][0]);
+	}
+
+	ctrls->wb = v4l2_ctrl_new_std_menu(hdl, ops,
+			V4L2_CID_AUTO_N_PRESET_WHITE_BALANCE,
+			wb_max, ~wb_mask, V4L2_WHITE_BALANCE_AUTO);
+
+	ctrls->blue_balance = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_BLUE_BALANCE,
+						0, 4000, 1, 1000);
+	ctrls->red_balance = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_RED_BALANCE,
+					       0, 4000, 1, 1000);
+
+	ctrls->gamma = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_GAMMA,
+					 0, 31, 1, 20);
+
+	ctrls->colorfx =
+		v4l2_ctrl_new_std_menu(hdl, ops, V4L2_CID_COLORFX, 15,
+				       ~(BIT(V4L2_COLORFX_NONE) |
+					 BIT(V4L2_COLORFX_NEGATIVE) |
+					 BIT(V4L2_COLORFX_SOLARIZATION) |
+					 BIT(V4L2_COLORFX_SKETCH) |
+					 BIT(V4L2_COLORFX_SEPIA) |
+					 BIT(V4L2_COLORFX_ANTIQUE) |
+					 BIT(V4L2_COLORFX_AQUA) |
+					 BIT(V4L2_COLORFX_BW)),
+				       V4L2_COLORFX_NONE);
+
+	ctrls->pl_freq =
+		v4l2_ctrl_new_std_menu(hdl, ops, V4L2_CID_POWER_LINE_FREQUENCY,
+				V4L2_CID_POWER_LINE_FREQUENCY_AUTO, 0,
+				V4L2_CID_POWER_LINE_FREQUENCY_50HZ);
+
+	ctrls->brightness = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_BRIGHTNESS,
+					      0, 200, 1, 90);
+	ctrls->saturation = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_SATURATION,
+					      0, 200, 1, 110);
+	ctrls->contrast = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_CONTRAST,
+					    0, 200, 1, 108);
+
+	ctrls->aaa_lock = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_3A_LOCK,
+					    0, 0x7, 0, 0);
+
+	for (i = 0; i < ARRAY_SIZE(ctrls->test_data); i++)
+		ctrls->test_data[i] =
+			v4l2_ctrl_new_std(hdl, ops,
+					  V4L2_CID_TEST_PATTERN_RED + i,
+					  0, 1023, 1, 0);
+
+	ctrls->af_status->flags |= V4L2_CTRL_FLAG_VOLATILE |
+		V4L2_CTRL_FLAG_READ_ONLY;
+
+	v4l2_ctrl_auto_cluster(3, &ctrls->wb, V4L2_WHITE_BALANCE_MANUAL, false);
+#endif
+
+	ctrls->pixel_rate->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+	ctrls->hblank->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+	ctrls->vblank->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+
+	v4l2_ctrl_auto_cluster(4, &ctrls->auto_exposure, V4L2_EXPOSURE_MANUAL,
+			       true);
+
+	if (hdl->error) {
+		ret = hdl->error;
+		goto free_ctrls;
+	}
+
+	sensor->sd.ctrl_handler = hdl;
+	return 0;
+
+free_ctrls:
+	v4l2_ctrl_handler_free(hdl);
+	return ret;
+}
+
+/* }}} */
+/* {{{ Video ops */
+
+/*
+ * Clock tree
+ * ----------
+ *
+ *     MCLK pin
+ *         |
+ *  DIV2 (optional)        - Divide input MCLK by 2 when 0xf7[1] == 1
+ *         |
+ *   /- PLL mux -\         - PLL selected by 0xf8[7], otherwise fixed 32x mult
+ *   |           |
+ * PLL           |         - PLL multiplies by 0xf8[5:0]+1 * 4
+ *   |      Fixed 32/48x   - Multiplies 32x when 0xf7[2] == 1 otherwise 48x
+ *    \_________/
+ *         |
+ *       DOUBLE  (div by 4 or 8) based on 0xf7[3]
+ *         |
+ *     /-------\
+ *     |       |
+ * pclk_div  sclk_div
+ *     |       |
+ *   2pclk    sclk
+ */
+__maybe_unused
+static int gc2145_get_2pclk(struct gc2145_dev *sensor, unsigned long* pclk)
+{
+	u8 pll_mode1, pll_mode2, clk_div_mode;
+	bool mclk_div2_en; // 0xf7[1]
+	bool pll_en; // 0xf8[7]
+	bool double_clk; // 0xf7[3]
+	bool fixed_32x; // 0xf7[2]
+	unsigned long pll_mult; // 0xf8[5:0] + 1
+	unsigned long sclk_div; // 1 << (0xf7[5:4] + 1)
+	unsigned long pclk_div; // 0xfa[7:4] + 1
+	unsigned long int_clk;
+	unsigned long mclk;
+        int ret;
+
+	ret = gc2145_read(sensor, 0xf7, &pll_mode1);
+	if (ret)
+		return ret;
+
+	ret = gc2145_read(sensor, 0xf8, &pll_mode2);
+	if (ret)
+		return ret;
+
+	ret = gc2145_read(sensor, 0xfa, &clk_div_mode);
+	if (ret)
+		return ret;
+
+	mclk = clk_get_rate(sensor->xclk);
+	if (mclk == 0)
+		return -EINVAL;
+
+	mclk_div2_en = pll_mode1 & BIT(1);
+	pll_en = pll_mode2 & BIT(7);
+	double_clk = pll_mode1 & BIT(3);
+	fixed_32x = pll_mode1 & BIT(2);
+	pll_mult = (pll_mode2 & 0x3f) + 1;
+	pclk_div = (clk_div_mode >> 4) + 1;
+	sclk_div = 1 << (((pll_mode1 >> 4) & 0x3) + 1);
+
+	int_clk = mclk / (mclk_div2_en ? 2 : 1);
+
+	if (pll_en)
+		int_clk *= pll_mult * 4;
+	else
+		int_clk *= fixed_32x ? 32 : 48;
+
+	int_clk /= double_clk ? 4 : 8;
+
+	if (pclk)
+		*pclk = int_clk / pclk_div;
+
+	return 0;
+}
+
+static int gc2145_set_2pclk(struct gc2145_dev *sensor,
+			    unsigned long *freq, bool apply)
+{
+	unsigned long pll_mult, pll_mult_max, /*sclk_div,*/ pclk_div, pclk2,/* sclk,*/
+		      mclk;
+	unsigned long pll_mult_best = 0, pclk_div_best = 0, diff_best = ULONG_MAX, diff,
+		      pclk2_best = 0;
+	int mclk_div2_en; //, double_clk;
+	int mclk_div2_en_best = 0; //, double_clk_best;
+
+	mclk = clk_get_rate(sensor->xclk);
+	if (mclk == 0)
+		return -EINVAL;
+
+        for (mclk_div2_en = 0; mclk_div2_en <= 1; mclk_div2_en++) {
+		pll_mult_max = 768000000 / 4 / (mclk / (mclk_div2_en ? 2 : 1));
+		if (pll_mult_max > 32)
+			pll_mult_max = 32;
+
+		for (pll_mult = 2; pll_mult <= pll_mult_max; pll_mult++) {
+			for (pclk_div = 1; pclk_div <= 8; pclk_div++) {
+				pclk2 = mclk / (mclk_div2_en ? 2 : 1) * pll_mult / pclk_div;
+
+				if (pclk2 > *freq)
+					continue;
+
+				diff = *freq - pclk2;
+
+				if (diff < diff_best) {
+					diff_best = diff;
+					pclk2_best = pclk2;
+
+					pll_mult_best = pll_mult;
+					pclk_div_best = pclk_div;
+					mclk_div2_en_best = mclk_div2_en;
+				}
+
+				if (diff == 0)
+					goto found;
+			}
+		}
+	}
+
+	if (diff_best == ULONG_MAX)
+		return -1;
+
+found:
+	*freq = pclk2_best;
+	if (!apply)
+		return 0;
+
+	gc2145_tx_start(sensor);
+
+	gc2145_tx_write8(sensor, 0xf7,
+			 ((pclk_div_best - 1)) << 4 |
+			 (mclk_div2_en_best << 1) | BIT(0) /* pll_en */);
+	gc2145_tx_write8(sensor, 0xf8, BIT(7) | (pll_mult_best - 1));
+	gc2145_tx_write8(sensor, 0xfa,
+			 (pclk_div_best - 1) << 4 |
+			 (((pclk_div_best - 1) / 2) & 0xf));
+
+	return gc2145_tx_commit(sensor);
+}
+
+struct gc2145_reg {
+	unsigned char address;
+	unsigned char val;
+};
+
+static const struct gc2145_reg gc2145_awb_regs[] = {
+	{0xfe, 0x01},
+	{0x4f, 0x00}, {0x4f, 0x00}, {0x4b, 0x01}, {0x4f, 0x00},
+	{0x4c, 0x01}, {0x4d, 0x71}, {0x4e, 0x01},
+	{0x4c, 0x01}, {0x4d, 0x91}, {0x4e, 0x01},
+	{0x4c, 0x01}, {0x4d, 0x70}, {0x4e, 0x01},
+	{0x4c, 0x01}, {0x4d, 0x90}, {0x4e, 0x02},
+	{0x4c, 0x01}, {0x4d, 0xb0}, {0x4e, 0x02},
+	{0x4c, 0x01}, {0x4d, 0x8f}, {0x4e, 0x02},
+	{0x4c, 0x01}, {0x4d, 0x6f}, {0x4e, 0x02},
+	{0x4c, 0x01}, {0x4d, 0xaf}, {0x4e, 0x02},
+	{0x4c, 0x01}, {0x4d, 0xd0}, {0x4e, 0x02},
+	{0x4c, 0x01}, {0x4d, 0xf0}, {0x4e, 0x02},
+	{0x4c, 0x01}, {0x4d, 0xcf}, {0x4e, 0x02},
+	{0x4c, 0x01}, {0x4d, 0xef}, {0x4e, 0x02},
+	{0x4c, 0x01}, {0x4d, 0x6e}, {0x4e, 0x03},
+	{0x4c, 0x01}, {0x4d, 0x8e}, {0x4e, 0x03},
+	{0x4c, 0x01}, {0x4d, 0xae}, {0x4e, 0x03},
+	{0x4c, 0x01}, {0x4d, 0xce}, {0x4e, 0x03},
+	{0x4c, 0x01}, {0x4d, 0x4d}, {0x4e, 0x03},
+	{0x4c, 0x01}, {0x4d, 0x6d}, {0x4e, 0x03},
+	{0x4c, 0x01}, {0x4d, 0x8d}, {0x4e, 0x03},
+	{0x4c, 0x01}, {0x4d, 0xad}, {0x4e, 0x03},
+	{0x4c, 0x01}, {0x4d, 0xcd}, {0x4e, 0x03},
+	{0x4c, 0x01}, {0x4d, 0x4c}, {0x4e, 0x03},
+	{0x4c, 0x01}, {0x4d, 0x6c}, {0x4e, 0x03},
+	{0x4c, 0x01}, {0x4d, 0x8c}, {0x4e, 0x03},
+	{0x4c, 0x01}, {0x4d, 0xac}, {0x4e, 0x03},
+	{0x4c, 0x01}, {0x4d, 0xcc}, {0x4e, 0x03},
+	{0x4c, 0x01}, {0x4d, 0xcb}, {0x4e, 0x03},
+	{0x4c, 0x01}, {0x4d, 0x4b}, {0x4e, 0x03},
+	{0x4c, 0x01}, {0x4d, 0x6b}, {0x4e, 0x03},
+	{0x4c, 0x01}, {0x4d, 0x8b}, {0x4e, 0x03},
+	{0x4c, 0x01}, {0x4d, 0xab}, {0x4e, 0x03},
+	{0x4c, 0x01}, {0x4d, 0x8a}, {0x4e, 0x04},
+	{0x4c, 0x01}, {0x4d, 0xaa}, {0x4e, 0x04},
+	{0x4c, 0x01}, {0x4d, 0xca}, {0x4e, 0x04},
+	{0x4c, 0x01}, {0x4d, 0xca}, {0x4e, 0x04},
+	{0x4c, 0x01}, {0x4d, 0xc9}, {0x4e, 0x04},
+	{0x4c, 0x01}, {0x4d, 0x8a}, {0x4e, 0x04},
+	{0x4c, 0x01}, {0x4d, 0x89}, {0x4e, 0x04},
+	{0x4c, 0x01}, {0x4d, 0xa9}, {0x4e, 0x04},
+	{0x4c, 0x02}, {0x4d, 0x0b}, {0x4e, 0x05},
+	{0x4c, 0x02}, {0x4d, 0x0a}, {0x4e, 0x05},
+	{0x4c, 0x01}, {0x4d, 0xeb}, {0x4e, 0x05},
+	{0x4c, 0x01}, {0x4d, 0xea}, {0x4e, 0x05},
+	{0x4c, 0x02}, {0x4d, 0x09}, {0x4e, 0x05},
+	{0x4c, 0x02}, {0x4d, 0x29}, {0x4e, 0x05},
+	{0x4c, 0x02}, {0x4d, 0x2a}, {0x4e, 0x05},
+	{0x4c, 0x02}, {0x4d, 0x4a}, {0x4e, 0x05},
+	{0x4c, 0x02}, {0x4d, 0x8a}, {0x4e, 0x06},
+	{0x4c, 0x02}, {0x4d, 0x49}, {0x4e, 0x06},
+	{0x4c, 0x02}, {0x4d, 0x69}, {0x4e, 0x06},
+	{0x4c, 0x02}, {0x4d, 0x89}, {0x4e, 0x06},
+	{0x4c, 0x02}, {0x4d, 0xa9}, {0x4e, 0x06},
+	{0x4c, 0x02}, {0x4d, 0x48}, {0x4e, 0x06},
+	{0x4c, 0x02}, {0x4d, 0x68}, {0x4e, 0x06},
+	{0x4c, 0x02}, {0x4d, 0x69}, {0x4e, 0x06},
+	{0x4c, 0x02}, {0x4d, 0xca}, {0x4e, 0x07},
+	{0x4c, 0x02}, {0x4d, 0xc9}, {0x4e, 0x07},
+	{0x4c, 0x02}, {0x4d, 0xe9}, {0x4e, 0x07},
+	{0x4c, 0x03}, {0x4d, 0x09}, {0x4e, 0x07},
+	{0x4c, 0x02}, {0x4d, 0xc8}, {0x4e, 0x07},
+	{0x4c, 0x02}, {0x4d, 0xe8}, {0x4e, 0x07},
+	{0x4c, 0x02}, {0x4d, 0xa7}, {0x4e, 0x07},
+	{0x4c, 0x02}, {0x4d, 0xc7}, {0x4e, 0x07},
+	{0x4c, 0x02}, {0x4d, 0xe7}, {0x4e, 0x07},
+	{0x4c, 0x03}, {0x4d, 0x07}, {0x4e, 0x07},
+	{0x4f, 0x01},
+	{0x50, 0x80}, {0x51, 0xa8}, {0x52, 0x47}, {0x53, 0x38},
+	{0x54, 0xc7}, {0x56, 0x0e}, {0x58, 0x08}, {0x5b, 0x00},
+	{0x5c, 0x74}, {0x5d, 0x8b}, {0x61, 0xdb}, {0x62, 0xb8},
+	{0x63, 0x86}, {0x64, 0xc0}, {0x65, 0x04}, {0x67, 0xa8},
+	{0x68, 0xb0}, {0x69, 0x00}, {0x6a, 0xa8}, {0x6b, 0xb0},
+	{0x6c, 0xaf}, {0x6d, 0x8b}, {0x6e, 0x50}, {0x6f, 0x18},
+	{0x73, 0xf0}, {0x70, 0x0d}, {0x71, 0x60}, {0x72, 0x80},
+	{0x74, 0x01}, {0x75, 0x01}, {0x7f, 0x0c}, {0x76, 0x70},
+	{0x77, 0x58}, {0x78, 0xa0}, {0x79, 0x5e}, {0x7a, 0x54},
+	{0x7b, 0x58},
+	{0xfe, 0x00},
+};
+
+static int gc2145_setup_awb(struct gc2145_dev *sensor,
+			     u16 x1, u16 y1, u16 x2, u16 y2)
+{
+	int ratio = 8; //XXX: manual for gc2035 FAE says 4
+
+	// disable awb
+	gc2145_update_bits(sensor, 0x82, BIT(1), 0);
+
+	// load awb settings
+	gc2145_set_registers(sensor, (void*)gc2145_awb_regs, sizeof(gc2145_awb_regs));
+
+	// awb window
+	gc2145_write(sensor, 0x1ec, x1 / ratio);
+	gc2145_write(sensor, 0x1ed, y1 / ratio);
+	gc2145_write(sensor, 0x1ee, x2 / ratio);
+	gc2145_write(sensor, 0x1ef, y2 / ratio);
+
+	// eanble awb
+	gc2145_update_bits(sensor, 0x82, BIT(1), BIT(1));
+
+	return 0;
+}
+
+static int gc2145_setup_aec(struct gc2145_dev *sensor,
+			     u16 x1, u16 y1, u16 x2, u16 y2,
+			     u16 cx1, u16 cy1, u16 cx2, u16 cy2)
+{
+        u16 x_ratio = 8;
+
+	//XXX: gc2035 has x ratio 16
+	//XXX: gc2035 doesn't have low light mode
+	gc2145_tx_start(sensor);
+
+	// disable AEC
+	gc2145_tx_write8(sensor, 0xb6, 0);
+
+	// setup measure window
+	gc2145_tx_write8(sensor, 0x101, x1 / x_ratio);
+	gc2145_tx_write8(sensor, 0x102, x2 / x_ratio);
+	gc2145_tx_write8(sensor, 0x103, y1 / 8);
+	gc2145_tx_write8(sensor, 0x104, y2 / 8);
+
+	// setup center
+	gc2145_tx_write8(sensor, 0x105, cx1 / x_ratio);
+	gc2145_tx_write8(sensor, 0x106, cx2 / x_ratio);
+	gc2145_tx_write8(sensor, 0x107, cy1 / 8);
+	gc2145_tx_write8(sensor, 0x108, cy2 / 8);
+
+	// increase maximum exposure level to 4
+	//gc2145_tx_write8(sensor, 0x13c, 0x60);
+	// setup AEC mode: measure point, adjust_max_gain, skip_mode = 2
+	//gc2145_tx_write8(sensor, 0x10a, 0xc2);
+
+	// AEC_ASDE_select_luma_value AEC_low_light_exp_THD_max:
+	//gc2145_tx_write8(sensor, 0x121, 0x15);
+
+	// enable AEC again
+	gc2145_tx_write8(sensor, 0xb6, 1);
+
+	return gc2145_tx_commit(sensor);
+}
+
+static int gc2145_setup_mode(struct gc2145_dev *sensor)
+{
+	int ret, pad, i;
+	struct gc2145_sensor_params params;
+	unsigned long pclk2;
+	unsigned long width = sensor->fmt.width;
+	unsigned long height = sensor->fmt.height;
+	unsigned long framerate = sensor->frame_interval.denominator;
+	const struct gc2145_pixfmt *pix_fmt;
+	unsigned long rt, ft, ft_rt;
+
+	pix_fmt = gc2145_find_format(sensor->fmt.code);
+	if (!pix_fmt) {
+		dev_err(&sensor->i2c_client->dev,
+			"pixel format not supported %u\n", sensor->fmt.code);
+		return -EINVAL;
+	}
+
+	params = gc2145_get_sensor_params(framerate, width, height, &pclk2);
+
+	gc2145_sensor_params_apply(sensor, &params);
+
+	ret = gc2145_set_2pclk(sensor, &pclk2, true);
+	if (ret < 0)
+		return ret;
+
+	pad = (width > 256 && height > 256) ? 32 : 16;
+
+	ret = gc2145_setup_awb(sensor, pad, pad, width - pad * 2, height - pad * 2);
+	if (ret)
+		return ret;
+
+	ret = gc2145_setup_aec(sensor,
+				pad, pad, width - pad * 2, height - pad * 2,
+				2 * pad, 2 * pad, width - pad * 4, height - pad * 4);
+	if (ret)
+		return ret;
+
+	gc2145_tx_start(sensor);
+
+	// anti-flicker step
+	//gc2145_tx_write16(sensor, 0x125, 360); //XXX: get this from the calculator (hb related)
+
+	//XXX: calculate auto exposure settings, there are 4 slots that the HW
+	//uses and exposure settings are set in row_time units
+
+	rt = gc2145_sensor_params_get_row_period(&params);
+	ft = gc2145_sensor_params_get_frame_period(&params);
+	ft_rt = ft / rt / 4;
+
+	for (i = 0; i < 7; i++) {
+		// exposure settings for exposure levels
+		gc2145_tx_write16(sensor, 0x127 + 2 * i, ft_rt * (i + 1));
+		// max dg gains
+		gc2145_tx_write8(sensor, 0x135 + i, 0x50);
+	}
+
+	// max analog gain
+	gc2145_tx_write8(sensor, 0x11f, 0x50);
+	// max digital gain
+	gc2145_tx_write8(sensor, 0x120, 0xe0);
+
+	gc2145_tx_write8(sensor, GC2145_P0_ISP_OUT_FORMAT, pix_fmt->fmt_setup);
+
+	// set gamma curve
+	gc2145_tx_update_bits(sensor, 0x80, BIT(6), BIT(6));
+
+	// disable denoising
+	gc2145_tx_update_bits(sensor, 0x80, BIT(2), 0);
+
+	// drive strength
+	gc2145_tx_write8(sensor, 0x24,
+			 (pclk2 / (params.enable_scaler + 1)) > 40000000 ?
+				0xff : 0x55);
+
+	return gc2145_tx_commit(sensor);
+}
+
+static int gc2145_set_stream(struct gc2145_dev *sensor, int enable)
+{
+	gc2145_tx_start(sensor);
+
+	gc2145_tx_write8(sensor, GC2145_REG_PAD_IO, enable ? 0x0f : 0);
+
+	//XXX: maybe disable cam module function blocks that are not used
+	//and downclock the PLL/disable it when not streaming?
+
+	return gc2145_tx_commit(sensor);
+}
+
+static int gc2145_s_stream(struct v4l2_subdev *sd, int enable)
+{
+	struct gc2145_dev *sensor = to_gc2145_dev(sd);
+	int ret = 0;
+
+	mutex_lock(&sensor->lock);
+
+	if (sensor->streaming == !enable) {
+		if (enable && sensor->pending_mode_change) {
+			ret = gc2145_setup_mode(sensor);
+			if (ret)
+				goto out;
+		}
+
+		ret = gc2145_set_stream(sensor, enable);
+		if (ret)
+			goto out;
+
+		sensor->streaming = !!enable;
+	}
+
+out:
+	mutex_unlock(&sensor->lock);
+	return ret;
+}
+
+/* }}} */
+/* {{{ Pad ops */
+
+static int gc2145_get_frame_interval(struct v4l2_subdev *sd,
+				     struct v4l2_subdev_state *state,
+				     struct v4l2_subdev_frame_interval *fi)
+{
+	struct gc2145_dev *sensor = to_gc2145_dev(sd);
+
+	if (fi->pad != 0)
+		return -EINVAL;
+
+	mutex_lock(&sensor->lock);
+	fi->interval = sensor->frame_interval;
+	mutex_unlock(&sensor->lock);
+
+	return 0;
+}
+
+static int gc2145_set_frame_interval(struct v4l2_subdev *sd,
+				     struct v4l2_subdev_state *state,
+				     struct v4l2_subdev_frame_interval *fi)
+{
+	struct gc2145_dev *sensor = to_gc2145_dev(sd);
+	int ret = 0, fps;
+	struct gc2145_sensor_params params;
+	unsigned long pixel_rate;
+
+	if (fi->pad != 0)
+		return -EINVAL;
+
+	mutex_lock(&sensor->lock);
+
+	/* user requested infinite frame rate */
+	if (fi->interval.numerator == 0)
+		fps = 60;
+	else
+		fps = DIV_ROUND_CLOSEST(fi->interval.denominator,
+					fi->interval.numerator);
+
+	fps = clamp(fps, 1, 60);
+
+	sensor->frame_interval.numerator = 1;
+	sensor->frame_interval.denominator = fps;
+	fi->interval = sensor->frame_interval;
+
+	params = gc2145_get_sensor_params(fps, sensor->fmt.width, sensor->fmt.height, &pixel_rate);
+	__v4l2_ctrl_s_ctrl_int64(sensor->ctrls.pixel_rate,
+				 pixel_rate);
+
+#if 0
+	if (sensor->streaming) {
+		ret = gc2145_write16(sensor, GC2145_REG_DESIRED_FRAME_RATE_NUM,
+				     fps);
+		if (ret)
+			goto err_unlock;
+	}
+err_unlock:
+#endif
+
+	mutex_unlock(&sensor->lock);
+	return ret;
 }
 
 static int gc2145_enum_mbus_code(struct v4l2_subdev *sd,
 				 struct v4l2_subdev_state *sd_state,
 				 struct v4l2_subdev_mbus_code_enum *code)
 {
-	if (code->index >= ARRAY_SIZE(supported_formats))
+	if (code->pad != 0 || code->index >= ARRAY_SIZE(gc2145_formats))
 		return -EINVAL;
 
-	code->code = supported_formats[code->index].code;
+	code->code = gc2145_formats[code->index].code;
+
 	return 0;
 }
 
@@ -717,711 +1911,496 @@ static int gc2145_enum_frame_size(struct v4l2_subdev *sd,
 				  struct v4l2_subdev_state *sd_state,
 				  struct v4l2_subdev_frame_size_enum *fse)
 {
-	struct gc2145 *gc2145 = to_gc2145(sd);
-	const struct gc2145_format *gc2145_format;
-	u32 code;
-
-	if (fse->index >= ARRAY_SIZE(supported_modes))
+	if (fse->pad != 0 || fse->index > 0)
 		return -EINVAL;
 
-	gc2145_format = gc2145_get_format_code(gc2145, fse->code);
-	code = gc2145_format->code;
-	if (fse->code != code)
-		return -EINVAL;
+	fse->min_width = GC2145_SENSOR_WIDTH_MIN;
+	fse->max_width = GC2145_SENSOR_WIDTH_MAX;
 
-	fse->min_width = supported_modes[fse->index].width;
-	fse->max_width = fse->min_width;
-	fse->min_height = supported_modes[fse->index].height;
-	fse->max_height = fse->min_height;
+	fse->min_height = GC2145_SENSOR_HEIGHT_MIN;
+	fse->max_height = GC2145_SENSOR_HEIGHT_MAX;
 
 	return 0;
 }
 
-static int gc2145_set_pad_format(struct v4l2_subdev *sd,
-				 struct v4l2_subdev_state *sd_state,
-				 struct v4l2_subdev_format *fmt)
+static int gc2145_enum_frame_interval(
+	struct v4l2_subdev *sd,
+	struct v4l2_subdev_state *sd_state,
+	struct v4l2_subdev_frame_interval_enum *fie)
 {
-	struct gc2145 *gc2145 = to_gc2145(sd);
-	const struct gc2145_mode *mode;
-	const struct gc2145_format *gc2145_fmt;
-	struct v4l2_mbus_framefmt *framefmt;
-	struct gc2145_ctrls *ctrls = &gc2145->ctrls;
-	struct v4l2_rect *crop;
+	if (fie->pad != 0 || fie->index > 0)
+		return -EINVAL;
 
-	gc2145_fmt = gc2145_get_format_code(gc2145, fmt->format.code);
-	mode = v4l2_find_nearest_size(supported_modes,
-				      ARRAY_SIZE(supported_modes),
-				      width, height,
-				      fmt->format.width, fmt->format.height);
+	fie->interval.numerator = 1;
+	fie->interval.denominator = 30;
 
-	gc2145_update_pad_format(gc2145, mode, &fmt->format, gc2145_fmt->code);
-	framefmt = v4l2_subdev_state_get_format(sd_state, fmt->pad);
-	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE) {
-		gc2145->mode = mode;
-		/* Update pixel_rate based on the mode */
-		__v4l2_ctrl_s_ctrl_int64(ctrls->pixel_rate, mode->pixel_rate);
-		/* Update link_freq based on the mode */
-		__v4l2_ctrl_s_ctrl(ctrls->link_freq, mode->link_freq_index);
-		/* Update hblank/vblank based on the mode */
-		__v4l2_ctrl_s_ctrl(ctrls->hblank, mode->hblank);
-		__v4l2_ctrl_s_ctrl(ctrls->vblank, mode->vblank);
+	return 0;
+}
+
+static int gc2145_get_fmt(struct v4l2_subdev *sd,
+			  struct v4l2_subdev_state *sd_state,
+			  struct v4l2_subdev_format *format)
+{
+	struct gc2145_dev *sensor = to_gc2145_dev(sd);
+	struct v4l2_mbus_framefmt *mf;
+
+	if (format->pad != 0)
+		return -EINVAL;
+
+	if (format->which == V4L2_SUBDEV_FORMAT_TRY) {
+		mf = v4l2_subdev_state_get_format(sd_state, format->pad);
+		format->format = *mf;
+		return 0;
 	}
-	*framefmt = fmt->format;
-	crop = v4l2_subdev_state_get_crop(sd_state, fmt->pad);
-	*crop = mode->crop;
+
+	mutex_lock(&sensor->lock);
+	format->format = sensor->fmt;
+	mutex_unlock(&sensor->lock);
 
 	return 0;
 }
 
-static const struct cci_reg_sequence gc2145_common_mipi_regs[] = {
-	{GC2145_REG_PAGE_SELECT, 0x03},
-	{GC2145_REG_DPHY_ANALOG_MODE1, GC2145_DPHY_MODE_PHY_CLK_EN |
-				       GC2145_DPHY_MODE_PHY_LANE0_EN |
-				       GC2145_DPHY_MODE_PHY_LANE1_EN |
-				       GC2145_DPHY_MODE_PHY_CLK_LANE_P2S_SEL},
-	{GC2145_REG_DPHY_ANALOG_MODE2, GC2145_DPHY_CLK_DIFF(2) |
-				       GC2145_DPHY_LANE0_DIFF(2)},
-	{GC2145_REG_DPHY_ANALOG_MODE3, GC2145_DPHY_LANE1_DIFF(0) |
-				       GC2145_DPHY_CLK_DELAY},
-	{GC2145_REG_FIFO_MODE, GC2145_FIFO_MODE_READ_GATE |
-			       GC2145_FIFO_MODE_MIPI_CLK_MODULE},
-	{GC2145_REG_DPHY_MODE, GC2145_DPHY_MODE_TRIGGER_PROG},
-	/* Clock & Data lanes timing */
-	{GC2145_REG_T_LPX, 0x10},
-	{GC2145_REG_T_CLK_HS_PREPARE, 0x04}, {GC2145_REG_T_CLK_ZERO, 0x10},
-	{GC2145_REG_T_CLK_PRE, 0x10}, {GC2145_REG_T_CLK_POST, 0x10},
-	{GC2145_REG_T_CLK_TRAIL, 0x05},
-	{GC2145_REG_T_HS_PREPARE, 0x03}, {GC2145_REG_T_HS_ZERO, 0x0a},
-	{GC2145_REG_T_HS_TRAIL, 0x06},
-};
-
-static int gc2145_config_mipi_mode(struct gc2145 *gc2145,
-				   const struct gc2145_format *gc2145_format)
+static int gc2145_set_fmt(struct v4l2_subdev *sd,
+			  struct v4l2_subdev_state *sd_state,
+			  struct v4l2_subdev_format *format)
 {
-	u16 lwc, fifo_full_lvl;
+	struct gc2145_dev *sensor = to_gc2145_dev(sd);
+	struct v4l2_mbus_framefmt *mf = &format->format;
+	const struct gc2145_pixfmt *pixfmt;
+	struct gc2145_sensor_params params;
+	unsigned long pixel_rate;
 	int ret = 0;
 
-	/* Common MIPI settings */
-	cci_multi_reg_write(gc2145->regmap, gc2145_common_mipi_regs,
-			    ARRAY_SIZE(gc2145_common_mipi_regs), &ret);
+	if (format->pad != 0)
+		return -EINVAL;
 
-	/*
-	 * Adjust the MIPI buffer settings.
-	 * For YUV/RGB, LWC = image width * 2
-	 * For RAW8, LWC = image width
-	 * For RAW10, LWC = image width * 1.25
-	 */
-	lwc = gc2145->mode->width * 2;
-	cci_write(gc2145->regmap, GC2145_REG_LWC_HIGH, lwc >> 8, &ret);
-	cci_write(gc2145->regmap, GC2145_REG_LWC_LOW, lwc & 0xff, &ret);
+	/* check if we support requested mbus fmt */
+	pixfmt = gc2145_find_format(mf->code);
+	if (!pixfmt)
+		pixfmt = &gc2145_formats[0];
 
-	/*
-	 * Adjust the MIPI FIFO Full Level
-	 * 640x480 RGB: 0x0190
-	 * 1280x720 / 1600x1200 (aka no scaler) non RAW: 0x0001
-	 * 1600x1200 RAW: 0x0190
-	 */
-	if (gc2145->mode->width == 1280 || gc2145->mode->width == 1600)
-		fifo_full_lvl = 0x0001;
-	else
-		fifo_full_lvl = 0x0190;
+	mf->code = pixfmt->code;
+	mf->colorspace = pixfmt->colorspace;
+	mf->xfer_func = V4L2_XFER_FUNC_DEFAULT;
+	mf->ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
+	mf->quantization = V4L2_QUANTIZATION_DEFAULT;
+	mf->field = V4L2_FIELD_NONE;
 
-	cci_write(gc2145->regmap, GC2145_REG_FIFO_FULL_LVL_HIGH,
-		  fifo_full_lvl >> 8, &ret);
-	cci_write(gc2145->regmap, GC2145_REG_FIFO_FULL_LVL_LOW,
-		  fifo_full_lvl & 0xff, &ret);
+	mutex_lock(&sensor->lock);
 
-	/*
-	 * Set the FIFO gate mode / MIPI wdiv set:
-	 * 0xf1 in case of RAW mode and 0xf0 otherwise
-	 */
-	cci_write(gc2145->regmap, GC2145_REG_FIFO_GATE_MODE, 0xf0, &ret);
+	mf->width = clamp(mf->width, GC2145_SENSOR_WIDTH_MIN,
+		      GC2145_SENSOR_WIDTH_MAX);
+	mf->height = clamp(mf->height, GC2145_SENSOR_HEIGHT_MIN,
+		       GC2145_SENSOR_HEIGHT_MAX);
 
-	/* Set the MIPI data type */
-	cci_write(gc2145->regmap, GC2145_REG_MIPI_DT,
-		  gc2145_format->datatype, &ret);
+	if (format->which == V4L2_SUBDEV_FORMAT_TRY) {
+		struct v4l2_mbus_framefmt *try_mf;
 
-	/* Configure mode and enable CSI */
-	cci_write(gc2145->regmap, GC2145_REG_BUF_CSI2_MODE,
-		  GC2145_CSI2_MODE_RAW8 | GC2145_CSI2_MODE_DOUBLE |
-		  GC2145_CSI2_MODE_EN | GC2145_CSI2_MODE_MIPI_EN, &ret);
+		try_mf = v4l2_subdev_state_get_format(sd_state, format->pad);
+		*try_mf = *mf;
+		goto out;
+	}
 
+	if (sensor->streaming) {
+		ret = -EBUSY;
+		goto out;
+	}
+
+	sensor->fmt = *mf;
+	sensor->pending_mode_change = true;
+
+	params = gc2145_get_sensor_params(sensor->frame_interval.denominator, mf->width, mf->height, &pixel_rate);
+	__v4l2_ctrl_s_ctrl_int64(sensor->ctrls.pixel_rate,
+				 pixel_rate);
+	__v4l2_ctrl_s_ctrl(sensor->ctrls.hblank,
+			   params.win_height);
+	__v4l2_ctrl_s_ctrl(sensor->ctrls.vblank,
+			   params.win_width);
+out:
+	mutex_unlock(&sensor->lock);
 	return ret;
 }
 
-static int gc2145_start_streaming(struct gc2145 *gc2145,
-				  struct v4l2_subdev_state *state)
+/* }}} */
+/* {{{ Core Ops */
+
+static int gc2145_configure(struct gc2145_dev *sensor)
 {
-	struct i2c_client *client = v4l2_get_subdevdata(&gc2145->sd);
-	const struct gc2145_format *gc2145_format;
-	struct v4l2_mbus_framefmt *fmt;
+	struct v4l2_mbus_config_parallel *bus = &sensor->ep.bus.parallel;
+	u8 sync_mode = 0;
+	u16 chip_id;
 	int ret;
 
-	ret = pm_runtime_resume_and_get(&client->dev);
+	ret = gc2145_read16(sensor, GC2145_REG_CHIP_ID, &chip_id);
+	if (ret)
+		return ret;
+
+	dev_info(&sensor->i2c_client->dev, "device id: 0x%04x\n",
+		 (unsigned int)chip_id);
+
+	if (chip_id != GC2145_REG_CHIP_ID_VALUE) {
+		dev_err(&sensor->i2c_client->dev,
+			"unsupported device id: 0x%04x\n",
+			(unsigned int)chip_id);
+		return -EINVAL;
+	}
+
+        // setup parallel bus
+
+	if (bus->flags & V4L2_MBUS_VSYNC_ACTIVE_LOW)
+		sync_mode |= 0x01;
+
+	if (bus->flags & V4L2_MBUS_HSYNC_ACTIVE_LOW)
+		sync_mode |= 0x02;
+
+	if (bus->flags & V4L2_MBUS_PCLK_SAMPLE_FALLING)
+		sync_mode |= 0x04;
+
+	gc2145_tx_start(sensor);
+
+	// soft reset
+	gc2145_tx_write8(sensor, GC2145_REG_RESET, 0xf0);
+
+	// enable analog/digital parts
+	gc2145_tx_write8(sensor, GC2145_REG_ANALOG_PWC, 0x06);
+
+	// safe initial PLL setting
+	gc2145_tx_write8(sensor, GC2145_REG_PLL_MODE1, 0x1d);
+	gc2145_tx_write8(sensor, GC2145_REG_PLL_MODE2, 0x84);
+	gc2145_tx_write8(sensor, GC2145_REG_CLK_DIV_MODE, 0x00);
+
+	gc2145_tx_write8(sensor, GC2145_REG_CM_MODE, 0xfe);
+
+	// disable pads
+	gc2145_tx_write8(sensor, GC2145_REG_PAD_IO, 0);
+
+	gc2145_tx_write8(sensor, 0x19, 0x0c); // set AD pipe number
+	gc2145_tx_write8(sensor, 0x20, 0x01); // AD clk mode
+
+	// enable defect correction, etc.
+	gc2145_tx_write8(sensor, 0x80, 0x0b);
+
+	gc2145_tx_write8(sensor, GC2145_P0_SYNC_MODE, sync_mode);
+
+	ret = gc2145_tx_commit(sensor);
+	if (ret)
+		return ret;
+
+	// load default register values from the firmware file
+	ret = gc2145_load_firmware(sensor, GC2145_FIRMWARE_PARAMETERS);
 	if (ret < 0)
 		return ret;
 
-	/* Apply default values of current mode */
-	cci_multi_reg_write(gc2145->regmap, gc2145->mode->reg_seq,
-			    gc2145->mode->reg_seq_size, &ret);
-	cci_multi_reg_write(gc2145->regmap, gc2145_common_regs,
-			    ARRAY_SIZE(gc2145_common_regs), &ret);
-	if (ret) {
-		dev_err(&client->dev, "%s failed to write regs\n", __func__);
-		goto err_rpm_put;
-	}
-
-	fmt = v4l2_subdev_state_get_format(state, 0);
-	gc2145_format = gc2145_get_format_code(gc2145, fmt->code);
-
-	/* Set the output format */
-	cci_write(gc2145->regmap, GC2145_REG_PAGE_SELECT, 0x00, &ret);
-
-	cci_write(gc2145->regmap, GC2145_REG_OUTPUT_FMT,
-		  gc2145_format->output_fmt, &ret);
-	cci_update_bits(gc2145->regmap, GC2145_REG_BYPASS_MODE,
-			GC2145_BYPASS_MODE_SWITCH,
-			gc2145_format->switch_bit ? GC2145_BYPASS_MODE_SWITCH
-						  : 0, &ret);
-	if (ret) {
-		dev_err(&client->dev, "%s failed to write regs\n", __func__);
-		goto err_rpm_put;
-	}
-
-	/* Apply customized values from user */
-	ret =  __v4l2_ctrl_handler_setup(&gc2145->ctrls.handler);
-	if (ret) {
-		dev_err(&client->dev, "%s failed to apply ctrls\n", __func__);
-		goto err_rpm_put;
-	}
-
-	/* Perform MIPI specific configuration */
-	ret = gc2145_config_mipi_mode(gc2145, gc2145_format);
-	if (ret) {
-		dev_err(&client->dev, "%s failed to write mipi conf\n",
-			__func__);
-		goto err_rpm_put;
-	}
-
-	cci_write(gc2145->regmap, GC2145_REG_PAGE_SELECT, 0x00, &ret);
-
 	return 0;
+}
 
-err_rpm_put:
-	pm_runtime_mark_last_busy(&client->dev);
-	pm_runtime_put_autosuspend(&client->dev);
+static int gc2145_set_power(struct gc2145_dev *sensor, bool on)
+{
+	int ret = 0;
+
+	if (on) {
+		ret = regulator_bulk_enable(GC2145_NUM_SUPPLIES,
+					    sensor->supplies);
+		if (ret)
+			return ret;
+
+		ret = clk_set_rate(sensor->xclk, 24000000);
+		if (ret)
+			goto xclk_off;
+
+		ret = clk_prepare_enable(sensor->xclk);
+		if (ret)
+			goto power_off;
+
+		usleep_range(10000, 12000);
+		gpiod_direction_output(sensor->reset_gpio, 1);
+		usleep_range(10000, 12000);
+		gpiod_direction_output(sensor->enable_gpio, 1);
+		usleep_range(10000, 12000);
+		gpiod_direction_output(sensor->reset_gpio, 0);
+		usleep_range(40000, 50000);
+
+		ret = gc2145_configure(sensor);
+		if (ret)
+			goto xclk_off;
+
+		ret = gc2145_setup_mode(sensor);
+		if (ret)
+			goto xclk_off;
+
+		return 0;
+	}
+
+xclk_off:
+	clk_disable_unprepare(sensor->xclk);
+power_off:
+	gpiod_direction_input(sensor->reset_gpio);
+	gpiod_direction_input(sensor->enable_gpio);
+	regulator_bulk_disable(GC2145_NUM_SUPPLIES, sensor->supplies);
+	msleep(100);
 	return ret;
 }
 
-static void gc2145_stop_streaming(struct gc2145 *gc2145)
+static int gc2145_s_power(struct v4l2_subdev *sd, int on)
 {
-	struct i2c_client *client = v4l2_get_subdevdata(&gc2145->sd);
+	struct gc2145_dev *sensor = to_gc2145_dev(sd);
+	bool power_up, power_down;
 	int ret = 0;
 
-	/* Disable lanes & mipi streaming */
-	cci_write(gc2145->regmap, GC2145_REG_PAGE_SELECT, 0x03, &ret);
-	cci_update_bits(gc2145->regmap, GC2145_REG_BUF_CSI2_MODE,
-			GC2145_CSI2_MODE_EN | GC2145_CSI2_MODE_MIPI_EN, 0,
-			&ret);
-	cci_write(gc2145->regmap, GC2145_REG_PAGE_SELECT, 0x00, &ret);
+	mutex_lock(&sensor->lock);
+
+	power_up = on && !sensor->powered;
+	power_down = !on && sensor->powered;
+
+	if (power_up || power_down) {
+		ret = gc2145_set_power(sensor, power_up);
+		if (!ret)
+			sensor->powered = on;
+	}
+
+	mutex_unlock(&sensor->lock);
+
+	if (!ret && power_up) {
+		/* restore controls */
+		ret = v4l2_ctrl_handler_setup(&sensor->ctrls.handler);
+		if (ret)
+			gc2145_s_power(sd, 0);
+	}
+
+	return ret;
+}
+
+#ifdef CONFIG_VIDEO_ADV_DEBUG
+static int gc2145_g_register(struct v4l2_subdev *sd,
+			     struct v4l2_dbg_register *reg)
+{
+	struct gc2145_dev *sensor = to_gc2145_dev(sd);
+	int ret;
+	u8 val = 0;
+
+	if (reg->reg > 0xffff)
+		return -EINVAL;
+
+	reg->size = 1;
+
+	mutex_lock(&sensor->lock);
+	ret = gc2145_read(sensor, reg->reg, &val);
+	mutex_unlock(&sensor->lock);
 	if (ret)
-		dev_err(&client->dev, "%s failed to write regs\n", __func__);
-
-	pm_runtime_mark_last_busy(&client->dev);
-	pm_runtime_put_autosuspend(&client->dev);
-}
-
-static int gc2145_set_stream(struct v4l2_subdev *sd, int enable)
-{
-	struct gc2145 *gc2145 = to_gc2145(sd);
-	struct v4l2_subdev_state *state;
-	int ret = 0;
-
-	state = v4l2_subdev_lock_and_get_active_state(sd);
-
-	if (enable)
-		ret = gc2145_start_streaming(gc2145, state);
-	else
-		gc2145_stop_streaming(gc2145);
-
-	v4l2_subdev_unlock_state(state);
-
-	return ret;
-}
-
-/* Power/clock management functions */
-static int gc2145_power_on(struct device *dev)
-{
-	struct v4l2_subdev *sd = dev_get_drvdata(dev);
-	struct gc2145 *gc2145 = to_gc2145(sd);
-	int ret;
-
-	ret = regulator_bulk_enable(GC2145_NUM_SUPPLIES, gc2145->supplies);
-	if (ret) {
-		dev_err(dev, "failed to enable regulators\n");
-		return ret;
-	}
-
-	ret = clk_prepare_enable(gc2145->xclk);
-	if (ret) {
-		dev_err(dev, "failed to enable clock\n");
-		goto reg_off;
-	}
-
-	gpiod_set_value_cansleep(gc2145->powerdown_gpio, 0);
-	gpiod_set_value_cansleep(gc2145->reset_gpio, 0);
-
-	/*
-	 * Datasheet doesn't mention timing between PWDN/RESETB control and
-	 * i2c access however, experimentation shows that a rather big delay is
-	 * needed.
-	 */
-	msleep(41);
-
-	return 0;
-
-reg_off:
-	regulator_bulk_disable(GC2145_NUM_SUPPLIES, gc2145->supplies);
-
-	return ret;
-}
-
-static int gc2145_power_off(struct device *dev)
-{
-	struct v4l2_subdev *sd = dev_get_drvdata(dev);
-	struct gc2145 *gc2145 = to_gc2145(sd);
-
-	gpiod_set_value_cansleep(gc2145->powerdown_gpio, 1);
-	gpiod_set_value_cansleep(gc2145->reset_gpio, 1);
-	clk_disable_unprepare(gc2145->xclk);
-	regulator_bulk_disable(GC2145_NUM_SUPPLIES, gc2145->supplies);
-
-	return 0;
-}
-
-static int gc2145_get_regulators(struct gc2145 *gc2145)
-{
-	struct i2c_client *client = v4l2_get_subdevdata(&gc2145->sd);
-	unsigned int i;
-
-	for (i = 0; i < GC2145_NUM_SUPPLIES; i++)
-		gc2145->supplies[i].supply = gc2145_supply_name[i];
-
-	return devm_regulator_bulk_get(&client->dev, GC2145_NUM_SUPPLIES,
-				       gc2145->supplies);
-}
-
-/* Verify chip ID */
-static int gc2145_identify_module(struct gc2145 *gc2145)
-{
-	struct i2c_client *client = v4l2_get_subdevdata(&gc2145->sd);
-	int ret;
-	u64 chip_id;
-
-	ret = cci_read(gc2145->regmap, GC2145_REG_CHIP_ID, &chip_id, NULL);
-	if (ret) {
-		dev_err(&client->dev, "failed to read chip id (%d)\n", ret);
-		return ret;
-	}
-
-	if (chip_id != GC2145_CHIP_ID) {
-		dev_err(&client->dev, "chip id mismatch: %x!=%llx\n",
-			GC2145_CHIP_ID, chip_id);
 		return -EIO;
-	}
 
+	reg->val = val;
 	return 0;
 }
 
-static const char * const test_pattern_menu[] = {
-	"Disabled",
-	"Colored patterns",
-	"Uniform white",
-	"Uniform yellow",
-	"Uniform cyan",
-	"Uniform green",
-	"Uniform magenta",
-	"Uniform red",
-	"Uniform black",
-};
+static int gc2145_s_register(struct v4l2_subdev *sd,
+			     const struct v4l2_dbg_register *reg)
+{
+	struct gc2145_dev *sensor = to_gc2145_dev(sd);
+	int ret;
 
-#define GC2145_TEST_PATTERN_ENABLE	BIT(0)
-#define GC2145_TEST_PATTERN_UXGA	BIT(3)
+	if (reg->reg > 0xffff || reg->val > 0xff)
+		return -EINVAL;
 
-#define GC2145_TEST_UNIFORM		BIT(3)
-#define GC2145_TEST_WHITE		(4 << 4)
-#define GC2145_TEST_YELLOW		(8 << 4)
-#define GC2145_TEST_CYAN		(9 << 4)
-#define GC2145_TEST_GREEN		(6 << 4)
-#define GC2145_TEST_MAGENTA		(10 << 4)
-#define GC2145_TEST_RED			(5 << 4)
-#define GC2145_TEST_BLACK		(0)
+	mutex_lock(&sensor->lock);
+	ret = gc2145_write(sensor, reg->reg, reg->val);
+	mutex_unlock(&sensor->lock);
 
-static const u8 test_pattern_val[] = {
-	0,
-	GC2145_TEST_PATTERN_ENABLE,
-	GC2145_TEST_UNIFORM | GC2145_TEST_WHITE,
-	GC2145_TEST_UNIFORM | GC2145_TEST_YELLOW,
-	GC2145_TEST_UNIFORM | GC2145_TEST_CYAN,
-	GC2145_TEST_UNIFORM | GC2145_TEST_GREEN,
-	GC2145_TEST_UNIFORM | GC2145_TEST_MAGENTA,
-	GC2145_TEST_UNIFORM | GC2145_TEST_RED,
-	GC2145_TEST_UNIFORM | GC2145_TEST_BLACK,
-};
+	return ret;
+}
+#endif
+
+/* }}} */
 
 static const struct v4l2_subdev_core_ops gc2145_core_ops = {
-	.subscribe_event = v4l2_ctrl_subdev_subscribe_event,
-	.unsubscribe_event = v4l2_event_subdev_unsubscribe,
-};
-
-static const struct v4l2_subdev_video_ops gc2145_video_ops = {
-	.s_stream = gc2145_set_stream,
+	.s_power = gc2145_s_power,
+#ifdef CONFIG_VIDEO_ADV_DEBUG
+	.g_register = gc2145_g_register,
+	.s_register = gc2145_s_register,
+#endif
 };
 
 static const struct v4l2_subdev_pad_ops gc2145_pad_ops = {
 	.enum_mbus_code = gc2145_enum_mbus_code,
-	.get_fmt = v4l2_subdev_get_fmt,
-	.set_fmt = gc2145_set_pad_format,
-	.get_selection = gc2145_get_selection,
 	.enum_frame_size = gc2145_enum_frame_size,
+	.enum_frame_interval = gc2145_enum_frame_interval,
+	.get_fmt = gc2145_get_fmt,
+	.set_fmt = gc2145_set_fmt,
+	.get_frame_interval = gc2145_get_frame_interval,
+	.set_frame_interval = gc2145_set_frame_interval,
+};
+
+static const struct v4l2_subdev_video_ops gc2145_video_ops = {
+	.s_stream = gc2145_s_stream,
 };
 
 static const struct v4l2_subdev_ops gc2145_subdev_ops = {
 	.core = &gc2145_core_ops,
-	.video = &gc2145_video_ops,
 	.pad = &gc2145_pad_ops,
+	.video = &gc2145_video_ops,
 };
 
-static const struct v4l2_subdev_internal_ops gc2145_subdev_internal_ops = {
-	.init_state = gc2145_init_state,
-};
-
-static int gc2145_set_ctrl_test_pattern(struct gc2145 *gc2145, int value)
+static int gc2145_get_regulators(struct gc2145_dev *sensor)
 {
-	int ret = 0;
+	int i;
 
-	if (!value) {
-		/* Disable test pattern */
-		cci_write(gc2145->regmap, GC2145_REG_DEBUG_MODE2, 0, &ret);
-		return cci_write(gc2145->regmap, GC2145_REG_DEBUG_MODE3, 0,
-				 &ret);
-	}
+	for (i = 0; i < GC2145_NUM_SUPPLIES; i++)
+		sensor->supplies[i].supply = gc2145_supply_name[i];
 
-	/* Enable test pattern, colored or uniform */
-	cci_write(gc2145->regmap, GC2145_REG_DEBUG_MODE2,
-		  GC2145_TEST_PATTERN_ENABLE | GC2145_TEST_PATTERN_UXGA, &ret);
-
-	if (!(test_pattern_val[value] & GC2145_TEST_UNIFORM))
-		return cci_write(gc2145->regmap, GC2145_REG_DEBUG_MODE3, 0,
-				 &ret);
-
-	/* Uniform */
-	return cci_write(gc2145->regmap, GC2145_REG_DEBUG_MODE3,
-			 test_pattern_val[value], &ret);
-}
-
-static int gc2145_s_ctrl(struct v4l2_ctrl *ctrl)
-{
-	struct v4l2_subdev *sd = gc2145_ctrl_to_sd(ctrl);
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
-	struct gc2145 *gc2145 = to_gc2145(sd);
-	int ret;
-
-	if (pm_runtime_get_if_in_use(&client->dev) == 0)
-		return 0;
-
-	switch (ctrl->id) {
-	case V4L2_CID_HBLANK:
-		ret = cci_write(gc2145->regmap, GC2145_REG_HBLANK, ctrl->val,
-				NULL);
-		break;
-	case V4L2_CID_VBLANK:
-		ret = cci_write(gc2145->regmap, GC2145_REG_VBLANK, ctrl->val,
-				NULL);
-		break;
-	case V4L2_CID_TEST_PATTERN:
-		ret = gc2145_set_ctrl_test_pattern(gc2145, ctrl->val);
-		break;
-	case V4L2_CID_HFLIP:
-		ret = cci_update_bits(gc2145->regmap, GC2145_REG_ANALOG_MODE1,
-				      BIT(0), (ctrl->val ? BIT(0) : 0), NULL);
-		break;
-	case V4L2_CID_VFLIP:
-		ret = cci_update_bits(gc2145->regmap, GC2145_REG_ANALOG_MODE1,
-				      BIT(1), (ctrl->val ? BIT(1) : 0), NULL);
-		break;
-	default:
-		ret = -EINVAL;
-		break;
-	}
-
-	pm_runtime_mark_last_busy(&client->dev);
-	pm_runtime_put_autosuspend(&client->dev);
-
-	return ret;
-}
-
-static const struct v4l2_ctrl_ops gc2145_ctrl_ops = {
-	.s_ctrl = gc2145_s_ctrl,
-};
-
-/* Initialize control handlers */
-static int gc2145_init_controls(struct gc2145 *gc2145)
-{
-	struct i2c_client *client = v4l2_get_subdevdata(&gc2145->sd);
-	const struct v4l2_ctrl_ops *ops = &gc2145_ctrl_ops;
-	struct gc2145_ctrls *ctrls = &gc2145->ctrls;
-	struct v4l2_ctrl_handler *hdl = &ctrls->handler;
-	struct v4l2_fwnode_device_properties props;
-	int ret;
-
-	ret = v4l2_ctrl_handler_init(hdl, 12);
-	if (ret)
-		return ret;
-
-	ctrls->pixel_rate = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_PIXEL_RATE,
-					      GC2145_640_480_PIXELRATE,
-					      GC2145_1600_1200_PIXELRATE, 1,
-					      supported_modes[0].pixel_rate);
-
-	ctrls->link_freq = v4l2_ctrl_new_int_menu(hdl, ops, V4L2_CID_LINK_FREQ,
-						  ARRAY_SIZE(gc2145_link_freq_menu) - 1,
-						  0, gc2145_link_freq_menu);
-	if (ctrls->link_freq)
-		ctrls->link_freq->flags |= V4L2_CTRL_FLAG_READ_ONLY;
-
-	ctrls->hblank = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HBLANK,
-					  0, 0xfff, 1, GC2145_640_480_HBLANK);
-
-	ctrls->vblank = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VBLANK,
-					  0, 0x1fff, 1, GC2145_640_480_VBLANK);
-
-	ctrls->test_pattern =
-		v4l2_ctrl_new_std_menu_items(hdl, ops, V4L2_CID_TEST_PATTERN,
-					     ARRAY_SIZE(test_pattern_menu) - 1,
-					     0, 0, test_pattern_menu);
-	ctrls->hflip = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HFLIP,
-					 0, 1, 1, 0);
-	ctrls->vflip = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VFLIP,
-					 0, 1, 1, 0);
-
-	if (hdl->error) {
-		ret = hdl->error;
-		dev_err(&client->dev, "control init failed (%d)\n", ret);
-		goto error;
-	}
-
-	ret = v4l2_fwnode_device_parse(&client->dev, &props);
-	if (ret)
-		goto error;
-
-	ret = v4l2_ctrl_new_fwnode_properties(hdl, &gc2145_ctrl_ops,
-					      &props);
-	if (ret)
-		goto error;
-
-	gc2145->sd.ctrl_handler = hdl;
-
-	return 0;
-
-error:
-	v4l2_ctrl_handler_free(hdl);
-
-	return ret;
-}
-
-static int gc2145_check_hwcfg(struct device *dev)
-{
-	struct fwnode_handle *endpoint;
-	struct v4l2_fwnode_endpoint ep_cfg = {
-		.bus_type = V4L2_MBUS_CSI2_DPHY
-	};
-	int ret;
-
-	endpoint = fwnode_graph_get_next_endpoint(dev_fwnode(dev), NULL);
-	if (!endpoint) {
-		dev_err(dev, "endpoint node not found\n");
-		return -EINVAL;
-	}
-
-	ret = v4l2_fwnode_endpoint_alloc_parse(endpoint, &ep_cfg);
-	fwnode_handle_put(endpoint);
-	if (ret)
-		return ret;
-
-	/* Check the number of MIPI CSI2 data lanes */
-	if (ep_cfg.bus.mipi_csi2.num_data_lanes != 2) {
-		dev_err(dev, "only 2 data lanes are currently supported\n");
-		ret = -EINVAL;
-		goto out;
-	}
-
-	/* Check the link frequency set in device tree */
-	if (!ep_cfg.nr_of_link_frequencies) {
-		dev_err(dev, "link-frequency property not found in DT\n");
-		ret = -EINVAL;
-		goto out;
-	}
-
-	if (ep_cfg.nr_of_link_frequencies != 3 ||
-	    ep_cfg.link_frequencies[0] != GC2145_640_480_LINKFREQ ||
-	    ep_cfg.link_frequencies[1] != GC2145_1280_720_LINKFREQ ||
-	    ep_cfg.link_frequencies[2] != GC2145_1600_1200_LINKFREQ) {
-		dev_err(dev, "Invalid link-frequencies provided\n");
-		ret = -EINVAL;
-	}
-
-out:
-	v4l2_fwnode_endpoint_free(&ep_cfg);
-
-	return ret;
+	return devm_regulator_bulk_get(&sensor->i2c_client->dev,
+				       GC2145_NUM_SUPPLIES,
+				       sensor->supplies);
 }
 
 static int gc2145_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
-	unsigned int xclk_freq;
-	struct gc2145 *gc2145;
+	struct fwnode_handle *endpoint;
+	struct gc2145_dev *sensor;
 	int ret;
 
-	gc2145 = devm_kzalloc(&client->dev, sizeof(*gc2145), GFP_KERNEL);
-	if (!gc2145)
+	sensor = devm_kzalloc(dev, sizeof(*sensor), GFP_KERNEL);
+	if (!sensor)
 		return -ENOMEM;
 
-	v4l2_i2c_subdev_init(&gc2145->sd, client, &gc2145_subdev_ops);
-	gc2145->sd.internal_ops = &gc2145_subdev_internal_ops;
+	sensor->i2c_client = client;
 
-	/* Check the hardware configuration in device tree */
-	if (gc2145_check_hwcfg(dev))
-		return -EINVAL;
+	sensor->fmt.code = gc2145_formats[0].code;
+	sensor->fmt.width = 1600;
+	sensor->fmt.height = 1200;
+	sensor->fmt.field = V4L2_FIELD_NONE;
+	sensor->frame_interval.numerator = 1;
+	sensor->frame_interval.denominator = 10;
+	sensor->pending_mode_change = true;
+	sensor->current_bank = 0xff;
 
-	/* Get system clock (xclk) */
-	gc2145->xclk = devm_clk_get(dev, NULL);
-	if (IS_ERR(gc2145->xclk))
-		return dev_err_probe(dev, PTR_ERR(gc2145->xclk),
-				     "failed to get xclk\n");
-
-	xclk_freq = clk_get_rate(gc2145->xclk);
-	if (xclk_freq != GC2145_XCLK_FREQ) {
-		dev_err(dev, "xclk frequency not supported: %d Hz\n",
-			xclk_freq);
+	endpoint = fwnode_graph_get_next_endpoint(
+		of_fwnode_handle(client->dev.of_node), NULL);
+	if (!endpoint) {
+		dev_err(dev, "endpoint node not found\n");
 		return -EINVAL;
 	}
 
-	ret = gc2145_get_regulators(gc2145);
-	if (ret)
-		return dev_err_probe(dev, ret,
-				     "failed to get regulators\n");
+	ret = v4l2_fwnode_endpoint_parse(endpoint, &sensor->ep);
+	fwnode_handle_put(endpoint);
+	if (ret) {
+		dev_err(dev, "could not parse endpoint\n");
+		return ret;
+	}
 
-	/* Request optional reset pin */
-	gc2145->reset_gpio = devm_gpiod_get_optional(dev, "reset",
-						     GPIOD_OUT_HIGH);
-	if (IS_ERR(gc2145->reset_gpio))
-		return dev_err_probe(dev, PTR_ERR(gc2145->reset_gpio),
-				     "failed to get reset_gpio\n");
+	if (sensor->ep.bus_type != V4L2_MBUS_PARALLEL) {
+		dev_err(dev, "unsupported bus type %d\n", sensor->ep.bus_type);
+		return -EINVAL;
+	}
 
-	/* Request optional powerdown pin */
-	gc2145->powerdown_gpio = devm_gpiod_get_optional(dev, "powerdown",
-							 GPIOD_OUT_HIGH);
-	if (IS_ERR(gc2145->powerdown_gpio))
-		return dev_err_probe(dev, PTR_ERR(gc2145->powerdown_gpio),
-				     "failed to get powerdown_gpio\n");
+	sensor->xclk = devm_clk_get(dev, "xclk");
+	if (IS_ERR(sensor->xclk)) {
+		dev_err(dev, "failed to get xclk\n");
+		return PTR_ERR(sensor->xclk);
+	}
 
-	/* Initialise the regmap for further cci access */
-	gc2145->regmap = devm_cci_regmap_init_i2c(client, 8);
-	if (IS_ERR(gc2145->regmap))
-		return dev_err_probe(dev, PTR_ERR(gc2145->regmap),
-				     "failed to get cci regmap\n");
+	sensor->enable_gpio = devm_gpiod_get_optional(dev, "enable", GPIOD_IN);
+	if (IS_ERR(sensor->enable_gpio)) {
+		dev_err(dev, "failed to get enable gpio\n");
+		return PTR_ERR(sensor->enable_gpio);
+	}
 
-	/*
-	 * The sensor must be powered for gc2145_identify_module()
-	 * to be able to read the CHIP_ID register
-	 */
-	ret = gc2145_power_on(dev);
+	sensor->reset_gpio = devm_gpiod_get_optional(dev, "reset", GPIOD_IN);
+	if (IS_ERR(sensor->reset_gpio)) {
+		dev_err(dev, "failed to get reset gpio\n");
+		return PTR_ERR(sensor->reset_gpio);
+	}
+
+	if (!sensor->enable_gpio || !sensor->reset_gpio) {
+		dev_err(dev, "enable and reset pins must be configured\n");
+		return ret;
+	}
+
+	v4l2_i2c_subdev_init(&sensor->sd, client, &gc2145_subdev_ops);
+
+	sensor->sd.flags = V4L2_SUBDEV_FL_HAS_DEVNODE;
+	sensor->pad.flags = MEDIA_PAD_FL_SOURCE;
+	sensor->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
+	ret = media_entity_pads_init(&sensor->sd.entity, 1, &sensor->pad);
 	if (ret)
 		return ret;
 
-	ret = gc2145_identify_module(gc2145);
+	mutex_init(&sensor->lock);
+
+	ret = gc2145_get_regulators(sensor);
 	if (ret)
-		goto error_power_off;
+		goto entity_cleanup;
 
-	/* Set default mode */
-	gc2145->mode = &supported_modes[0];
-
-	ret = gc2145_init_controls(gc2145);
+	ret = gc2145_init_controls(sensor);
 	if (ret)
-		goto error_power_off;
+		goto entity_cleanup;
 
-	/* Initialize subdev */
-	gc2145->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE |
-			    V4L2_SUBDEV_FL_HAS_EVENTS;
-	gc2145->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
-
-	/* Initialize source pad */
-	gc2145->pad.flags = MEDIA_PAD_FL_SOURCE;
-
-	ret = media_entity_pads_init(&gc2145->sd.entity, 1, &gc2145->pad);
-	if (ret) {
-		dev_err(dev, "failed to init entity pads: %d\n", ret);
-		goto error_handler_free;
-	}
-
-	gc2145->sd.state_lock = gc2145->ctrls.handler.lock;
-	ret = v4l2_subdev_init_finalize(&gc2145->sd);
-	if (ret < 0) {
-		dev_err(dev, "subdev init error: %d\n", ret);
-		goto error_media_entity;
-	}
-
-	/* Enable runtime PM and turn off the device */
-	pm_runtime_set_active(dev);
-	pm_runtime_get_noresume(&client->dev);
-	pm_runtime_enable(dev);
-
-	pm_runtime_set_autosuspend_delay(&client->dev, 1000);
-	pm_runtime_use_autosuspend(&client->dev);
-	pm_runtime_put_autosuspend(&client->dev);
-
-	ret = v4l2_async_register_subdev_sensor(&gc2145->sd);
-	if (ret < 0) {
-		dev_err(dev, "failed to register sensor sub-device: %d\n", ret);
-		goto error_subdev_cleanup;
-	}
+	ret = v4l2_async_register_subdev(&sensor->sd);
+	if (ret)
+		goto free_ctrls;
 
 	return 0;
 
-error_subdev_cleanup:
-	v4l2_subdev_cleanup(&gc2145->sd);
-	pm_runtime_disable(&client->dev);
-	pm_runtime_set_suspended(&client->dev);
-
-error_media_entity:
-	media_entity_cleanup(&gc2145->sd.entity);
-
-error_handler_free:
-	v4l2_ctrl_handler_free(&gc2145->ctrls.handler);
-
-error_power_off:
-	gc2145_power_off(dev);
-
+free_ctrls:
+	v4l2_ctrl_handler_free(&sensor->ctrls.handler);
+entity_cleanup:
+	mutex_destroy(&sensor->lock);
+	media_entity_cleanup(&sensor->sd.entity);
 	return ret;
 }
 
 static void gc2145_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
-	struct gc2145 *gc2145 = to_gc2145(sd);
+	struct gc2145_dev *sensor = to_gc2145_dev(sd);
 
-	v4l2_subdev_cleanup(sd);
-	v4l2_async_unregister_subdev(sd);
-	media_entity_cleanup(&sd->entity);
-	v4l2_ctrl_handler_free(&gc2145->ctrls.handler);
-
-	pm_runtime_disable(&client->dev);
-	if (!pm_runtime_status_suspended(&client->dev))
-		gc2145_power_off(&client->dev);
-	pm_runtime_set_suspended(&client->dev);
+	v4l2_async_unregister_subdev(&sensor->sd);
+	mutex_destroy(&sensor->lock);
+	media_entity_cleanup(&sensor->sd.entity);
+	v4l2_ctrl_handler_free(&sensor->ctrls.handler);
 }
+
+static int gc2145_sensor_suspend(struct device *dev)
+{
+	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct gc2145_dev *sensor = to_gc2145_dev(sd);
+
+	mutex_lock(&sensor->lock);
+	if (sensor->streaming)
+		gc2145_set_stream(sensor, false);
+	mutex_unlock(&sensor->lock);
+
+	return 0;
+}
+
+static int gc2145_sensor_resume(struct device *dev)
+{
+	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct gc2145_dev *sensor = to_gc2145_dev(sd);
+	int ret = 0;
+
+	mutex_lock(&sensor->lock);
+	if (sensor->streaming) {
+		ret = gc2145_set_stream(sensor, true);
+		if (ret) {
+			gc2145_set_stream(sensor, false);
+			sensor->streaming = false;
+		}
+	}
+	mutex_unlock(&sensor->lock);
+
+	return ret;
+}
+
+static const struct dev_pm_ops gc2145_pm_ops = {
+	SET_SYSTEM_SLEEP_PM_OPS(gc2145_sensor_suspend, gc2145_sensor_resume)
+};
+
+static const struct i2c_device_id gc2145_id[] = {
+	{"gc2145", 0},
+	{},
+};
+MODULE_DEVICE_TABLE(i2c, gc2145_id);
 
 static const struct of_device_id gc2145_dt_ids[] = {
 	{ .compatible = "galaxycore,gc2145" },
@@ -1429,22 +2408,19 @@ static const struct of_device_id gc2145_dt_ids[] = {
 };
 MODULE_DEVICE_TABLE(of, gc2145_dt_ids);
 
-static const struct dev_pm_ops gc2145_pm_ops = {
-	RUNTIME_PM_OPS(gc2145_power_off, gc2145_power_on, NULL)
-};
-
 static struct i2c_driver gc2145_i2c_driver = {
 	.driver = {
-		.name = "gc2145",
+		.name  = "gc2145",
 		.of_match_table	= gc2145_dt_ids,
-		.pm = pm_ptr(&gc2145_pm_ops),
+		.pm = &gc2145_pm_ops,
 	},
-	.probe = gc2145_probe,
-	.remove = gc2145_remove,
+	.id_table = gc2145_id,
+	.probe    = gc2145_probe,
+	.remove   = gc2145_remove,
 };
 
 module_i2c_driver(gc2145_i2c_driver);
 
-MODULE_AUTHOR("Alain Volmat <alain.volmat@foss.st.com>");
-MODULE_DESCRIPTION("GalaxyCore GC2145 sensor driver");
+MODULE_AUTHOR("Ondrej Jirman <megi@xff.cz>");
+MODULE_DESCRIPTION("GC2145 Camera Subdev Driver");
 MODULE_LICENSE("GPL");
