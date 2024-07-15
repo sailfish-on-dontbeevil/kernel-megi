@@ -132,7 +132,7 @@ void dwc3_set_prtcap(struct dwc3 *dwc, u32 mode)
 
 	reg = dwc3_readl(dwc->regs, DWC3_GCTL);
 	reg &= ~(DWC3_GCTL_PRTCAPDIR(DWC3_GCTL_PRTCAP_OTG));
-	reg |= DWC3_GCTL_PRTCAPDIR(mode);
+	reg |= DWC3_GCTL_PRTCAPDIR(mode & DWC3_GCTL_PRTCAP_OTG);
 	dwc3_writel(dwc->regs, DWC3_GCTL, reg);
 
 	dwc->current_dr_role = mode;
@@ -171,6 +171,7 @@ static void __dwc3_set_mode(struct work_struct *work)
 		dwc3_host_exit(dwc);
 		break;
 	case DWC3_GCTL_PRTCAP_DEVICE:
+	case DWC3_GCTL_PRTCAP_DEVICE_DISCONNECTED:
 		dwc3_gadget_exit(dwc);
 		dwc3_event_buffers_cleanup(dwc);
 		break;
@@ -190,11 +191,42 @@ static void __dwc3_set_mode(struct work_struct *work)
 	 * Only perform GCTL.CoreSoftReset when there's DRD role switching.
 	 */
 	if (dwc->current_dr_role && ((DWC3_IP_IS(DWC3) ||
-			DWC3_VER_IS_PRIOR(DWC31, 190A)) &&
+			DWC3_VER_IS_PRIOR(DWC31, 190A) || dwc->usb3_phy_reset_quirk) &&
 			desired_dr_role != DWC3_GCTL_PRTCAP_OTG)) {
+		/*
+		 * RK3399 TypeC PHY needs to be powered off and powered on again
+		 * for it to apply the correct Type-C plug orientation setting
+		 * and reconfigure itself.
+		 *
+		 * For that purpose we observe complete USB disconnect via
+		 * extcon in drd.c and pass it to __dwc3_set_mode as
+		 * desired_dr_role == 0.
+		 *
+		 * We thus handle transitions between three states of
+		 * desired_dr_role here:
+		 *
+		 * - DWC3_GCTL_PRTCAP_HOST
+		 * - DWC3_GCTL_PRTCAP_DEVICE
+		 * - DWC3_GCTL_PRTCAP_DEVICE_DISCONNECTED - almost equivalent to
+		 *   DWC3_GCTL_PRTCAP_DEVICE, present only to distinguish
+		 *   disconnected state, and so that set_mode is called when
+		 *   user plugs in the device to the host.
+		 */
+		if (dwc->usb3_phy_powered && dwc->usb3_phy_reset_quirk)
+			for (int j = 0; j < dwc->num_usb3_ports; j++)
+				phy_power_off(dwc->usb3_generic_phy[j]);
+
 		reg = dwc3_readl(dwc->regs, DWC3_GCTL);
 		reg |= DWC3_GCTL_CORESOFTRESET;
 		dwc3_writel(dwc->regs, DWC3_GCTL, reg);
+
+		if (dwc->usb3_phy_reset_quirk) {
+			for (int j = 0; j < dwc->num_usb3_ports; j++) {
+				ret = phy_power_on(dwc->usb3_generic_phy[j]);
+				//XXX: bleh
+				dwc->usb3_phy_powered = ret >= 0;
+			}
+		}
 
 		/*
 		 * Wait for internal clocks to synchronized. DWC_usb31 and
@@ -237,6 +269,7 @@ static void __dwc3_set_mode(struct work_struct *work)
 		}
 		break;
 	case DWC3_GCTL_PRTCAP_DEVICE:
+	case DWC3_GCTL_PRTCAP_DEVICE_DISCONNECTED:
 		dwc3_core_soft_reset(dwc);
 
 		dwc3_event_buffers_setup(dwc);
@@ -850,6 +883,7 @@ static int dwc3_phy_power_on(struct dwc3 *dwc)
 			goto err_power_off_usb3_phy;
 	}
 
+	dwc->usb3_phy_powered = true;
 	return 0;
 
 err_power_off_usb3_phy:
@@ -870,8 +904,10 @@ static void dwc3_phy_power_off(struct dwc3 *dwc)
 {
 	int i;
 
-	for (i = 0; i < dwc->num_usb3_ports; i++)
-		phy_power_off(dwc->usb3_generic_phy[i]);
+	if (dwc->usb3_phy_powered)
+		for (i = 0; i < dwc->num_usb3_ports; i++)
+			phy_power_off(dwc->usb3_generic_phy[i]);
+	dwc->usb3_phy_powered = false;
 
 	for (i = 0; i < dwc->num_usb2_ports; i++)
 		phy_power_off(dwc->usb2_generic_phy[i]);
@@ -1733,6 +1769,8 @@ static void dwc3_get_properties(struct dwc3 *dwc)
 
 	dwc->dis_split_quirk = device_property_read_bool(dev,
 				"snps,dis-split-quirk");
+	dwc->usb3_phy_reset_quirk = device_property_read_bool(dev,
+				"snps,usb3-phy-reset-quirk");
 
 	dwc->lpm_nyet_threshold = lpm_nyet_threshold;
 	dwc->tx_de_emphasis = tx_de_emphasis;
@@ -2273,6 +2311,7 @@ static int dwc3_suspend_common(struct dwc3 *dwc, pm_message_t msg)
 
 	switch (dwc->current_dr_role) {
 	case DWC3_GCTL_PRTCAP_DEVICE:
+	case DWC3_GCTL_PRTCAP_DEVICE_DISCONNECTED:
 		if (pm_runtime_suspended(dwc->dev))
 			break;
 		dwc3_gadget_suspend(dwc);
@@ -2333,11 +2372,12 @@ static int dwc3_resume_common(struct dwc3 *dwc, pm_message_t msg)
 
 	switch (dwc->current_dr_role) {
 	case DWC3_GCTL_PRTCAP_DEVICE:
+	case DWC3_GCTL_PRTCAP_DEVICE_DISCONNECTED:
 		ret = dwc3_core_init_for_resume(dwc);
 		if (ret)
 			return ret;
 
-		dwc3_set_prtcap(dwc, DWC3_GCTL_PRTCAP_DEVICE);
+		dwc3_set_prtcap(dwc, dwc->current_dr_role);
 		dwc3_gadget_resume(dwc);
 		break;
 	case DWC3_GCTL_PRTCAP_HOST:
@@ -2396,6 +2436,7 @@ static int dwc3_runtime_checks(struct dwc3 *dwc)
 {
 	switch (dwc->current_dr_role) {
 	case DWC3_GCTL_PRTCAP_DEVICE:
+	case DWC3_GCTL_PRTCAP_DEVICE_DISCONNECTED:
 		if (dwc->connected)
 			return -EBUSY;
 		break;
@@ -2434,6 +2475,7 @@ static int dwc3_runtime_resume(struct device *dev)
 
 	switch (dwc->current_dr_role) {
 	case DWC3_GCTL_PRTCAP_DEVICE:
+	case DWC3_GCTL_PRTCAP_DEVICE_DISCONNECTED:
 		dwc3_gadget_process_pending_events(dwc);
 		break;
 	case DWC3_GCTL_PRTCAP_HOST:
@@ -2453,6 +2495,7 @@ static int dwc3_runtime_idle(struct device *dev)
 
 	switch (dwc->current_dr_role) {
 	case DWC3_GCTL_PRTCAP_DEVICE:
+	case DWC3_GCTL_PRTCAP_DEVICE_DISCONNECTED:
 		if (dwc3_runtime_checks(dwc))
 			return -EBUSY;
 		break;
