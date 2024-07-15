@@ -275,8 +275,8 @@
 		gpio = <&gpio0 RK_PA1 GPIO_ACTIVE_HIGH>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&sdmmc0_pwr_h_pin>;
+		regulator-boot-on;
 		regulator-name = "vcc3v0_sd";
-		regulator-always-on;
 		regulator-min-microvolt = <3000000>;
 		regulator-max-microvolt = <3000000>;
 		vin-supply = <&vcc3v3_sys>;
@@ -335,7 +335,7 @@
 
 	/* Regulators supplied by vcc5v0_usb */
 	/* Type C port power supply regulator */
-	vbus_5vout: vbus_typec: vbus-5vout {
+	vbus_5vout: vbus-5vout {
 		compatible = "regulator-fixed";
 		enable-active-high;
 		gpio = <&gpio1 RK_PA3 GPIO_ACTIVE_HIGH>;
@@ -374,6 +374,14 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&dc_det_pin>;
 	};
+
+	typec_extcon_bridge: typec-extcon {
+		compatible = "linux,typec-extcon-bridge";
+		usb-role-switch;
+		orientation-switch;
+		mode-switch;
+		svid = /bits/ 16 <0xff01>;
+	};
 };
 
 &cpu_b0 {
@@ -400,10 +408,47 @@
 	cpu-supply = <&vdd_cpu_l>;
 };
 
+&cdn_dp {
+	status = "okay";
+	extcon = <&typec_extcon_bridge>;
+	phys = <&tcphy0_dp>;
+};
+
+&dfi {
+	status = "okay";
+};
+
+&dmc {
+	// This node can only be enabled by FDT patching from U-Boot that
+	// uses Rockchip TPL/TF-A. DMC only works with the downstream firmware.
+	// If you enabled this on mainline, your phone will lock up on boot.
+	//status = "okay";
+
+	center-supply = <&vdd_center>;
+
+	rockchip,pd-idle-ns = <160>;
+	rockchip,sr-idle-ns = <10240>;
+	rockchip,sr-mc-gate-idle-ns = <40960>;
+	rockchip,srpd-lite-idle-ns = <61440>;
+	rockchip,standby-idle-ns = <81920>;
+
+	rockchip,lpddr4_odt_dis_freq = <666000000>;
+
+	rockchip,srpd-lite-idle-dis-freq-hz = <0>;
+	rockchip,standby-idle-dis-freq-hz = <928000000>;
+	rockchip,sr-mc-gate-idle-dis-freq-hz = <800000000>;
+	rockchip,pd-idle-dis-freq-hz = <800000000>;
+	rockchip,sr-idle-dis-freq-hz = <800000000>;
+};
+
+&dmc_opp_table {
+	opp00 {
+		opp-suspend;
+	};
+};
+
 &edp {
 	force-hpd;
-	pinctrl-names = "default";
-	pinctrl-0 = <&edp_hpd>;
 	status = "okay";
 
 	ports {
@@ -537,13 +582,12 @@
 
 			vcc_sdio: LDO_REG4 {
 				regulator-name = "vcc_sdio";
-				regulator-always-on;
 				regulator-boot-on;
 				regulator-min-microvolt = <1800000>;
 				regulator-max-microvolt = <3000000>;
 
 				regulator-state-mem {
-					regulator-on-in-suspend;
+					regulator-off-in-suspend;
 					regulator-suspend-microvolt = <3000000>;
 				};
 			};
@@ -670,6 +714,8 @@
 		reg = <0x11>;
 		clocks = <&cru SCLK_I2S_8CH_OUT>;
 		clock-names = "mclk";
+		assigned-clocks = <&cru SCLK_I2S_8CH_OUT>, <&cru SCLK_I2S1_8CH>;
+		assigned-clock-rates = <11289599>, <11289599>;
 		#sound-dai-cells = <0>;
 	};
 };
@@ -692,7 +738,9 @@
 		interrupts = <RK_PA2 IRQ_TYPE_LEVEL_LOW>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&fusb0_int_pin>;
-		vbus-supply = <&vbus_typec>;
+		vbus-supply = <&vbus_5vout>;
+		usb-role-switch = <&typec_extcon_bridge>;
+		extcon = <&typec_extcon_bridge>;
 
 		connector {
 			compatible = "usb-c-connector";
@@ -701,10 +749,19 @@
 			op-sink-microwatt = <1000000>;
 			power-role = "dual";
 			sink-pdos =
-				<PDO_FIXED(5000, 2500, PDO_FIXED_USB_COMM)>;
+				<PDO_FIXED(5000, 2500, PDO_FIXED_USB_COMM | PDO_FIXED_DUAL_ROLE | PDO_FIXED_DATA_SWAP)>;
 			source-pdos =
-				<PDO_FIXED(5000, 1400, PDO_FIXED_USB_COMM)>;
+				<PDO_FIXED(5000, 1400, PDO_FIXED_USB_COMM | PDO_FIXED_DUAL_ROLE | PDO_FIXED_DATA_SWAP)>;
 			try-power-role = "sink";
+			mode-switch = <&typec_extcon_bridge>;
+			orientation-switch = <&typec_extcon_bridge>;
+
+			altmodes {
+				dp {
+					svid = /bits/ 16 <0xff01>;
+					vdo = <0x0c46>;
+				};
+			};
 
 			ports {
 				#address-cells = <1>;
@@ -933,6 +990,7 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&sdmmc_clk &sdmmc_cmd &sdmmc_bus4>;
 	sd-uhs-sdr50;
+	sd-uhs-sdr104;
 	vmmc-supply = <&vcc3v0_sd>;
 	vqmmc-supply = <&vcc_sdio>;
 	status = "okay";
@@ -971,6 +1029,7 @@
 };
 
 &tcphy0 {
+	extcon = <&typec_extcon_bridge>;
 	status = "okay";
 };
 
@@ -1004,13 +1063,21 @@
 
 &u2phy0 {
 	status = "okay";
+	extcon = <&typec_extcon_bridge>;
+	extcon,ignore-usb;
 
 	u2phy0_otg: otg-port {
+		/*
+		 * Type-C port on the left side of the chasis.
+		 */
 		status = "okay";
 	};
 
 	u2phy0_host: host-port {
-		phy-supply = <&vcc5v0_otg>;
+		/*
+		 * USB 2.0 host port for the keyboard (internally connected).
+		 */
+		phy-supply = <&vcc5v0_usb>;
 		status = "okay";
 	};
 
@@ -1025,11 +1092,18 @@
 	status = "okay";
 
 	u2phy1_otg: otg-port {
+		/*
+		 * USB 3.0 A port on the left side of the chasis.
+		 */
 		status = "okay";
 	};
 
 	u2phy1_host: host-port {
-		phy-supply = <&vcc5v0_otg>;
+		/*
+		 * To the HUB that has USB camera and USB 2.0 port on the right
+		 * side of the chasis.
+		 */
+		phy-supply = <&vcc5v0_usb>;
 		status = "okay";
 	};
 };
@@ -1080,7 +1154,9 @@
 };
 
 &usbdrd_dwc3_0 {
-	dr_mode = "host";
+	dr_mode = "otg";
+	extcon = <&typec_extcon_bridge>;
+	snps,usb3-phy-reset-quirk;
 	status = "okay";
 };
 
