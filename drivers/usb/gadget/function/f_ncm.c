@@ -1728,6 +1728,8 @@ static void ncm_free(struct usb_function *f)
 static void ncm_unbind(struct usb_configuration *c, struct usb_function *f)
 {
 	struct f_ncm *ncm = func_to_ncm(f);
+	struct f_ncm_opts *opts = container_of(f->fi, struct f_ncm_opts,
+					       func_inst);
 
 	DBG(c->cdev, "ncm unbind\n");
 
@@ -1746,6 +1748,8 @@ static void ncm_unbind(struct usb_configuration *c, struct usb_function *f)
 
 	kfree(ncm->notify_req->buf);
 	usb_ep_free_request(ncm->notify, ncm->notify_req);
+
+	gether_set_gadget(opts->net, NULL);
 }
 
 static struct usb_function *ncm_alloc(struct usb_function_instance *fi)
