@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0
 dtb-$(CONFIG_ARCH_ROCKCHIP) += \
 	rv1103g-luckfox-pico-mini-b.dtb \
+	rv1106g-luckfox-pico-pro-max.dtb \
 	rv1108-elgin-r1.dtb \
 	rv1108-evb.dtb \
 	rv1109-sonoff-ihost.dtb \
