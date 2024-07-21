@@ -247,31 +247,23 @@ static int eem_bind(struct usb_configuration *c, struct usb_function *f)
 	struct usb_composite_dev *cdev = c->cdev;
 	struct f_eem		*eem = func_to_eem(f);
 	struct usb_string	*us;
-	int			status;
+	int			status = 0;
 	struct usb_ep		*ep;
 
 	struct f_eem_opts	*eem_opts;
 
 	eem_opts = container_of(f->fi, struct f_eem_opts, func_inst);
-	/*
-	 * in drivers/usb/gadget/configfs.c:configfs_composite_bind()
-	 * configurations are bound in sequence with list_for_each_entry,
-	 * in each configuration its functions are bound in sequence
-	 * with list_for_each_entry, so we assume no race condition
-	 * with regard to eem_opts->bound access
-	 */
+
 	mutex_lock(&eem_opts->lock);
 	gether_set_gadget(eem_opts->net, cdev->gadget);
-	mutex_unlock(&eem_opts->lock);
-
 	if (!eem_opts->bound) {
-		mutex_lock(&eem_opts->lock);
 		status = gether_register_netdev(eem_opts->net);
-		mutex_unlock(&eem_opts->lock);
-		if (status)
-			return status;
-		eem_opts->bound = true;
+		if (!status)
+			eem_opts->bound = true;
 	}
+	mutex_unlock(&eem_opts->lock);
+	if (status)
+		return status;
 
 	us = usb_gstrings_attach(cdev, eem_strings,
 				 ARRAY_SIZE(eem_string_defs));

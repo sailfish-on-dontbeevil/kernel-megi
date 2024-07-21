@@ -1454,13 +1454,12 @@ static int ncm_bind(struct usb_configuration *c, struct usb_function *f)
 	if (!ncm_opts->bound) {
 		ncm_opts->net->mtu = (ncm_opts->max_segment_size - ETH_HLEN);
 		status = gether_register_netdev(ncm_opts->net);
+		if (!status)
+			ncm_opts->bound = true;
 	}
 	mutex_unlock(&ncm_opts->lock);
-
 	if (status)
 		goto fail;
-
-	ncm_opts->bound = true;
 
 	us = usb_gstrings_attach(cdev, ncm_strings,
 				 ARRAY_SIZE(ncm_string_defs));

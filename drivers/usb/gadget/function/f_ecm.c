@@ -685,14 +685,12 @@ ecm_bind(struct usb_configuration *c, struct usb_function *f)
 	ecm_opts = container_of(f->fi, struct f_ecm_opts, func_inst);
 
 	mutex_lock(&ecm_opts->lock);
-
 	gether_set_gadget(ecm_opts->net, cdev->gadget);
-
 	if (!ecm_opts->bound) {
 		status = gether_register_netdev(ecm_opts->net);
-		ecm_opts->bound = true;
+		if (!status)
+			ecm_opts->bound = true;
 	}
-
 	mutex_unlock(&ecm_opts->lock);
 	if (status)
 		return status;

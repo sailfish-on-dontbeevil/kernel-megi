@@ -310,16 +310,14 @@ geth_bind(struct usb_configuration *c, struct usb_function *f)
 	 */
 	mutex_lock(&gether_opts->lock);
 	gether_set_gadget(gether_opts->net, cdev->gadget);
-	mutex_unlock(&gether_opts->lock);
-
 	if (!gether_opts->bound) {
-		mutex_lock(&gether_opts->lock);
 		status = gether_register_netdev(gether_opts->net);
-		mutex_unlock(&gether_opts->lock);
-		if (status)
-			return status;
-		gether_opts->bound = true;
+		if (!status)
+			gether_opts->bound = true;
 	}
+	mutex_unlock(&gether_opts->lock);
+	if (status)
+		return status;
 
 	us = usb_gstrings_attach(cdev, geth_strings,
 				 ARRAY_SIZE(geth_string_defs));
