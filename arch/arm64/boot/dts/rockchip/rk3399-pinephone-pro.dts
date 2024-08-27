@@ -993,6 +993,7 @@
 			wcam_out: endpoint {
 				remote-endpoint = <&mipi_in_wcam>;
 				data-lanes = <1 2 3 4>;
+                                link-frequencies = /bits/ 64 <636000000>;
 			};
 		};
 	};
