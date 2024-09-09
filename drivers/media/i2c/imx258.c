@@ -678,6 +678,7 @@ struct imx258 {
 	struct mutex mutex;
 
 	struct clk *clk;
+	struct gpio_desc *reset_gpio;
 	struct regulator_bulk_data supplies[IMX258_NUM_SUPPLIES];
 };
 
@@ -1113,11 +1114,19 @@ static int imx258_power_on(struct device *dev)
 		return ret;
 	}
 
+	mdelay(20);
+
 	ret = clk_prepare_enable(imx258->clk);
 	if (ret) {
 		dev_err(dev, "failed to enable clock\n");
 		regulator_bulk_disable(IMX258_NUM_SUPPLIES, imx258->supplies);
 	}
+
+	usleep_range(1000, 2000);
+
+	gpiod_set_value_cansleep(imx258->reset_gpio, 0);
+
+	usleep_range(400, 500);
 
 	return ret;
 }
@@ -1128,6 +1137,7 @@ static int imx258_power_off(struct device *dev)
 	struct imx258 *imx258 = to_imx258(sd);
 
 	clk_disable_unprepare(imx258->clk);
+	gpiod_set_value_cansleep(imx258->reset_gpio, 1);
 	regulator_bulk_disable(IMX258_NUM_SUPPLIES, imx258->supplies);
 
 	return 0;
@@ -1425,6 +1435,11 @@ static int imx258_probe(struct i2c_client *client)
 	if (ret)
 		return dev_err_probe(&client->dev, ret,
 				     "failed to get regulators\n");
+
+	imx258->reset_gpio = devm_gpiod_get_optional(&client->dev, "reset",
+						     GPIOD_OUT_HIGH);
+	if (IS_ERR(imx258->reset_gpio))
+		return PTR_ERR(imx258->reset_gpio);
 
 	imx258->clk = devm_clk_get_optional(&client->dev, NULL);
 	if (IS_ERR(imx258->clk))
