@@ -212,12 +212,12 @@ static const struct cci_reg_sequence mipi_1267mbps_19_2mhz_4l[] = {
 	{ IMX258_REG_REQ_LINK_BIT_RATE_MBPS_L, 0 },
 };
 
-static const struct cci_reg_sequence mipi_1272mbps_24mhz_2l[] = {
+static const struct cci_reg_sequence mipi_1224mbps_24mhz_2l[] = {
 	{ IMX258_REG_EXCK_FREQ, 0x1800 },
 	{ IMX258_REG_IVTPXCK_DIV, 10 },
 	{ IMX258_REG_IVTSYCK_DIV, 2 },
 	{ IMX258_REG_PREPLLCK_VT_DIV, 4 },
-	{ IMX258_REG_PLL_IVT_MPY, 212 },
+	{ IMX258_REG_PLL_IVT_MPY, 204 },
 	{ IMX258_REG_IOPPXCK_DIV, 10 },
 	{ IMX258_REG_IOPSYCK_DIV, 1 },
 	{ IMX258_REG_PREPLLCK_OP_DIV, 2 },
@@ -225,16 +225,16 @@ static const struct cci_reg_sequence mipi_1272mbps_24mhz_2l[] = {
 	{ IMX258_REG_PLL_MULT_DRIV, 0 },
 
 	{ IMX258_REG_CSI_LANE_MODE, 1 },
-	{ IMX258_REG_REQ_LINK_BIT_RATE_MBPS_H, 1272 * 2 },
+	{ IMX258_REG_REQ_LINK_BIT_RATE_MBPS_H, 1224 * 2 },
 	{ IMX258_REG_REQ_LINK_BIT_RATE_MBPS_L, 0 },
 };
 
-static const struct cci_reg_sequence mipi_1272mbps_24mhz_4l[] = {
+static const struct cci_reg_sequence mipi_1224mbps_24mhz_4l[] = {
 	{ IMX258_REG_EXCK_FREQ, 0x1800 },
 	{ IMX258_REG_IVTPXCK_DIV, 5 },
 	{ IMX258_REG_IVTSYCK_DIV, 2 },
 	{ IMX258_REG_PREPLLCK_VT_DIV, 4 },
-	{ IMX258_REG_PLL_IVT_MPY, 212 },
+	{ IMX258_REG_PLL_IVT_MPY, 204 },
 	{ IMX258_REG_IOPPXCK_DIV, 10 },
 	{ IMX258_REG_IOPSYCK_DIV, 1 },
 	{ IMX258_REG_PREPLLCK_OP_DIV, 2 },
@@ -242,7 +242,7 @@ static const struct cci_reg_sequence mipi_1272mbps_24mhz_4l[] = {
 	{ IMX258_REG_PLL_MULT_DRIV, 0 },
 
 	{ IMX258_REG_CSI_LANE_MODE, 3 },
-	{ IMX258_REG_REQ_LINK_BIT_RATE_MBPS_H, 1272 * 4 },
+	{ IMX258_REG_REQ_LINK_BIT_RATE_MBPS_H, 1224 * 4 },
 	{ IMX258_REG_REQ_LINK_BIT_RATE_MBPS_L, 0 },
 };
 
@@ -567,11 +567,11 @@ static const struct imx258_link_freq_config link_freq_configs_24[] = {
 		.link_cfg = {
 			[IMX258_2_LANE_MODE] = {
 				.lf_to_pix_rate_factor = 2,
-				.reg_list = REGS(mipi_1272mbps_24mhz_2l),
+				.reg_list = REGS(mipi_1224mbps_24mhz_2l),
 			},
 			[IMX258_4_LANE_MODE] = {
 				.lf_to_pix_rate_factor = 4,
-				.reg_list = REGS(mipi_1272mbps_24mhz_4l),
+				.reg_list = REGS(mipi_1224mbps_24mhz_4l),
 			},
 		}
 	},
