@@ -1648,6 +1648,7 @@ enum rtw_edcca_mode {
 
 struct rtw_cfo_track {
 	bool is_adjust;
+	bool atc_enable;
 	u8 crystal_cap;
 	s32 cfo_tail[RTW_RF_PATH_MAX];
 	s32 cfo_cnt[RTW_RF_PATH_MAX];
