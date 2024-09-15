@@ -6,6 +6,7 @@
 
 #include <dt-bindings/input/linux-event-codes.h>
 #include <dt-bindings/pwm/pwm.h>
+#include <dt-bindings/usb/pd.h>
 #include "rk3399.dtsi"
 #include "rk3399-opp.dtsi"
 
@@ -204,7 +205,6 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&vcc5v0_typec_en>;
 		regulator-name = "vcc5v0_typec";
-		regulator-always-on;
 		vin-supply = <&vcc5v0_usb>;
 	};
 
@@ -238,6 +238,20 @@
 		regulator-min-microvolt = <800000>;
 		regulator-max-microvolt = <1700000>;
 	};
+
+	typec_extcon_bridge: typec-extcon {
+		compatible = "linux,typec-extcon-bridge";
+		usb-role-switch;
+		orientation-switch;
+		mode-switch;
+		svid = /bits/ 16 <0xff01>;
+	};
+};
+
+&cdn_dp {
+	status = "okay";
+	extcon = <&typec_extcon_bridge>;
+	phys = <&tcphy0_dp>;
 };
 
 &cpu_l0 {
@@ -289,6 +303,39 @@
 			trip = <&cpu_hot>;
 			cooling-device = <&fan 2 THERMAL_NO_LIMIT>;
 		};
+	};
+};
+
+&dfi {
+	status = "okay";
+};
+
+&dmc {
+	// This node can only be enabled by FDT patching from U-Boot that
+	// uses Rockchip TPL/TF-A. DMC only works with the downstream firmware.
+	// If you enabled this on mainline, your phone will lock up on boot.
+	//status = "okay";
+
+	center-supply = <&vdd_center>;
+
+	rockchip,pd-idle-ns = <160>;
+	rockchip,sr-idle-ns = <10240>;
+	rockchip,sr-mc-gate-idle-ns = <40960>;
+	rockchip,srpd-lite-idle-ns = <61440>;
+	rockchip,standby-idle-ns = <81920>;
+
+	rockchip,lpddr4_odt_dis_freq = <666000000>;
+
+	rockchip,srpd-lite-idle-dis-freq-hz = <0>;
+	rockchip,standby-idle-dis-freq-hz = <928000000>;
+	rockchip,sr-mc-gate-idle-dis-freq-hz = <800000000>;
+	rockchip,pd-idle-dis-freq-hz = <800000000>;
+	rockchip,sr-idle-dis-freq-hz = <800000000>;
+};
+
+&dmc_opp_table {
+	opp00 {
+		opp-suspend;
 	};
 };
 
@@ -577,7 +624,63 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&fusb0_int>;
 		vbus-supply = <&vcc5v0_typec>;
+		usb-role-switch = <&typec_extcon_bridge>;
+		extcon = <&typec_extcon_bridge>;
 		status = "okay";
+
+		connector {
+			compatible = "usb-c-connector";
+			data-role = "dual";
+			label = "USB-C";
+			op-sink-microwatt = <1000000>;
+			power-role = "dual";
+			sink-pdos =
+				<PDO_FIXED(5000, 2500, PDO_FIXED_USB_COMM | PDO_FIXED_DUAL_ROLE | PDO_FIXED_DATA_SWAP)>;
+			source-pdos =
+				<PDO_FIXED(5000, 1400, PDO_FIXED_USB_COMM | PDO_FIXED_DUAL_ROLE | PDO_FIXED_DATA_SWAP)>;
+			try-power-role = "sink";
+			mode-switch = <&typec_extcon_bridge>;
+			orientation-switch = <&typec_extcon_bridge>;
+
+			altmodes {
+				dp {
+					svid = /bits/ 16 <0xff01>;
+					vdo = <0x0c46>;
+				};
+			};
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+
+					usbc_hs: endpoint {
+						remote-endpoint =
+							<&u2phy0_typec_hs>;
+					};
+				};
+
+				port@1 {
+					reg = <1>;
+
+					usbc_ss: endpoint {
+						remote-endpoint =
+							<&tcphy0_typec_ss>;
+					};
+				};
+
+				port@2 {
+					reg = <2>;
+
+					usbc_dp: endpoint {
+						remote-endpoint =
+							<&tcphy0_typec_dp>;
+					};
+				};
+			};
+		};
 	};
 
 	/* enable for pine64 touch screen support */
@@ -841,7 +944,24 @@
 };
 
 &tcphy0 {
+	extcon = <&typec_extcon_bridge>;
 	status = "okay";
+};
+
+&tcphy0_dp {
+	port {
+		tcphy0_typec_dp: endpoint {
+			remote-endpoint = <&usbc_dp>;
+		};
+	};
+};
+
+&tcphy0_usb3 {
+	port {
+		tcphy0_typec_ss: endpoint {
+			remote-endpoint = <&usbc_ss>;
+		};
+	};
 };
 
 &tcphy1 {
@@ -858,6 +978,8 @@
 
 &u2phy0 {
 	status = "okay";
+	extcon = <&typec_extcon_bridge>;
+	extcon,ignore-usb;
 
 	u2phy0_otg: otg-port {
 		status = "okay";
@@ -866,6 +988,12 @@
 	u2phy0_host: host-port {
 		phy-supply = <&vcc5v0_host>;
 		status = "okay";
+	};
+
+	port {
+		u2phy0_typec_hs: endpoint {
+			remote-endpoint = <&usbc_hs>;
+		};
 	};
 };
 
@@ -927,7 +1055,9 @@
 
 &usbdrd_dwc3_0 {
 	status = "okay";
-	dr_mode = "host";
+	dr_mode = "otg";
+	extcon = <&typec_extcon_bridge>;
+	snps,usb3-phy-reset-quirk;
 };
 
 &usbdrd3_1 {
