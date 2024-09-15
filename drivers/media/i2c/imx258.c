@@ -212,12 +212,12 @@ static const struct cci_reg_sequence mipi_1267mbps_19_2mhz_4l[] = {
 	{ IMX258_REG_REQ_LINK_BIT_RATE_MBPS_L, 0 },
 };
 
-static const struct cci_reg_sequence mipi_1272mbps_24mhz_2l[] = {
+static const struct cci_reg_sequence mipi_1224mbps_24mhz_2l[] = {
 	{ IMX258_REG_EXCK_FREQ, 0x1800 },
 	{ IMX258_REG_IVTPXCK_DIV, 10 },
 	{ IMX258_REG_IVTSYCK_DIV, 2 },
 	{ IMX258_REG_PREPLLCK_VT_DIV, 4 },
-	{ IMX258_REG_PLL_IVT_MPY, 212 },
+	{ IMX258_REG_PLL_IVT_MPY, 204 },
 	{ IMX258_REG_IOPPXCK_DIV, 10 },
 	{ IMX258_REG_IOPSYCK_DIV, 1 },
 	{ IMX258_REG_PREPLLCK_OP_DIV, 2 },
@@ -225,16 +225,16 @@ static const struct cci_reg_sequence mipi_1272mbps_24mhz_2l[] = {
 	{ IMX258_REG_PLL_MULT_DRIV, 0 },
 
 	{ IMX258_REG_CSI_LANE_MODE, 1 },
-	{ IMX258_REG_REQ_LINK_BIT_RATE_MBPS_H, 1272 * 2 },
+	{ IMX258_REG_REQ_LINK_BIT_RATE_MBPS_H, 1224 * 2 },
 	{ IMX258_REG_REQ_LINK_BIT_RATE_MBPS_L, 0 },
 };
 
-static const struct cci_reg_sequence mipi_1272mbps_24mhz_4l[] = {
+static const struct cci_reg_sequence mipi_1224mbps_24mhz_4l[] = {
 	{ IMX258_REG_EXCK_FREQ, 0x1800 },
 	{ IMX258_REG_IVTPXCK_DIV, 5 },
 	{ IMX258_REG_IVTSYCK_DIV, 2 },
 	{ IMX258_REG_PREPLLCK_VT_DIV, 4 },
-	{ IMX258_REG_PLL_IVT_MPY, 212 },
+	{ IMX258_REG_PLL_IVT_MPY, 204 },
 	{ IMX258_REG_IOPPXCK_DIV, 10 },
 	{ IMX258_REG_IOPSYCK_DIV, 1 },
 	{ IMX258_REG_PREPLLCK_OP_DIV, 2 },
@@ -242,7 +242,7 @@ static const struct cci_reg_sequence mipi_1272mbps_24mhz_4l[] = {
 	{ IMX258_REG_PLL_MULT_DRIV, 0 },
 
 	{ IMX258_REG_CSI_LANE_MODE, 3 },
-	{ IMX258_REG_REQ_LINK_BIT_RATE_MBPS_H, 1272 * 4 },
+	{ IMX258_REG_REQ_LINK_BIT_RATE_MBPS_H, 1224 * 4 },
 	{ IMX258_REG_REQ_LINK_BIT_RATE_MBPS_L, 0 },
 };
 
@@ -485,6 +485,7 @@ static const char * const imx258_supply_name[] = {
 	"vana",  /* Analog (2.8V) supply */
 	"vdig",  /* Digital Core (1.2V) supply */
 	"vif",  /* IF (1.8V) supply */
+	"i2c",  /* I2C BUS I/O (1.8V) supply */
 };
 
 #define IMX258_NUM_SUPPLIES ARRAY_SIZE(imx258_supply_name)
@@ -566,11 +567,11 @@ static const struct imx258_link_freq_config link_freq_configs_24[] = {
 		.link_cfg = {
 			[IMX258_2_LANE_MODE] = {
 				.lf_to_pix_rate_factor = 2,
-				.reg_list = REGS(mipi_1272mbps_24mhz_2l),
+				.reg_list = REGS(mipi_1224mbps_24mhz_2l),
 			},
 			[IMX258_4_LANE_MODE] = {
 				.lf_to_pix_rate_factor = 4,
-				.reg_list = REGS(mipi_1272mbps_24mhz_4l),
+				.reg_list = REGS(mipi_1224mbps_24mhz_4l),
 			},
 		}
 	},
@@ -677,6 +678,7 @@ struct imx258 {
 	struct mutex mutex;
 
 	struct clk *clk;
+	struct gpio_desc *reset_gpio;
 	struct regulator_bulk_data supplies[IMX258_NUM_SUPPLIES];
 };
 
@@ -1112,11 +1114,19 @@ static int imx258_power_on(struct device *dev)
 		return ret;
 	}
 
+	mdelay(20);
+
 	ret = clk_prepare_enable(imx258->clk);
 	if (ret) {
 		dev_err(dev, "failed to enable clock\n");
 		regulator_bulk_disable(IMX258_NUM_SUPPLIES, imx258->supplies);
 	}
+
+	usleep_range(1000, 2000);
+
+	gpiod_set_value_cansleep(imx258->reset_gpio, 0);
+
+	usleep_range(400, 500);
 
 	return ret;
 }
@@ -1127,6 +1137,7 @@ static int imx258_power_off(struct device *dev)
 	struct imx258 *imx258 = to_imx258(sd);
 
 	clk_disable_unprepare(imx258->clk);
+	gpiod_set_value_cansleep(imx258->reset_gpio, 1);
 	regulator_bulk_disable(IMX258_NUM_SUPPLIES, imx258->supplies);
 
 	return 0;
@@ -1193,6 +1204,53 @@ static int imx258_identify_module(struct imx258 *imx258)
 	return 0;
 }
 
+#ifdef CONFIG_VIDEO_ADV_DEBUG
+static int imx258_g_register(struct v4l2_subdev *sd,
+			     struct v4l2_dbg_register *reg)
+{
+	struct imx258 *imx258 = to_imx258(sd);
+	u64 val = 0;
+	int ret;
+
+	if (reg->reg > 0xffff)
+		return -EINVAL;
+
+	reg->size = 1;
+
+	mutex_lock(&imx258->mutex);
+	ret = cci_read(imx258->regmap, CCI_REG8(reg->reg), &val, NULL);
+	mutex_unlock(&imx258->mutex);
+	if (ret)
+		return -EIO;
+
+	reg->val = val;
+	return 0;
+}
+
+static int imx258_s_register(struct v4l2_subdev *sd,
+			     const struct v4l2_dbg_register *reg)
+{
+	struct imx258 *imx258 = to_imx258(sd);
+	int ret;
+
+	if (reg->reg > 0xffff || reg->val > 0xff)
+		return -EINVAL;
+
+	mutex_lock(&imx258->mutex);
+	ret = cci_write(imx258->regmap, CCI_REG8(reg->reg), reg->val, NULL);
+	mutex_unlock(&imx258->mutex);
+
+	return ret;
+}
+#endif
+
+static const struct v4l2_subdev_core_ops imx258_core_ops = {
+#ifdef CONFIG_VIDEO_ADV_DEBUG
+	.g_register = imx258_g_register,
+	.s_register = imx258_s_register,
+#endif
+};
+
 static const struct v4l2_subdev_video_ops imx258_video_ops = {
 	.s_stream = imx258_set_stream,
 };
@@ -1206,6 +1264,7 @@ static const struct v4l2_subdev_pad_ops imx258_pad_ops = {
 };
 
 static const struct v4l2_subdev_ops imx258_subdev_ops = {
+	.core = &imx258_core_ops,
 	.video = &imx258_video_ops,
 	.pad = &imx258_pad_ops,
 };
@@ -1376,6 +1435,11 @@ static int imx258_probe(struct i2c_client *client)
 	if (ret)
 		return dev_err_probe(&client->dev, ret,
 				     "failed to get regulators\n");
+
+	imx258->reset_gpio = devm_gpiod_get_optional(&client->dev, "reset",
+						     GPIOD_OUT_HIGH);
+	if (IS_ERR(imx258->reset_gpio))
+		return PTR_ERR(imx258->reset_gpio);
 
 	imx258->clk = devm_clk_get_optional(&client->dev, NULL);
 	if (IS_ERR(imx258->clk))
