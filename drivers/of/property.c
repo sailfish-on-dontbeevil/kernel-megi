@@ -1366,8 +1366,9 @@ static struct device_node *parse_allwinner_sram(struct device_node *np,
 		return NULL;
 
 	sram_node = of_parse_phandle(np, prop_name, 0);
-	sram_node = of_get_parent(sram_node);
-	sram_node = of_get_parent(sram_node);
+	while (sram_node && !of_node_is_type(sram_node, "syscon")) {
+		sram_node = of_get_parent(sram_node);
+	}
 
 	return sram_node;
 }
