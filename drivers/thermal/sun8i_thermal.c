@@ -308,8 +308,13 @@ static int sun8i_ths_calibrate(struct ths_device *tmdev)
 
 	calcell = nvmem_cell_get(dev, "calibration");
 	if (IS_ERR(calcell)) {
+		dev_err_probe(dev, PTR_ERR(calcell),
+			      "Failed to get calibration nvmem cell (%pe)\n",
+			      calcell);
+
 		if (PTR_ERR(calcell) == -EPROBE_DEFER)
 			return -EPROBE_DEFER;
+
 		/*
 		 * Even if the external calibration data stored in sid is
 		 * not accessible, the THS hardware can still work, although
@@ -329,6 +334,8 @@ static int sun8i_ths_calibrate(struct ths_device *tmdev)
 	caldata = nvmem_cell_read(calcell, &callen);
 	if (IS_ERR(caldata)) {
 		ret = PTR_ERR(caldata);
+		dev_err(dev, "Failed to read calibration data (%pe)\n",
+			caldata);
 		goto out;
 	}
 
@@ -386,13 +393,17 @@ static int sun8i_ths_resource_init(struct ths_device *tmdev)
 		return PTR_ERR(base);
 
 	tmdev->regmap = devm_regmap_init_mmio(dev, base, &config);
-	if (IS_ERR(tmdev->regmap))
+	if (IS_ERR(tmdev->regmap)) {
+		dev_err(dev, "Failed to init regmap (%pe)\n", tmdev->regmap);
 		return PTR_ERR(tmdev->regmap);
+	}
 
 	if (tmdev->chip->has_bus_clk_reset) {
 		tmdev->reset = devm_reset_control_get(dev, NULL);
-		if (IS_ERR(tmdev->reset))
+		if (IS_ERR(tmdev->reset)) {
+			dev_err(dev, "Failed to get reset (%pe)\n", tmdev->reset);
 			return PTR_ERR(tmdev->reset);
+		}
 
 		ret = reset_control_deassert(tmdev->reset);
 		if (ret)
@@ -543,6 +554,9 @@ static int sun8i_ths_register(struct ths_device *tmdev)
 		if (IS_ERR(tmdev->sensor[i].tzd)) {
 			if (PTR_ERR(tmdev->sensor[i].tzd) == -EPROBE_DEFER)
 				return PTR_ERR(tmdev->sensor[i].tzd);
+			dev_err(tmdev->dev,
+				"Failed to register sensor %d (%pe)\n",
+				i, tmdev->sensor[i].tzd);
 			continue;
 		}
 
@@ -591,8 +605,10 @@ static int sun8i_ths_probe(struct platform_device *pdev)
 	ret = devm_request_threaded_irq(dev, irq, NULL,
 					sun8i_irq_thread,
 					IRQF_ONESHOT, "ths", tmdev);
-	if (ret)
+	if (ret) {
+		dev_err(dev, "Failed to request irq (%d)\n", ret);
 		return ret;
+	}
 
 	return 0;
 }
