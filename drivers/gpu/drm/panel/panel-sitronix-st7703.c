@@ -62,6 +62,7 @@ struct st7703 {
 	struct dentry *debugfs;
 	const struct st7703_panel_desc *desc;
 	enum drm_panel_orientation orientation;
+	bool hw_preenabled;
 };
 
 struct st7703_panel_desc {
@@ -312,14 +313,14 @@ static void xbd599_init_sequence(struct mipi_dsi_multi_context *dsi_ctx)
 
 static const struct drm_display_mode xbd599_mode = {
 	.hdisplay    = 720,
-	.hsync_start = 720 + 40,
-	.hsync_end   = 720 + 40 + 40,
-	.htotal	     = 720 + 40 + 40 + 40,
+	.hsync_start = 720 + 30,
+	.hsync_end   = 720 + 30 + 28,
+	.htotal	     = 720 + 30 + 28 + 30,
 	.vdisplay    = 1440,
 	.vsync_start = 1440 + 18,
 	.vsync_end   = 1440 + 18 + 10,
 	.vtotal	     = 1440 + 18 + 10 + 17,
-	.clock	     = 69000,
+	.clock	     = 72000,
 	.flags	     = DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC,
 	.width_mm    = 68,
 	.height_mm   = 136,
@@ -679,6 +680,11 @@ static int st7703_enable(struct drm_panel *panel)
 	struct mipi_dsi_device *dsi = to_mipi_dsi_device(ctx->dev);
 	struct mipi_dsi_multi_context dsi_ctx = {.dsi = dsi};
 
+	if (ctx->hw_preenabled) {
+		ctx->hw_preenabled = false;
+		return 0;
+	}
+
 	ctx->desc->init_sequence(&dsi_ctx);
 
 	mipi_dsi_dcs_exit_sleep_mode_multi(&dsi_ctx);
@@ -726,8 +732,10 @@ static int st7703_prepare(struct drm_panel *panel)
 	struct st7703 *ctx = panel_to_st7703(panel);
 	int ret;
 
+	if (!ctx->hw_preenabled) {
 	dev_dbg(ctx->dev, "Resetting the panel\n");
 	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
+	}
 
 	ret = regulator_enable(ctx->iovcc);
 	if (ret < 0) {
@@ -743,10 +751,12 @@ static int st7703_prepare(struct drm_panel *panel)
 	}
 
 	/* Give power supplies time to stabilize before deasserting reset. */
+	if (!ctx->hw_preenabled) {
 	usleep_range(10000, 20000);
 
 	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
 	usleep_range(15000, 20000);
+	}
 
 	return 0;
 }
@@ -844,11 +854,18 @@ static int st7703_probe(struct mipi_dsi_device *dsi)
 {
 	struct device *dev = &dsi->dev;
 	struct st7703 *ctx;
+	u32 fb_start;
 	int ret;
 
 	ctx = devm_kzalloc(dev, sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
+
+	ret = of_property_read_u32_index(of_chosen, "p-boot,framebuffer-start", 0, &fb_start);
+	if (ret == 0) {
+		/* the display pipeline is already initialized by p-boot */
+		ctx->hw_preenabled = true;
+	}
 
 	ctx->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_LOW);
 	if (IS_ERR(ctx->reset_gpio))
