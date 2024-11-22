@@ -255,7 +255,8 @@ static const struct wiphy_wowlan_support cw1200_wowlan_support = {
 
 
 static struct ieee80211_hw *cw1200_init_common(const u8 *macaddr,
-						const bool have_5ghz)
+					       const bool have_5ghz,
+					       unsigned int fw_api)
 {
 	int i, band;
 	struct ieee80211_hw *hw;
@@ -271,6 +272,7 @@ static struct ieee80211_hw *cw1200_init_common(const u8 *macaddr,
 	priv->mode = NL80211_IFTYPE_UNSPECIFIED;
 	priv->rates = cw1200_rates; /* TODO: fetch from FW */
 	priv->mcs_rates = cw1200_n_rates;
+	priv->fw_api = fw_api;
 	if (cw1200_ba_rx_tids != -1)
 		priv->ba_rx_tid_mask = cw1200_ba_rx_tids;
 	else
@@ -517,12 +519,15 @@ u32 cw1200_dpll_from_clk(u16 clk_khz)
 	}
 }
 
+int bes2600_load_firmware(struct cw1200_common *priv);
+
 int cw1200_core_probe(const struct hwbus_ops *hwbus_ops,
 		      struct hwbus_priv *hwbus,
 		      struct device *pdev,
 		      struct cw1200_common **core,
 		      int ref_clk, const u8 *macaddr,
-		      const char *sdd_path, bool have_5ghz)
+		      const char *sdd_path, bool have_5ghz,
+		      unsigned int fw_api)
 {
 	int err = -EINVAL;
 	struct ieee80211_hw *dev;
@@ -532,7 +537,7 @@ int cw1200_core_probe(const struct hwbus_ops *hwbus_ops,
 		.disable_more_flag_usage = true,
 	};
 
-	dev = cw1200_init_common(macaddr, have_5ghz);
+	dev = cw1200_init_common(macaddr, have_5ghz, fw_api);
 	if (!dev)
 		goto err;
 
@@ -557,7 +562,10 @@ int cw1200_core_probe(const struct hwbus_ops *hwbus_ops,
 	if (err)
 		goto err1;
 
-	err = cw1200_load_firmware(priv);
+	if (priv->fw_api == CW1200_FW_API_BES2600)
+		err = bes2600_load_firmware(priv);
+	else
+		err = cw1200_load_firmware(priv);
 	if (err)
 		goto err2;
 
