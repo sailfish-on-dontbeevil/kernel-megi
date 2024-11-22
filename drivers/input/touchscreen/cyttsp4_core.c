@@ -851,7 +851,7 @@ static void cyttsp4_get_mt_touches(struct cyttsp4 *cd, int num_cur_tch)
 	struct cyttsp4_sysinfo *si = cd->si;
 	struct cyttsp4_touch tch;
 	int i, j, t = 0;
-	int ids[max(CY_TMA1036_MAX_TCH, CY_TMA4XX_MAX_TCH)] = {0};
+	int ids[max(CY_TMA1036_MAX_TCH, CY_TMA4XX_MAX_TCH)] = {};
 	struct cyttsp4_signal_def* sig;
 
 	for (i = 0; i < num_cur_tch; i++) {
